@@ -91,6 +91,65 @@ function Footman:canMoveTo(newX, newY, buildings)
     return true
 end
 
+-- Get flow field direction, with fallback to sample nearby tiles if current tile has no direction
+function Footman:getFlowDirection(flowField, worldX, worldY)
+    if not flowField then return nil, nil end
+    
+    -- Try current position first
+    local dirX, dirY = flowField:getDirection(worldX, worldY, self.map)
+    if dirX and dirY then
+        return dirX, dirY
+    end
+    
+    -- Check if we're already near the destination (low cost = close to target)
+    -- If so, don't redirect - let arrival checks or direct movement handle it
+    local currentCost = flowField:getCost(worldX, worldY, self.map)
+    if currentCost < 3 then
+        return nil, nil
+    end
+    
+    -- Current tile has no direction and we're far from destination
+    -- Sample nearby positions to find valid flow
+    -- Use 32 pixels (full tile) to ensure we sample different grid tiles
+    local sampleOffsets = {
+        {dx = 32, dy = 0},   -- right
+        {dx = -32, dy = 0},  -- left
+        {dx = 0, dy = 32},   -- down
+        {dx = 0, dy = -32},  -- up
+        {dx = 32, dy = 32},  -- down-right
+        {dx = -32, dy = 32}, -- down-left
+        {dx = 32, dy = -32}, -- up-right
+        {dx = -32, dy = -32}, -- up-left
+    }
+    
+    local bestDirX, bestDirY = nil, nil
+    local bestCost = math.huge
+    
+    for _, offset in ipairs(sampleOffsets) do
+        local sampleX = worldX + offset.dx
+        local sampleY = worldY + offset.dy
+        
+        if self.map:isWorldPosPassable(sampleX, sampleY) then
+            local sampleDirX, sampleDirY = flowField:getDirection(sampleX, sampleY, self.map)
+            if sampleDirX and sampleDirY then
+                local cost = flowField:getCost(sampleX, sampleY, self.map)
+                if cost < bestCost then
+                    bestCost = cost
+                    local toSampleX = sampleX - worldX
+                    local toSampleY = sampleY - worldY
+                    local dist = math.sqrt(toSampleX * toSampleX + toSampleY * toSampleY)
+                    if dist > 0.1 then
+                        bestDirX = toSampleX / dist
+                        bestDirY = toSampleY / dist
+                    end
+                end
+            end
+        end
+    end
+    
+    return bestDirX, bestDirY
+end
+
 function Footman:update(dt, buildings)
     if self.state == Footman.STATE_MOVING then
         self:updateMoving(dt, buildings)
@@ -115,14 +174,14 @@ function Footman:updateMoving(dt, buildings)
         return
     end
     
-    -- Get movement direction from flow field or direct path
+    -- Get movement direction from flow field (with fallback to nearby tiles)
     local moveDirX, moveDirY
     
     if self.flowField then
-        moveDirX, moveDirY = self.flowField:getDirection(self.worldX, self.worldY, self.map)
+        moveDirX, moveDirY = self:getFlowDirection(self.flowField, self.worldX, self.worldY)
     end
     
-    -- Fall back to direct path if no flow field direction
+    -- Fall back to direct path only if flow field provides no direction at all
     if not moveDirX or not moveDirY then
         if dist > 0.1 then
             moveDirX = dx / dist
