@@ -85,24 +85,41 @@ local function separateUnits()
     for _, p in ipairs(peons) do if p.visible then table.insert(allUnits, p) end end
     for _, f in ipairs(footmen) do table.insert(allUnits, f) end
     
-    for i = 1, #allUnits do
-        for j = i + 1, #allUnits do
-            local a, b = allUnits[i], allUnits[j]
-            local dx = b.worldX - a.worldX
-            local dy = b.worldY - a.worldY
-            local dist = math.sqrt(dx * dx + dy * dy)
-            local minDist = a.radius + b.radius
-            
-            if dist < minDist and dist > 0 then
-                local overlap = (minDist - dist) / 2
-                local nx, ny = dx / dist, dy / dist
-                a.worldX = a.worldX - nx * overlap
-                a.worldY = a.worldY - ny * overlap
-                b.worldX = b.worldX + nx * overlap
-                b.worldY = b.worldY + ny * overlap
-            elseif dist == 0 then
-                a.worldX = a.worldX + math.random() * 2 - 1
-                a.worldY = a.worldY + math.random() * 2 - 1
+    -- Multiple passes for better separation
+    for pass = 1, 3 do
+        for i = 1, #allUnits do
+            for j = i + 1, #allUnits do
+                local a, b = allUnits[i], allUnits[j]
+                local dx = b.worldX - a.worldX
+                local dy = b.worldY - a.worldY
+                local dist = math.sqrt(dx * dx + dy * dy)
+                local minDist = a.radius + b.radius
+                
+                if dist < minDist and dist > 0.1 then
+                    local overlap = (minDist - dist) / 2 + 0.5
+                    local nx, ny = dx / dist, dy / dist
+                    
+                    -- Push apart
+                    local ax, ay = a.worldX - nx * overlap, a.worldY - ny * overlap
+                    local bx, by = b.worldX + nx * overlap, b.worldY + ny * overlap
+                    
+                    -- Only apply if the new position is passable
+                    if map:isWorldPosPassable(ax, ay) then
+                        a.worldX, a.worldY = ax, ay
+                    end
+                    if map:isWorldPosPassable(bx, by) then
+                        b.worldX, b.worldY = bx, by
+                    end
+                elseif dist < 0.1 then
+                    -- Exactly overlapping, push in random direction
+                    local angle = math.random() * math.pi * 2
+                    local push = minDist / 2 + 1
+                    local ax = a.worldX + math.cos(angle) * push
+                    local ay = a.worldY + math.sin(angle) * push
+                    if map:isWorldPosPassable(ax, ay) then
+                        a.worldX, a.worldY = ax, ay
+                    end
+                end
             end
         end
     end
@@ -394,6 +411,43 @@ local function findNearestTree(worldX, worldY)
     return nil, nil
 end
 
+local function pushUnitOutOfBuildings(unit)
+    local buildings = getAllBuildings()
+    for _, b in ipairs(buildings) do
+        if b.getWorldBounds then
+            local bx1, by1, bx2, by2 = b:getWorldBounds()
+            local closestX = math.max(bx1, math.min(unit.worldX, bx2))
+            local closestY = math.max(by1, math.min(unit.worldY, by2))
+            local dx = unit.worldX - closestX
+            local dy = unit.worldY - closestY
+            local dist = math.sqrt(dx * dx + dy * dy)
+            
+            if dist < unit.radius then
+                -- Inside building, push out
+                if dist > 0.1 then
+                    local pushDist = unit.radius - dist + 2
+                    unit.worldX = unit.worldX + (dx / dist) * pushDist
+                    unit.worldY = unit.worldY + (dy / dist) * pushDist
+                else
+                    -- At center, push in arbitrary direction (away from building center)
+                    local bcx, bcy = b:getWorldCenter()
+                    dx = unit.worldX - bcx
+                    dy = unit.worldY - bcy
+                    dist = math.sqrt(dx * dx + dy * dy)
+                    if dist > 0.1 then
+                        local pushDist = unit.radius + (bx2 - bx1) / 2 + 5
+                        unit.worldX = bcx + (dx / dist) * pushDist
+                        unit.worldY = bcy + (dy / dist) * pushDist
+                    else
+                        unit.worldX = bx2 + unit.radius + 5
+                        unit.worldY = by1 + (by2 - by1) / 2
+                    end
+                end
+            end
+        end
+    end
+end
+
 local function clearSelection()
     for _, e in ipairs(selectedEntities) do e.selected = false end
     selectedEntities = {}
@@ -434,11 +488,13 @@ function Gameplay.load()
     -- Spawn 3 starting peons (away from town hall)
     local spawnX, spawnY = townHall:getSpawnPos()
     for i = 1, 3 do
-        table.insert(peons, Peon.new({
+        local newPeon = Peon.new({
             worldX = spawnX + (i - 1) * 35,
             worldY = spawnY + (i - 2) * 30,
             map = map
-        }))
+        })
+        pushUnitOutOfBuildings(newPeon)
+        table.insert(peons, newPeon)
     end
     
     calculatePopulation()
@@ -459,7 +515,9 @@ function Gameplay.update(dt)
     -- Town hall
     if townHall:update(dt) and currentPop < maxPop then
         local spawnX, spawnY = townHall:getSpawnPos()
-        table.insert(peons, Peon.new({worldX = spawnX, worldY = spawnY, map = map}))
+        local newPeon = Peon.new({worldX = spawnX, worldY = spawnY, map = map})
+        pushUnitOutOfBuildings(newPeon)
+        table.insert(peons, newPeon)
         calculatePopulation()
     end
     
@@ -484,7 +542,9 @@ function Gameplay.update(dt)
         end
         if footmanReady and currentPop < maxPop then
             local spawnX, spawnY = barrack:getSpawnPos()
-            table.insert(footmen, Footman.new({worldX = spawnX, worldY = spawnY, map = map}))
+            local newFootman = Footman.new({worldX = spawnX, worldY = spawnY, map = map})
+            pushUnitOutOfBuildings(newFootman)
+            table.insert(footmen, newFootman)
             calculatePopulation()
         end
     end
@@ -712,57 +772,60 @@ function handleRightClick(x, y)
     
     local worldX, worldY = map:screenToWorld(x, y)
     
+    -- Check what was clicked ONCE (not per-unit)
+    local clickedMine = nil
+    for _, mine in ipairs(goldMines) do
+        if mine:containsPoint(x, y) and not mine.depleted then
+            clickedMine = mine
+            break
+        end
+    end
+    
+    local clickedTownHall = townHall:containsPoint(x, y)
+    
+    -- Only check for tree if clicked directly on a tree tile
+    local gridX, gridY = map:worldToGrid(worldX, worldY)
+    local clickedTree = map:isTileTree(gridX, gridY)
+    local treeX, treeY = nil, nil
+    if clickedTree then
+        treeX, treeY = gridX, gridY
+    end
+    
+    local clickedOnBuilding = false
+    for _, farm in ipairs(farms) do
+        if farm:containsPoint(x, y) then clickedOnBuilding = true break end
+    end
+    if not clickedOnBuilding then
+        for _, barrack in ipairs(barracks) do
+            if barrack:containsPoint(x, y) then clickedOnBuilding = true break end
+        end
+    end
+    
     -- Command all selected units
     for _, entity in ipairs(selectedEntities) do
         if entity.type == "peon" then
             local peon = entity
             
-            -- Check mine
-            for _, mine in ipairs(goldMines) do
-                if mine:containsPoint(x, y) and not mine.depleted then
-                    peon:goToMine(mine)
-                    goto continue
-                end
-            end
-            
-            -- Check town hall
-            if townHall:containsPoint(x, y) then
+            if clickedMine then
+                peon:goToMine(clickedMine)
+            elseif clickedTownHall then
                 if peon.carryingGold > 0 or peon.carryingLumber > 0 then
                     peon.state = Peon.STATE_RETURNING
                 else
                     peon:moveTo(worldX, worldY)
                 end
-                goto continue
-            end
-            
-            -- Check for tree - find nearest tree to click point
-            local treeX, treeY = findNearestTree(worldX, worldY)
-            if treeX then
+            elseif treeX then
                 peon:goToTree(treeX, treeY)
-                goto continue
-            end
-            
-            -- Move (only if passable and not clicking on a building)
-            local clickedOnBuilding = false
-            for _, farm in ipairs(farms) do
-                if farm:containsPoint(x, y) then clickedOnBuilding = true break end
-            end
-            for _, barrack in ipairs(barracks) do
-                if barrack:containsPoint(x, y) then clickedOnBuilding = true break end
-            end
-            
-            if not clickedOnBuilding and map:isWorldPosPassable(worldX, worldY) then
+            elseif not clickedOnBuilding and map:isWorldPosPassable(worldX, worldY) then
                 peon:moveTo(worldX, worldY)
             end
             
         elseif entity.type == "footman" then
-            -- Footmen can only move, not interact with buildings
-            if map:isWorldPosPassable(worldX, worldY) then
+            -- Footmen can only move
+            if not clickedOnBuilding and not clickedMine and not clickedTownHall and not clickedTree and map:isWorldPosPassable(worldX, worldY) then
                 entity:moveTo(worldX, worldY)
             end
         end
-        
-        ::continue::
     end
 end
 

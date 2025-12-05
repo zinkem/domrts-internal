@@ -72,6 +72,78 @@ function Peon:getScreenPos()
     return self.worldX, self.worldY
 end
 
+function Peon:wouldCollideWithBuilding(x, y, building)
+    if not building.getWorldBounds then return false end
+    local bx1, by1, bx2, by2 = building:getWorldBounds()
+    local closestX = math.max(bx1, math.min(x, bx2))
+    local closestY = math.max(by1, math.min(y, by2))
+    local distX = x - closestX
+    local distY = y - closestY
+    return (distX * distX + distY * distY) < (self.radius * self.radius)
+end
+
+function Peon:getBuildingPenetration(x, y, building)
+    if not building.getWorldBounds then return 0 end
+    local bx1, by1, bx2, by2 = building:getWorldBounds()
+    local closestX = math.max(bx1, math.min(x, bx2))
+    local closestY = math.max(by1, math.min(y, by2))
+    local distX = x - closestX
+    local distY = y - closestY
+    local dist = math.sqrt(distX * distX + distY * distY)
+    if dist < self.radius then
+        return self.radius - dist  -- penetration depth
+    end
+    return 0
+end
+
+-- Check if peon is touching (adjacent to) a building without being inside
+-- Returns true if peon is within contactBuffer pixels of building edge
+function Peon:isTouchingBuilding(building, contactBuffer)
+    contactBuffer = contactBuffer or 4
+    if not building.getWorldBounds then return false end
+    local bx1, by1, bx2, by2 = building:getWorldBounds()
+    local closestX = math.max(bx1, math.min(self.worldX, bx2))
+    local closestY = math.max(by1, math.min(self.worldY, by2))
+    local distX = self.worldX - closestX
+    local distY = self.worldY - closestY
+    local dist = math.sqrt(distX * distX + distY * distY)
+    -- Touching means within radius + buffer distance of building edge
+    return dist <= self.radius + contactBuffer
+end
+
+function Peon:canMoveTo(newX, newY, buildings)
+    -- Check tree collision
+    if self.map then
+        local targetGridX, targetGridY = self.map:worldToGrid(newX, newY)
+        local isTargetTree = self.targetTreeX and targetGridX == self.targetTreeX and targetGridY == self.targetTreeY
+        if not isTargetTree and not self.map:isWorldPosPassable(newX, newY) then
+            return false
+        end
+    end
+    
+    if not buildings then return true end
+    
+    for _, b in ipairs(buildings) do
+        local currentPen = self:getBuildingPenetration(self.worldX, self.worldY, b)
+        local newPen = self:getBuildingPenetration(newX, newY, b)
+        
+        if newPen > 0 then
+            -- Would be inside building
+            if currentPen > 0 then
+                -- Already inside - only allow if reducing penetration (escaping)
+                if newPen >= currentPen then
+                    return false
+                end
+            else
+                -- Not inside currently, don't allow entering
+                return false
+            end
+        end
+    end
+    
+    return true
+end
+
 function Peon:update(dt, townHall, buildings)
     local goldDeposited = 0
     local lumberDeposited = 0
@@ -96,119 +168,80 @@ function Peon:updateMoving(dt, buildings)
         return
     end
     
-    local dx = self.targetX - self.worldX
-    local dy = self.targetY - self.worldY
-    local dist = math.sqrt(dx * dx + dy * dy)
-    
-    local arriveThreshold = 8
-    if self.targetMine then
-        -- Stop at mine edge, not inside
-        arriveThreshold = self.targetMine.pixelSize / 2 + self.radius + 2
-    elseif self.targetTreeX then
-        arriveThreshold = 20
-    elseif self.buildTargetX then
-        arriveThreshold = 32
-    end
-    
-    if dist <= arriveThreshold then
-        if self.targetMine and not self.targetMine.depleted then
+    -- Check for contact-based arrival (mines, town hall for returning)
+    -- This happens BEFORE distance checks to handle collision-blocked movement
+    if self.targetMine and not self.targetMine.depleted then
+        if self:isTouchingBuilding(self.targetMine, 4) then
             self.state = Peon.STATE_HARVESTING
             self.harvestTimer = 0
             self.visible = false
-        elseif self.targetTreeX and self.map:isTileTree(self.targetTreeX, self.targetTreeY) then
+            return
+        end
+    end
+    
+    -- Check tree arrival - adjacent to tree tile
+    if self.targetTreeX and self.map:isTileTree(self.targetTreeX, self.targetTreeY) then
+        local treeWorldX, treeWorldY = self.map:getTileWorldCenter(self.targetTreeX, self.targetTreeY)
+        local dx = treeWorldX - self.worldX
+        local dy = treeWorldY - self.worldY
+        local dist = math.sqrt(dx * dx + dy * dy)
+        -- Tree tile is 32 pixels, so touching is radius + 16 + small buffer
+        if dist <= self.radius + 20 then
             self.state = Peon.STATE_CHOPPING
             self.choppingTimer = 0
-        elseif self.buildTargetX and self.buildCallback then
+            return
+        end
+    end
+    
+    -- Check build site arrival
+    if self.buildTargetX and self.buildCallback then
+        local buildWorldX, buildWorldY = self.map:gridToWorld(self.buildTargetX, self.buildTargetY)
+        local dx = (buildWorldX + 16) - self.worldX
+        local dy = (buildWorldY + 16) - self.worldY
+        local dist = math.sqrt(dx * dx + dy * dy)
+        if dist <= 40 then
             self.state = Peon.STATE_BUILDING
             self.visible = false
             self.buildCallback(self.buildTargetX, self.buildTargetY, self.buildingType, self)
             self.buildCallback = nil
-        else
+            return
+        end
+    end
+    
+    local dx = self.targetX - self.worldX
+    local dy = self.targetY - self.worldY
+    local dist = math.sqrt(dx * dx + dy * dy)
+    
+    -- Simple move arrival (no special target)
+    local arriveThreshold = 8
+    if not self.targetMine and not self.targetTreeX and not self.buildTargetX then
+        if dist <= arriveThreshold then
             self.state = Peon.STATE_IDLE
             self.targetX = nil
             self.targetY = nil
-            self.targetMine = nil
-            self.targetTreeX = nil
-            self.targetTreeY = nil
-            self.buildTargetX = nil
-            self.buildTargetY = nil
+            return
         end
-        return
     end
     
-    -- Calculate move, but don't overshoot arrival threshold
-    local moveSpeed = self.speed * dt
-    local maxMove = dist - arriveThreshold
-    if maxMove > 0 and moveSpeed > maxMove then
-        moveSpeed = maxMove
-    end
-    
+    -- Movement
+    local moveSpeed = math.min(self.speed * dt, dist)
     local moveX = (dx / dist) * moveSpeed
     local moveY = (dy / dist) * moveSpeed
     local newX = self.worldX + moveX
     local newY = self.worldY + moveY
     
-    local canPass = true
-    if self.map then
-        local targetGridX, targetGridY = self.map:worldToGrid(newX, newY)
-        if self.targetTreeX and targetGridX == self.targetTreeX and targetGridY == self.targetTreeY then
-            canPass = true
-        else
-            canPass = self.map:isWorldPosPassable(newX, newY)
-        end
-    end
-    
-    -- Check building collision (never enter buildings)
-    if canPass and buildings then
-        for _, b in ipairs(buildings) do
-            if self:wouldCollideWithBuilding(newX, newY, b) then
-                canPass = false
-                break
-            end
-        end
-    end
-    
-    if canPass then
+    if self:canMoveTo(newX, newY, buildings) then
         self.worldX = newX
         self.worldY = newY
     else
-        -- Sliding
-        local canX = self.map:isWorldPosPassable(newX, self.worldY)
-        local canY = self.map:isWorldPosPassable(self.worldX, newY)
-        
-        if canX and buildings then
-            for _, b in ipairs(buildings) do
-                if self:wouldCollideWithBuilding(newX, self.worldY, b) then
-                    canX = false
-                    break
-                end
-            end
-        end
-        if canY and buildings then
-            for _, b in ipairs(buildings) do
-                if self:wouldCollideWithBuilding(self.worldX, newY, b) then
-                    canY = false
-                    break
-                end
-            end
-        end
-        
-        if canX then
+        -- Try sliding along X or Y axis
+        if self:canMoveTo(newX, self.worldY, buildings) then
             self.worldX = newX
-        elseif canY then
+        elseif self:canMoveTo(self.worldX, newY, buildings) then
             self.worldY = newY
         end
+        -- If both blocked, don't move (contact-based arrival will trigger next frame)
     end
-end
-
-function Peon:wouldCollideWithBuilding(x, y, building)
-    if not building.getWorldBounds then return false end
-    local bx1, by1, bx2, by2 = building:getWorldBounds()
-    local closestX = math.max(bx1, math.min(x, bx2))
-    local closestY = math.max(by1, math.min(y, by2))
-    local distX = x - closestX
-    local distY = y - closestY
-    return (distX * distX + distY * distY) < (self.radius * self.radius)
 end
 
 function Peon:updateHarvesting(dt)
@@ -239,21 +272,16 @@ function Peon:updateReturning(dt, townHall, buildings)
     end
     
     self.targetTownHall = townHall
-    local targetX, targetY = townHall:getWorldCenter()
     
-    local dx = targetX - self.worldX
-    local dy = targetY - self.worldY
-    local dist = math.sqrt(dx * dx + dy * dy)
-    
-    -- Stop at building edge + small buffer (don't enter building)
-    local stopDist = townHall.pixelSize / 2 + self.radius + 2
-    
-    if dist <= stopDist then
+    -- Check for contact-based arrival at town hall
+    if self:isTouchingBuilding(townHall, 4) then
+        -- Deposit resources
         local goldDeposited = self.carryingGold
         local lumberDeposited = self.carryingLumber
         self.carryingGold = 0
         self.carryingLumber = 0
         
+        -- Continue harvesting if we have a valid target
         if self.targetMine and not self.targetMine.depleted then
             self:goToMine(self.targetMine)
         elseif self.targetTreeX and self.map:isTileTree(self.targetTreeX, self.targetTreeY) then
@@ -268,29 +296,32 @@ function Peon:updateReturning(dt, townHall, buildings)
         return goldDeposited, lumberDeposited
     end
     
-    -- Calculate move distance, but don't overshoot the stop point
-    local moveSpeed = self.speed * dt
-    local maxMove = dist - stopDist
-    if moveSpeed > maxMove then
-        moveSpeed = maxMove
+    -- Move toward town hall center
+    local targetX, targetY = townHall:getWorldCenter()
+    local dx = targetX - self.worldX
+    local dy = targetY - self.worldY
+    local dist = math.sqrt(dx * dx + dy * dy)
+    
+    if dist < 1 then
+        return 0, 0
     end
     
+    local moveSpeed = math.min(self.speed * dt, dist)
     local moveX = (dx / dist) * moveSpeed
     local moveY = (dy / dist) * moveSpeed
     local newX = self.worldX + moveX
     local newY = self.worldY + moveY
     
-    local canPass = self.map and self.map:isWorldPosPassable(newX, newY)
-    
-    if canPass then
+    if self:canMoveTo(newX, newY, buildings) then
         self.worldX = newX
         self.worldY = newY
     else
-        if self.map:isWorldPosPassable(newX, self.worldY) then
+        if self:canMoveTo(newX, self.worldY, buildings) then
             self.worldX = newX
-        elseif self.map:isWorldPosPassable(self.worldX, newY) then
+        elseif self:canMoveTo(self.worldX, newY, buildings) then
             self.worldY = newY
         end
+        -- If blocked, contact check will trigger next frame
     end
     
     return 0, 0
