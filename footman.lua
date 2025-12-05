@@ -29,6 +29,8 @@ function Footman.new(params)
     self.targetX = nil
     self.targetY = nil
     self.flowField = nil  -- Flow field for pathfinding
+    self.lastMoveDirX = nil  -- Track last successful move for corner navigation
+    self.lastMoveDirY = nil
     
     return self
 end
@@ -91,63 +93,180 @@ function Footman:canMoveTo(newX, newY, buildings)
     return true
 end
 
+-- Try to move in the given direction, with sliding and cardinal fallbacks
+function Footman:tryMove(moveDirX, moveDirY, moveSpeed, buildings)
+    local moveX = moveDirX * moveSpeed
+    local moveY = moveDirY * moveSpeed
+    local newX = self.worldX + moveX
+    local newY = self.worldY + moveY
+    
+    if self:canMoveTo(newX, newY, buildings) then
+        self.worldX = newX
+        self.worldY = newY
+        self.lastMoveDirX = moveDirX
+        self.lastMoveDirY = moveDirY
+        return true
+    end
+    
+    -- Try sliding
+    if self:canMoveTo(newX, self.worldY, buildings) then
+        self.worldX = newX
+        self.lastMoveDirX = moveDirX > 0 and 1 or -1
+        self.lastMoveDirY = 0
+        return true
+    end
+    if self:canMoveTo(self.worldX, newY, buildings) then
+        self.worldY = newY
+        self.lastMoveDirX = 0
+        self.lastMoveDirY = moveDirY > 0 and 1 or -1
+        return true
+    end
+    
+    -- Corner case: try momentum
+    if self.lastMoveDirX and self.lastMoveDirY then
+        local lastX = self.worldX + self.lastMoveDirX * moveSpeed
+        local lastY = self.worldY + self.lastMoveDirY * moveSpeed
+        if self:canMoveTo(lastX, lastY, buildings) then
+            self.worldX = lastX
+            self.worldY = lastY
+            return true
+        end
+        if self.lastMoveDirX ~= 0 and self:canMoveTo(lastX, self.worldY, buildings) then
+            self.worldX = lastX
+            self.lastMoveDirY = 0
+            return true
+        end
+        if self.lastMoveDirY ~= 0 and self:canMoveTo(self.worldX, lastY, buildings) then
+            self.worldY = lastY
+            self.lastMoveDirX = 0
+            return true
+        end
+    end
+    
+    -- Last resort: try cardinals sorted by alignment with intended direction
+    local cardinals = {
+        {dx = 1, dy = 0}, {dx = -1, dy = 0},
+        {dx = 0, dy = 1}, {dx = 0, dy = -1}
+    }
+    table.sort(cardinals, function(a, b)
+        local dotA = a.dx * moveDirX + a.dy * moveDirY
+        local dotB = b.dx * moveDirX + b.dy * moveDirY
+        return dotA > dotB
+    end)
+    for _, dir in ipairs(cardinals) do
+        local testX = self.worldX + dir.dx * moveSpeed
+        local testY = self.worldY + dir.dy * moveSpeed
+        if self:canMoveTo(testX, testY, buildings) then
+            self.worldX = testX
+            self.worldY = testY
+            self.lastMoveDirX = dir.dx
+            self.lastMoveDirY = dir.dy
+            return true
+        end
+    end
+    
+    -- Corner escape: try larger steps to clear tight corners
+    local escapeStep = self.radius * 0.5
+    for _, dir in ipairs(cardinals) do
+        local testX = self.worldX + dir.dx * escapeStep
+        local testY = self.worldY + dir.dy * escapeStep
+        if self:canMoveTo(testX, testY, buildings) then
+            self.worldX = testX
+            self.worldY = testY
+            self.lastMoveDirX = dir.dx
+            self.lastMoveDirY = dir.dy
+            return true
+        end
+    end
+    
+    -- Final escape: try diagonals
+    local diagonals = {
+        {dx = 1, dy = 1}, {dx = -1, dy = 1},
+        {dx = 1, dy = -1}, {dx = -1, dy = -1}
+    }
+    table.sort(diagonals, function(a, b)
+        local dotA = a.dx * moveDirX + a.dy * moveDirY
+        local dotB = b.dx * moveDirX + b.dy * moveDirY
+        return dotA > dotB
+    end)
+    for _, dir in ipairs(diagonals) do
+        local testX = self.worldX + dir.dx * escapeStep * 0.707
+        local testY = self.worldY + dir.dy * escapeStep * 0.707
+        if self:canMoveTo(testX, testY, buildings) then
+            self.worldX = testX
+            self.worldY = testY
+            self.lastMoveDirX = dir.dx
+            self.lastMoveDirY = dir.dy
+            return true
+        end
+    end
+    
+    -- Truly stuck
+    self.lastMoveDirX = nil
+    self.lastMoveDirY = nil
+    return false
+end
+
 -- Get flow field direction, with fallback to sample nearby tiles if current tile has no direction
-function Footman:getFlowDirection(flowField, worldX, worldY)
-    if not flowField then return nil, nil end
-    
-    -- Try current position first
-    local dirX, dirY = flowField:getDirection(worldX, worldY, self.map)
-    if dirX and dirY then
-        return dirX, dirY
+-- Get movement direction using flow field with nearby tile sampling fallback
+function Footman:getMoveDirection(targetWorldX, targetWorldY, buildings)
+    -- First, try flow field at current position
+    if self.flowField then
+        local dirX, dirY = self.flowField:getDirection(self.worldX, self.worldY, self.map)
+        if dirX and dirY then
+            return dirX, dirY
+        end
     end
     
-    -- Check if we're already near the destination (low cost = close to target)
-    -- If so, don't redirect - let arrival checks or direct movement handle it
-    local currentCost = flowField:getCost(worldX, worldY, self.map)
-    if currentCost < 3 then
-        return nil, nil
+    -- Flow field returned nil - sample nearby tiles to find one with lower cost
+    local currentCost = math.huge
+    if self.flowField then
+        currentCost = self.flowField:getCost(self.worldX, self.worldY, self.map) or math.huge
     end
     
-    -- Current tile has no direction and we're far from destination
-    -- Sample nearby positions to find valid flow
-    -- Use 32 pixels (full tile) to ensure we sample different grid tiles
     local sampleOffsets = {
-        {dx = 32, dy = 0},   -- right
-        {dx = -32, dy = 0},  -- left
-        {dx = 0, dy = 32},   -- down
-        {dx = 0, dy = -32},  -- up
-        {dx = 32, dy = 32},  -- down-right
-        {dx = -32, dy = 32}, -- down-left
-        {dx = 32, dy = -32}, -- up-right
-        {dx = -32, dy = -32}, -- up-left
+        {dx = 32, dy = 0}, {dx = -32, dy = 0},
+        {dx = 0, dy = 32}, {dx = 0, dy = -32},
+        {dx = 32, dy = 32}, {dx = -32, dy = 32},
+        {dx = 32, dy = -32}, {dx = -32, dy = -32},
     }
     
     local bestDirX, bestDirY = nil, nil
-    local bestCost = math.huge
+    local bestCost = currentCost
     
     for _, offset in ipairs(sampleOffsets) do
-        local sampleX = worldX + offset.dx
-        local sampleY = worldY + offset.dy
+        local sampleX = self.worldX + offset.dx
+        local sampleY = self.worldY + offset.dy
         
         if self.map:isWorldPosPassable(sampleX, sampleY) then
-            local sampleDirX, sampleDirY = flowField:getDirection(sampleX, sampleY, self.map)
-            if sampleDirX and sampleDirY then
-                local cost = flowField:getCost(sampleX, sampleY, self.map)
-                if cost < bestCost then
-                    bestCost = cost
-                    local toSampleX = sampleX - worldX
-                    local toSampleY = sampleY - worldY
-                    local dist = math.sqrt(toSampleX * toSampleX + toSampleY * toSampleY)
-                    if dist > 0.1 then
-                        bestDirX = toSampleX / dist
-                        bestDirY = toSampleY / dist
-                    end
+            local sampleCost = self.flowField and self.flowField:getCost(sampleX, sampleY, self.map)
+            if sampleCost and sampleCost < bestCost then
+                bestCost = sampleCost
+                local toSampleX = sampleX - self.worldX
+                local toSampleY = sampleY - self.worldY
+                local dist = math.sqrt(toSampleX * toSampleX + toSampleY * toSampleY)
+                if dist > 0.1 then
+                    bestDirX = toSampleX / dist
+                    bestDirY = toSampleY / dist
                 end
             end
         end
     end
     
-    return bestDirX, bestDirY
+    if bestDirX and bestDirY then
+        return bestDirX, bestDirY
+    end
+    
+    -- No better nearby tile - use direct movement
+    local dx = targetWorldX - self.worldX
+    local dy = targetWorldY - self.worldY
+    local dist = math.sqrt(dx * dx + dy * dy)
+    
+    if dist > 0.1 then
+        return dx / dist, dy / dist
+    end
+    
+    return nil, nil
 end
 
 function Footman:update(dt, buildings)
@@ -174,41 +293,16 @@ function Footman:updateMoving(dt, buildings)
         return
     end
     
-    -- Get movement direction from flow field (with fallback to nearby tiles)
-    local moveDirX, moveDirY
+    -- Get movement direction (flow field with fallback)
+    local moveDirX, moveDirY = self:getMoveDirection(self.targetX, self.targetY, buildings)
     
-    if self.flowField then
-        moveDirX, moveDirY = self:getFlowDirection(self.flowField, self.worldX, self.worldY)
-    end
-    
-    -- Fall back to direct path only if flow field provides no direction at all
     if not moveDirX or not moveDirY then
-        if dist > 0.1 then
-            moveDirX = dx / dist
-            moveDirY = dy / dist
-        else
-            return
-        end
+        return
     end
     
-    -- Movement
+    -- Movement with sliding and cardinal fallbacks
     local moveSpeed = self.speed * dt
-    local moveX = moveDirX * moveSpeed
-    local moveY = moveDirY * moveSpeed
-    local newX = self.worldX + moveX
-    local newY = self.worldY + moveY
-    
-    if self:canMoveTo(newX, newY, buildings) then
-        self.worldX = newX
-        self.worldY = newY
-    else
-        -- Try sliding
-        if self:canMoveTo(newX, self.worldY, buildings) then
-            self.worldX = newX
-        elseif self:canMoveTo(self.worldX, newY, buildings) then
-            self.worldY = newY
-        end
-    end
+    self:tryMove(moveDirX, moveDirY, moveSpeed, buildings)
 end
 
 function Footman:draw()
@@ -329,6 +423,8 @@ function Footman:moveTo(worldX, worldY, flowField)
     self.targetX = worldX
     self.targetY = worldY
     self.flowField = flowField
+    self.lastMoveDirX = nil
+    self.lastMoveDirY = nil
     self.state = Footman.STATE_MOVING
 end
 
