@@ -1,6 +1,7 @@
 --[[
     Peon
-    Worker unit that can move and harvest gold
+    Worker unit that moves and harvests gold
+    Size: 1x1 tile, free movement (not grid-aligned), circular collision
 ]]
 
 local Peon = {}
@@ -12,14 +13,22 @@ Peon.STATE_MOVING = "Moving"
 Peon.STATE_HARVESTING = "Harvesting"
 Peon.STATE_RETURNING = "Returning"
 
+Peon.RADIUS = 12  -- Circular collision radius
+
 function Peon.new(params)
     local self = setmetatable({}, Peon)
     
-    self.x = params.x or 0
-    self.y = params.y or 0
-    self.width = 24
-    self.height = 24
-    self.speed = 100
+    -- World position (pixels, not grid-aligned)
+    self.worldX = params.worldX or 0
+    self.worldY = params.worldY or 0
+    
+    -- Map reference
+    self.map = params.map
+    
+    -- Collision
+    self.radius = Peon.RADIUS
+    
+    self.speed = 120  -- Pixels per second
     self.selected = false
     self.type = "peon"
     self.name = "Peon"
@@ -27,10 +36,9 @@ function Peon.new(params)
     -- State machine
     self.state = Peon.STATE_IDLE
     
-    -- Movement
+    -- Movement target (world pixels)
     self.targetX = nil
     self.targetY = nil
-    self.arrivalThreshold = 8
     
     -- Harvesting
     self.carryingGold = 0
@@ -44,11 +52,18 @@ function Peon.new(params)
     return self
 end
 
+function Peon:getScreenPos()
+    if self.map then
+        return self.map:worldToScreen(self.worldX, self.worldY)
+    end
+    return self.worldX, self.worldY
+end
+
 function Peon:update(dt, townHall)
     local goldDeposited = 0
     
     if self.state == Peon.STATE_MOVING then
-        goldDeposited = self:updateMoving(dt)
+        self:updateMoving(dt)
     elseif self.state == Peon.STATE_HARVESTING then
         self:updateHarvesting(dt)
     elseif self.state == Peon.STATE_RETURNING then
@@ -61,18 +76,20 @@ end
 function Peon:updateMoving(dt)
     if not self.targetX or not self.targetY then
         self.state = Peon.STATE_IDLE
-        return 0
+        return
     end
     
-    local dx = self.targetX - self.x
-    local dy = self.targetY - self.y
+    local dx = self.targetX - self.worldX
+    local dy = self.targetY - self.worldY
     local dist = math.sqrt(dx * dx + dy * dy)
     
-    if dist <= self.arrivalThreshold then
-        self.x = self.targetX
-        self.y = self.targetY
-        
-        -- Check if we arrived at a mine
+    -- Check arrival
+    local arriveThreshold = 8
+    if self.targetMine then
+        arriveThreshold = self.targetMine.pixelSize / 2 + self.radius
+    end
+    
+    if dist <= arriveThreshold then
         if self.targetMine and not self.targetMine.depleted then
             self.state = Peon.STATE_HARVESTING
             self.harvestTimer = 0
@@ -83,16 +100,28 @@ function Peon:updateMoving(dt)
             self.targetY = nil
             self.targetMine = nil
         end
-        return 0
+        return
     end
     
+    -- Move toward target
     local moveX = (dx / dist) * self.speed * dt
     local moveY = (dy / dist) * self.speed * dt
     
-    self.x = self.x + moveX
-    self.y = self.y + moveY
+    -- Check collision with trees
+    local newX = self.worldX + moveX
+    local newY = self.worldY + moveY
     
-    return 0
+    if self.map and self.map:isWorldPosPassable(newX, newY) then
+        self.worldX = newX
+        self.worldY = newY
+    else
+        -- Try sliding along obstacles
+        if self.map:isWorldPosPassable(newX, self.worldY) then
+            self.worldX = newX
+        elseif self.map:isWorldPosPassable(self.worldX, newY) then
+            self.worldY = newY
+        end
+    end
 end
 
 function Peon:updateHarvesting(dt)
@@ -117,19 +146,20 @@ function Peon:updateReturning(dt, townHall)
     end
     
     self.targetTownHall = townHall
-    local targetX = townHall:getCenterX()
-    local targetY = townHall:getCenterY()
+    local targetX, targetY = townHall:getWorldCenter()
     
-    local dx = targetX - self.x
-    local dy = targetY - self.y
+    local dx = targetX - self.worldX
+    local dy = targetY - self.worldY
     local dist = math.sqrt(dx * dx + dy * dy)
     
-    if dist <= townHall.width / 2 + 15 then
-        -- Arrived at town hall, deposit gold
+    local arriveThreshold = townHall.pixelSize / 2 + self.radius
+    
+    if dist <= arriveThreshold then
+        -- Deposit gold
         local deposited = self.carryingGold
         self.carryingGold = 0
         
-        -- Return to mine if it still has gold
+        -- Return to mine
         if self.targetMine and not self.targetMine.depleted then
             self:goToMine(self.targetMine)
         else
@@ -140,11 +170,23 @@ function Peon:updateReturning(dt, townHall)
         return deposited
     end
     
+    -- Move toward town hall
     local moveX = (dx / dist) * self.speed * dt
     local moveY = (dy / dist) * self.speed * dt
     
-    self.x = self.x + moveX
-    self.y = self.y + moveY
+    local newX = self.worldX + moveX
+    local newY = self.worldY + moveY
+    
+    if self.map and self.map:isWorldPosPassable(newX, newY) then
+        self.worldX = newX
+        self.worldY = newY
+    else
+        if self.map:isWorldPosPassable(newX, self.worldY) then
+            self.worldX = newX
+        elseif self.map:isWorldPosPassable(self.worldX, newY) then
+            self.worldY = newY
+        end
+    end
     
     return 0
 end
@@ -154,62 +196,63 @@ function Peon:draw()
         return
     end
     
-    -- Draw selection circle
+    local x, y = self:getScreenPos()
+    
+    -- Selection circle
     if self.selected then
         love.graphics.setColor(0, 1, 0, 0.4)
-        love.graphics.circle("fill", self.x, self.y + 2, self.width / 2 + 4)
+        love.graphics.circle("fill", x, y, self.radius + 4)
         love.graphics.setColor(0, 1, 0, 0.8)
         love.graphics.setLineWidth(2)
-        love.graphics.circle("line", self.x, self.y + 2, self.width / 2 + 4)
+        love.graphics.circle("line", x, y, self.radius + 4)
     end
     
-    -- Draw peon body
+    -- Body
     if self.carryingGold > 0 then
-        love.graphics.setColor(0.8, 0.65, 0.2, 1) -- Gold tint when carrying
+        love.graphics.setColor(0.8, 0.65, 0.2, 1)
     else
-        love.graphics.setColor(0.3, 0.55, 0.3, 1) -- Normal green
+        love.graphics.setColor(0.3, 0.55, 0.3, 1)
     end
-    love.graphics.rectangle("fill", self.x - self.width / 2, self.y - self.height / 2, self.width, self.height, 4)
+    love.graphics.circle("fill", x, y, self.radius)
     
-    -- Draw face
+    -- Face
     love.graphics.setColor(0.9, 0.75, 0.6, 1)
-    love.graphics.circle("fill", self.x, self.y - 4, 8)
+    love.graphics.circle("fill", x, y - 2, 7)
     
-    -- Draw eyes
+    -- Eyes
     love.graphics.setColor(0, 0, 0, 1)
-    love.graphics.circle("fill", self.x - 3, self.y - 5, 2)
-    love.graphics.circle("fill", self.x + 3, self.y - 5, 2)
+    love.graphics.circle("fill", x - 3, y - 3, 2)
+    love.graphics.circle("fill", x + 3, y - 3, 2)
     
-    -- Draw gold icon if carrying
+    -- Gold indicator
     if self.carryingGold > 0 then
         love.graphics.setColor(1, 0.85, 0, 1)
-        love.graphics.circle("fill", self.x + 10, self.y - 10, 5)
-        love.graphics.setColor(0.8, 0.65, 0, 1)
-        love.graphics.setLineWidth(1)
-        love.graphics.circle("line", self.x + 10, self.y - 10, 5)
+        love.graphics.circle("fill", x + 8, y - 8, 5)
     end
     
     love.graphics.setColor(1, 1, 1, 1)
 end
 
-function Peon:containsPoint(px, py)
-    local halfW = self.width / 2 + 4
-    local halfH = self.height / 2 + 4
-    return px >= self.x - halfW and px <= self.x + halfW and
-           py >= self.y - halfH and py <= self.y + halfH
+-- Circular collision check (screen coordinates)
+function Peon:containsPoint(screenX, screenY)
+    local x, y = self:getScreenPos()
+    local dx = screenX - x
+    local dy = screenY - y
+    return (dx * dx + dy * dy) <= (self.radius + 4) * (self.radius + 4)
 end
 
-function Peon:moveTo(x, y)
-    self.targetX = x
-    self.targetY = y
+function Peon:moveTo(worldX, worldY)
+    self.targetX = worldX
+    self.targetY = worldY
     self.targetMine = nil
     self.state = Peon.STATE_MOVING
 end
 
 function Peon:goToMine(mine)
     self.targetMine = mine
-    self.targetX = mine:getCenterX()
-    self.targetY = mine:getCenterY()
+    local cx, cy = mine:getWorldCenter()
+    self.targetX = cx
+    self.targetY = cy
     self.state = Peon.STATE_MOVING
 end
 
@@ -218,6 +261,32 @@ function Peon:getStateText()
         return "Carrying Gold"
     end
     return self.state
+end
+
+-- UI Methods (no actions for peon)
+function Peon:updateUI(resources, screenW, screenH, font)
+end
+
+function Peon:drawUI()
+end
+
+function Peon:mousepressed(x, y, button)
+end
+
+function Peon:mousereleased(x, y, button)
+end
+
+-- Minimap drawing
+function Peon:drawOnMinimap(mapX, mapY, scale)
+    if not self.visible then return end
+    love.graphics.setColor(0.3, 0.8, 0.3, 1)
+    local gridX, gridY = 1, 1
+    if self.map then
+        gridX, gridY = self.map:worldToGrid(self.worldX, self.worldY)
+    end
+    local x = mapX + (gridX - 0.5) * scale
+    local y = mapY + (gridY - 0.5) * scale
+    love.graphics.circle("fill", x, y, math.max(2, scale * 0.5))
 end
 
 return Peon
