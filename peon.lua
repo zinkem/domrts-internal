@@ -27,7 +27,7 @@ function Peon.new(params)
     self.worldY = params.worldY or 0
     self.map = params.map
     self.radius = Peon.RADIUS
-    self.speed = 120
+    self.speed = 60
     self.selected = false
     self.type = "peon"
     self.name = "Peon"
@@ -59,6 +59,8 @@ function Peon.new(params)
     self.buildTargetY = nil
     self.buildingType = nil
     self.buildCallback = nil
+    self.buildEntryX = nil  -- Position when entering building site
+    self.buildEntryY = nil
     
     -- UI
     self.buildFarmButton = nil
@@ -204,6 +206,8 @@ function Peon:updateMoving(dt, buildings)
         local bdy = (buildWorldY + 16) - self.worldY
         local bdist = math.sqrt(bdx * bdx + bdy * bdy)
         if bdist <= 40 then
+            self.buildEntryX = self.worldX  -- Remember where we entered
+            self.buildEntryY = self.worldY
             self.state = Peon.STATE_BUILDING
             self.visible = false
             self.flowField = nil
@@ -377,9 +381,66 @@ end
 function Peon:finishBuilding()
     self.visible = true
     self.state = Peon.STATE_IDLE
+    
+    -- Find closest empty tile around the completed building
+    if self.buildTargetX and self.buildTargetY and self.map then
+        -- Determine building size based on type
+        local buildingSize = 2  -- Default for farm
+        if self.buildingType == "barracks" then
+            buildingSize = 3
+        end
+        
+        -- Get building world position
+        local buildWorldX, buildWorldY = self.map:gridToWorld(self.buildTargetX, self.buildTargetY)
+        local buildCenterX = buildWorldX + (buildingSize * 32) / 2
+        local buildCenterY = buildWorldY + (buildingSize * 32) / 2
+        
+        -- Entry position (or building center if no entry recorded)
+        local entryX = self.buildEntryX or buildCenterX
+        local entryY = self.buildEntryY or buildCenterY
+        
+        -- Search adjacent tiles around the building perimeter
+        local bestX, bestY = nil, nil
+        local bestDist = math.huge
+        
+        for dy = -1, buildingSize do
+            for dx = -1, buildingSize do
+                -- Only check perimeter tiles (not inside building)
+                local isPerimeter = dx == -1 or dy == -1 or dx == buildingSize or dy == buildingSize
+                if isPerimeter then
+                    local tileGridX = self.buildTargetX + dx
+                    local tileGridY = self.buildTargetY + dy
+                    local tileWorldX, tileWorldY = self.map:gridToWorld(tileGridX, tileGridY)
+                    local tileCenterX = tileWorldX + 16
+                    local tileCenterY = tileWorldY + 16
+                    
+                    -- Check if tile is passable
+                    if self.map:isWorldPosPassable(tileCenterX, tileCenterY) then
+                        local distX = tileCenterX - entryX
+                        local distY = tileCenterY - entryY
+                        local dist = distX * distX + distY * distY
+                        if dist < bestDist then
+                            bestDist = dist
+                            bestX = tileCenterX
+                            bestY = tileCenterY
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Place peon at best position found
+        if bestX and bestY then
+            self.worldX = bestX
+            self.worldY = bestY
+        end
+    end
+    
     self.buildTargetX = nil
     self.buildTargetY = nil
     self.buildingType = nil
+    self.buildEntryX = nil
+    self.buildEntryY = nil
     self.flowField = nil
 end
 
@@ -611,9 +672,10 @@ function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
         
         local canFarm = resources.gold >= Farm.COST_GOLD and resources.lumber >= Farm.COST_LUMBER
         local canBarracks = resources.gold >= Barracks.COST_GOLD and resources.lumber >= Barracks.COST_LUMBER
+        local canGiveOrders = self.state == Peon.STATE_IDLE or self.state == Peon.STATE_MOVING
         
-        self.buildFarmButton:setEnabled(canFarm and self.state == Peon.STATE_IDLE)
-        self.buildBarracksButton:setEnabled(canBarracks and self.state == Peon.STATE_IDLE)
+        self.buildFarmButton:setEnabled(canFarm and canGiveOrders)
+        self.buildBarracksButton:setEnabled(canBarracks and canGiveOrders)
         self.buildFarmButton:update(0)
         self.buildBarracksButton:update(0)
     else

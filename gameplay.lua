@@ -91,6 +91,14 @@ local function separateUnits()
         for i = 1, #allUnits do
             for j = i + 1, #allUnits do
                 local a, b = allUnits[i], allUnits[j]
+                
+                -- Skip collision if either unit is a peon carrying gold
+                local aCarryingGold = a.carryingGold and a.carryingGold > 0
+                local bCarryingGold = b.carryingGold and b.carryingGold > 0
+                if aCarryingGold or bCarryingGold then
+                    goto continue
+                end
+                
                 local dx = b.worldX - a.worldX
                 local dy = b.worldY - a.worldY
                 local dist = math.sqrt(dx * dx + dy * dy)
@@ -121,6 +129,8 @@ local function separateUnits()
                         a.worldX, a.worldY = ax, ay
                     end
                 end
+                
+                ::continue::
             end
         end
     end
@@ -322,7 +332,50 @@ local function drawBuildingPlacement()
     local gridX, gridY = map:worldToGrid(worldX, worldY)
     local buildSize = placingBuildingType == "farm" and 2 or 3
     
+    -- Check if area is clear of trees/terrain
     placementValid = map:isAreaClear(gridX, gridY, buildSize, buildSize)
+    
+    -- Also check for overlap with existing buildings
+    if placementValid then
+        local function buildingsOverlap(ax, ay, aSize, bx, by, bSize)
+            return ax < bx + bSize and ax + aSize > bx and
+                   ay < by + bSize and ay + aSize > by
+        end
+        
+        -- Check town hall (3x3)
+        if townHall and buildingsOverlap(gridX, gridY, buildSize, townHall.gridX, townHall.gridY, 3) then
+            placementValid = false
+        end
+        
+        -- Check gold mines (2x2)
+        for _, mine in ipairs(goldMines) do
+            if buildingsOverlap(gridX, gridY, buildSize, mine.gridX, mine.gridY, 2) then
+                placementValid = false
+                break
+            end
+        end
+        
+        -- Check farms (2x2)
+        if placementValid then
+            for _, farm in ipairs(farms) do
+                if buildingsOverlap(gridX, gridY, buildSize, farm.gridX, farm.gridY, 2) then
+                    placementValid = false
+                    break
+                end
+            end
+        end
+        
+        -- Check barracks (3x3)
+        if placementValid then
+            for _, barrack in ipairs(barracks) do
+                if buildingsOverlap(gridX, gridY, buildSize, barrack.gridX, barrack.gridY, 3) then
+                    placementValid = false
+                    break
+                end
+            end
+        end
+    end
+    
     placementGridX, placementGridY = gridX, gridY
     
     local screenX, screenY = map:worldToScreen(map:gridToWorld(gridX, gridY))
