@@ -10,6 +10,7 @@ local Peon = require("peon")
 local Farm = require("farm")
 local Barracks = require("barracks")
 local Footman = require("footman")
+local FlowField = require("flowfield")
 
 local Gameplay = {}
 
@@ -371,6 +372,8 @@ local function createBuilding(gridX, gridY, buildingType, peon)
         barrack.builderPeon = peon
         table.insert(barracks, barrack)
     end
+    -- Invalidate all flow fields since map topology changed
+    FlowField.invalidateAll()
 end
 
 local function findNearestTree(worldX, worldY)
@@ -455,6 +458,9 @@ end
 
 function Gameplay.load()
     local screenW, screenH = love.graphics.getDimensions()
+    
+    -- Clear any cached flow fields from previous game
+    FlowField.invalidateAll()
     
     elapsedTime = 0
     victory = false
@@ -771,6 +777,7 @@ function handleRightClick(x, y)
     if #selectedEntities == 0 then return end
     
     local worldX, worldY = map:screenToWorld(x, y)
+    local buildings = getAllBuildings()
     
     -- Check what was clicked ONCE (not per-unit)
     local clickedMine = nil
@@ -801,29 +808,40 @@ function handleRightClick(x, y)
         end
     end
     
+    -- Generate flow field for the destination (shared by all units going there)
+    local flowField = nil
+    if clickedMine then
+        flowField = FlowField.getField(clickedMine.gridX + 1, clickedMine.gridY + 1, map, buildings)
+    elseif treeX then
+        flowField = FlowField.getField(treeX, treeY, map, buildings)
+    elseif not clickedOnBuilding and not clickedTownHall and map:isWorldPosPassable(worldX, worldY) then
+        flowField = FlowField.getField(gridX, gridY, map, buildings)
+    end
+    
     -- Command all selected units
     for _, entity in ipairs(selectedEntities) do
         if entity.type == "peon" then
             local peon = entity
             
             if clickedMine then
-                peon:goToMine(clickedMine)
+                peon:goToMine(clickedMine, flowField)
             elseif clickedTownHall then
                 if peon.carryingGold > 0 or peon.carryingLumber > 0 then
                     peon.state = Peon.STATE_RETURNING
+                    peon.flowField = nil  -- Will be set in updateReturning
                 else
-                    peon:moveTo(worldX, worldY)
+                    peon:moveTo(worldX, worldY, flowField)
                 end
             elseif treeX then
-                peon:goToTree(treeX, treeY)
+                peon:goToTree(treeX, treeY, flowField)
             elseif not clickedOnBuilding and map:isWorldPosPassable(worldX, worldY) then
-                peon:moveTo(worldX, worldY)
+                peon:moveTo(worldX, worldY, flowField)
             end
             
         elseif entity.type == "footman" then
             -- Footmen can only move
             if not clickedOnBuilding and not clickedMine and not clickedTownHall and not clickedTree and map:isWorldPosPassable(worldX, worldY) then
-                entity:moveTo(worldX, worldY)
+                entity:moveTo(worldX, worldY, flowField)
             end
         end
     end

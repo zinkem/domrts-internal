@@ -5,6 +5,7 @@
 ]]
 
 local Button = require("button")
+local FlowField = require("flowfield")
 
 local Peon = {}
 Peon.__index = Peon
@@ -34,6 +35,7 @@ function Peon.new(params)
     
     self.targetX = nil
     self.targetY = nil
+    self.flowField = nil  -- Flow field for pathfinding
     
     -- Gold harvesting
     self.carryingGold = 0
@@ -182,11 +184,11 @@ function Peon:updateMoving(dt, buildings)
     -- Check tree arrival - adjacent to tree tile
     if self.targetTreeX and self.map:isTileTree(self.targetTreeX, self.targetTreeY) then
         local treeWorldX, treeWorldY = self.map:getTileWorldCenter(self.targetTreeX, self.targetTreeY)
-        local dx = treeWorldX - self.worldX
-        local dy = treeWorldY - self.worldY
-        local dist = math.sqrt(dx * dx + dy * dy)
+        local tdx = treeWorldX - self.worldX
+        local tdy = treeWorldY - self.worldY
+        local tdist = math.sqrt(tdx * tdx + tdy * tdy)
         -- Tree tile is 32 pixels, so touching is radius + 16 + small buffer
-        if dist <= self.radius + 20 then
+        if tdist <= self.radius + 20 then
             self.state = Peon.STATE_CHOPPING
             self.choppingTimer = 0
             return
@@ -196,10 +198,10 @@ function Peon:updateMoving(dt, buildings)
     -- Check build site arrival
     if self.buildTargetX and self.buildCallback then
         local buildWorldX, buildWorldY = self.map:gridToWorld(self.buildTargetX, self.buildTargetY)
-        local dx = (buildWorldX + 16) - self.worldX
-        local dy = (buildWorldY + 16) - self.worldY
-        local dist = math.sqrt(dx * dx + dy * dy)
-        if dist <= 40 then
+        local bdx = (buildWorldX + 16) - self.worldX
+        local bdy = (buildWorldY + 16) - self.worldY
+        local bdist = math.sqrt(bdx * bdx + bdy * bdy)
+        if bdist <= 40 then
             self.state = Peon.STATE_BUILDING
             self.visible = false
             self.buildCallback(self.buildTargetX, self.buildTargetY, self.buildingType, self)
@@ -219,14 +221,32 @@ function Peon:updateMoving(dt, buildings)
             self.state = Peon.STATE_IDLE
             self.targetX = nil
             self.targetY = nil
+            self.flowField = nil
+            return
+        end
+    end
+    
+    -- Get movement direction from flow field or direct path
+    local moveDirX, moveDirY
+    
+    if self.flowField then
+        moveDirX, moveDirY = self.flowField:getDirection(self.worldX, self.worldY, self.map)
+    end
+    
+    -- Fall back to direct path if no flow field direction
+    if not moveDirX or not moveDirY then
+        if dist > 0.1 then
+            moveDirX = dx / dist
+            moveDirY = dy / dist
+        else
             return
         end
     end
     
     -- Movement
-    local moveSpeed = math.min(self.speed * dt, dist)
-    local moveX = (dx / dist) * moveSpeed
-    local moveY = (dy / dist) * moveSpeed
+    local moveSpeed = self.speed * dt
+    local moveX = moveDirX * moveSpeed
+    local moveY = moveDirY * moveSpeed
     local newX = self.worldX + moveX
     local newY = self.worldY + moveY
     
@@ -240,7 +260,7 @@ function Peon:updateMoving(dt, buildings)
         elseif self:canMoveTo(self.worldX, newY, buildings) then
             self.worldY = newY
         end
-        -- If both blocked, don't move (contact-based arrival will trigger next frame)
+        -- If both blocked, contact-based arrival will trigger next frame
     end
 end
 
@@ -291,24 +311,42 @@ function Peon:updateReturning(dt, townHall, buildings)
             self.targetMine = nil
             self.targetTreeX = nil
             self.targetTreeY = nil
+            self.flowField = nil
         end
         
         return goldDeposited, lumberDeposited
     end
     
-    -- Move toward town hall center
-    local targetX, targetY = townHall:getWorldCenter()
-    local dx = targetX - self.worldX
-    local dy = targetY - self.worldY
-    local dist = math.sqrt(dx * dx + dy * dy)
-    
-    if dist < 1 then
-        return 0, 0
+    -- Get or create flow field to town hall
+    if not self.flowField then
+        local thGridX, thGridY = self.map:worldToGrid(townHall:getWorldCenter())
+        self.flowField = FlowField.getField(thGridX, thGridY, self.map, buildings)
     end
     
-    local moveSpeed = math.min(self.speed * dt, dist)
-    local moveX = (dx / dist) * moveSpeed
-    local moveY = (dy / dist) * moveSpeed
+    -- Get movement direction from flow field
+    local moveDirX, moveDirY
+    if self.flowField then
+        moveDirX, moveDirY = self.flowField:getDirection(self.worldX, self.worldY, self.map)
+    end
+    
+    -- Fall back to direct path if no flow field direction
+    if not moveDirX or not moveDirY then
+        local targetX, targetY = townHall:getWorldCenter()
+        local dx = targetX - self.worldX
+        local dy = targetY - self.worldY
+        local dist = math.sqrt(dx * dx + dy * dy)
+        if dist > 0.1 then
+            moveDirX = dx / dist
+            moveDirY = dy / dist
+        else
+            return 0, 0
+        end
+    end
+    
+    -- Movement
+    local moveSpeed = self.speed * dt
+    local moveX = moveDirX * moveSpeed
+    local moveY = moveDirY * moveSpeed
     local newX = self.worldX + moveX
     local newY = self.worldY + moveY
     
@@ -390,7 +428,7 @@ function Peon:isInBox(x1, y1, x2, y2)
     return sx >= minX and sx <= maxX and sy >= minY and sy <= maxY
 end
 
-function Peon:moveTo(worldX, worldY)
+function Peon:moveTo(worldX, worldY, flowField)
     self.targetX = worldX
     self.targetY = worldY
     self.targetMine = nil
@@ -399,16 +437,18 @@ function Peon:moveTo(worldX, worldY)
     self.buildTargetX = nil
     self.buildTargetY = nil
     self.buildCallback = nil
+    self.flowField = flowField
     self.state = Peon.STATE_MOVING
 end
 
-function Peon:goToMine(mine)
+function Peon:goToMine(mine, flowField)
     self.targetMine = mine
     self.targetTreeX = nil
     self.targetTreeY = nil
     self.buildTargetX = nil
     self.buildTargetY = nil
     self.buildCallback = nil
+    self.flowField = flowField
     -- Target the center - updateMoving will stop at the edge
     local cx, cy = mine:getWorldCenter()
     self.targetX = cx
@@ -416,20 +456,21 @@ function Peon:goToMine(mine)
     self.state = Peon.STATE_MOVING
 end
 
-function Peon:goToTree(gridX, gridY)
+function Peon:goToTree(gridX, gridY, flowField)
     self.targetTreeX = gridX
     self.targetTreeY = gridY
     self.targetMine = nil
     self.buildTargetX = nil
     self.buildTargetY = nil
     self.buildCallback = nil
+    self.flowField = flowField
     if self.map then
         self.targetX, self.targetY = self.map:getTileWorldCenter(gridX, gridY)
     end
     self.state = Peon.STATE_MOVING
 end
 
-function Peon:goToBuild(gridX, gridY, buildingType, callback)
+function Peon:goToBuild(gridX, gridY, buildingType, callback, flowField)
     self.buildTargetX = gridX
     self.buildTargetY = gridY
     self.buildingType = buildingType
@@ -437,6 +478,7 @@ function Peon:goToBuild(gridX, gridY, buildingType, callback)
     self.targetMine = nil
     self.targetTreeX = nil
     self.targetTreeY = nil
+    self.flowField = flowField
     if self.map then
         self.targetX, self.targetY = self.map:gridToWorld(gridX, gridY)
         self.targetX = self.targetX + 16
