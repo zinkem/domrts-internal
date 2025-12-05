@@ -34,6 +34,9 @@ function Map.new()
     self.viewportW = 800
     self.viewportH = 600
     
+    -- Perlin noise seed
+    self.noiseSeed = math.random(0, 1000)
+    
     -- Initialize tiles as grass
     self.tiles = {}
     for y = 1, self.height do
@@ -43,33 +46,31 @@ function Map.new()
         end
     end
     
-    -- Generate trees
+    -- Generate trees using perlin noise
     self:generateTerrain()
     
     return self
 end
 
+-- Simple perlin-like noise using sine waves
+function Map:noise2D(x, y)
+    local seed = self.noiseSeed
+    local n = math.sin(x * 0.1 + seed) * math.cos(y * 0.1 + seed * 0.7)
+    n = n + math.sin(x * 0.05 + y * 0.08 + seed * 1.3) * 0.5
+    n = n + math.sin(x * 0.2 - y * 0.15 + seed * 0.3) * 0.25
+    return (n + 1.75) / 3.5  -- Normalize to 0-1
+end
+
 function Map:generateTerrain()
-    -- Create clusters of trees
-    for i = 1, 25 do
-        local cx = math.random(4, self.width - 4)
-        local cy = math.random(4, self.height - 4)
-        local size = math.random(2, 6)
-        
-        for j = 1, size do
-            local tx = cx + math.random(-2, 2)
-            local ty = cy + math.random(-2, 2)
-            if tx >= 1 and tx <= self.width and ty >= 1 and ty <= self.height then
-                self.tiles[ty][tx] = Map.TILE_TREE
+    local treeThreshold = 0.65  -- Higher = fewer trees
+    
+    for y = 1, self.height do
+        for x = 1, self.width do
+            local n = self:noise2D(x, y)
+            if n > treeThreshold then
+                self.tiles[y][x] = Map.TILE_TREE
             end
         end
-    end
-    
-    -- Scattered trees
-    for i = 1, 40 do
-        local tx = math.random(1, self.width)
-        local ty = math.random(1, self.height)
-        self.tiles[ty][tx] = Map.TILE_TREE
     end
 end
 
@@ -194,13 +195,10 @@ function Map:draw()
             local tile = self.tiles[y][x]
             
             if tile == Map.TILE_GRASS then
-                local shade = 0.42 + ((x + y) % 3) * 0.04
-                love.graphics.setColor(0.2, shade, 0.2, 1)
-                love.graphics.rectangle("fill", screenX, screenY, self.tileSize, self.tileSize)
+                self:drawHoundstoothTile(screenX, screenY, x, y)
             elseif tile == Map.TILE_TREE then
-                -- Grass under tree
-                love.graphics.setColor(0.2, 0.42, 0.2, 1)
-                love.graphics.rectangle("fill", screenX, screenY, self.tileSize, self.tileSize)
+                -- Grass under tree (use houndstooth too)
+                self:drawHoundstoothTile(screenX, screenY, x, y)
                 -- Trunk
                 love.graphics.setColor(0.4, 0.25, 0.1, 1)
                 love.graphics.rectangle("fill", screenX + 12, screenY + 18, 8, 14)
@@ -217,7 +215,50 @@ function Map:draw()
     love.graphics.setColor(1, 1, 1, 1)
 end
 
+-- Draw houndstooth pattern tile with very low contrast
+function Map:drawHoundstoothTile(screenX, screenY, gridX, gridY)
+    local size = self.tileSize
+    local half = size / 2
+    
+    -- Base grass color
+    local baseR, baseG, baseB = 0.22, 0.45, 0.22
+    -- Very subtle variation for houndstooth
+    local altR, altG, altB = 0.24, 0.47, 0.24
+    
+    -- Determine which pattern cell (2x2 repeat)
+    local px = (gridX - 1) % 2
+    local py = (gridY - 1) % 2
+    
+    -- Fill base
+    love.graphics.setColor(baseR, baseG, baseB, 1)
+    love.graphics.rectangle("fill", screenX, screenY, size, size)
+    
+    -- Houndstooth pattern: alternating notched squares
+    love.graphics.setColor(altR, altG, altB, 1)
+    
+    if (px + py) % 2 == 0 then
+        -- Top-left quadrant with notch
+        love.graphics.rectangle("fill", screenX, screenY, half, half)
+        -- Bottom-right notch extension
+        love.graphics.rectangle("fill", screenX + half, screenY + half, half / 2, half / 2)
+        love.graphics.rectangle("fill", screenX + half / 2, screenY + half, half / 2, half / 2)
+        love.graphics.rectangle("fill", screenX + half, screenY + half / 2, half / 2, half / 2)
+    else
+        -- Bottom-right quadrant with notch
+        love.graphics.rectangle("fill", screenX + half, screenY + half, half, half)
+        -- Top-left notch extension  
+        love.graphics.rectangle("fill", screenX, screenY, half / 2, half / 2)
+        love.graphics.rectangle("fill", screenX + half / 2, screenY, half / 2, half / 2)
+        love.graphics.rectangle("fill", screenX, screenY + half / 2, half / 2, half / 2)
+    end
+end
+
 function Map:drawMinimap(x, y, size)
+    -- Store minimap bounds for click detection
+    self.minimapX = x
+    self.minimapY = y
+    self.minimapSize = size
+    
     local scale = size / self.width
     
     love.graphics.setColor(0.1, 0.2, 0.1, 1)
@@ -247,6 +288,28 @@ function Map:drawMinimap(x, y, size)
     love.graphics.rectangle("line", x, y, size, size, 4)
     
     love.graphics.setColor(1, 1, 1, 1)
+end
+
+function Map:minimapClick(screenX, screenY)
+    -- Check if click is within minimap bounds
+    if not self.minimapX then return false end
+    
+    if screenX >= self.minimapX and screenX <= self.minimapX + self.minimapSize and
+       screenY >= self.minimapY and screenY <= self.minimapY + self.minimapSize then
+        
+        -- Convert minimap click to grid position
+        local relX = screenX - self.minimapX
+        local relY = screenY - self.minimapY
+        
+        local gridX = (relX / self.minimapSize) * self.width
+        local gridY = (relY / self.minimapSize) * self.height
+        
+        -- Center camera on clicked position
+        self:centerOnTile(gridX, gridY)
+        return true
+    end
+    
+    return false
 end
 
 return Map

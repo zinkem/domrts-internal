@@ -391,6 +391,11 @@ function Gameplay.mousepressed(x, y, button)
         selectedEntity:mousepressed(x, y, button)
     end
     
+    -- Check minimap click first
+    if button == 1 and map:minimapClick(x, y) then
+        return
+    end
+    
     -- Check if click is in viewport
     if not map:isInViewport(x, y) then
         return
