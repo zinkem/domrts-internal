@@ -149,7 +149,10 @@ local function drawRightPanel(screenW, startY, height)
             love.graphics.print("Status: " .. selectedEntity:getStateText(), panelX + 15, startY + 100)
             if selectedEntity.carryingGold > 0 then
                 love.graphics.setColor(1, 0.85, 0, 1)
-                love.graphics.print("Carrying: " .. selectedEntity.carryingGold, panelX + 15, startY + 120)
+                love.graphics.print("Carrying: " .. selectedEntity.carryingGold .. " gold", panelX + 15, startY + 120)
+            elseif selectedEntity.carryingLumber > 0 then
+                love.graphics.setColor(0.6, 0.4, 0.2, 1)
+                love.graphics.print("Carrying: " .. selectedEntity.carryingLumber .. " lumber", panelX + 15, startY + 120)
             end
         end
     else
@@ -228,7 +231,7 @@ function Gameplay.load()
     goldMines = {}
     selectedEntity = nil
     
-    -- Create map
+    -- Create map (generates trees)
     map = Map.new()
     
     -- Set viewport (game area between panels)
@@ -238,38 +241,42 @@ function Gameplay.load()
     local viewH = screenH - 90
     map:setViewport(viewX, viewY, viewW, viewH)
     
+    -- Find clear positions for buildings (after trees are generated)
+    local buildingSize = 3  -- All buildings are 3x3
+    
     -- Place Town Hall near center-left of map
-    local thGridX = 10
-    local thGridY = 30
+    local thGridX, thGridY = map:findClearArea(buildingSize, buildingSize, 10, 30, 15)
     townHall = TownHall.new({
         gridX = thGridX,
         gridY = thGridY,
         map = map
     })
     
-    -- Place 3 Gold Mines evenly distributed
-    -- Mine 1: 5 tiles diagonally from town hall
+    -- Place Mine 1: close to town hall (5 tiles diagonal)
+    local m1X, m1Y = map:findClearArea(buildingSize, buildingSize, thGridX + 8, thGridY + 5, 10)
     local mine1 = GoldMine.new({
-        gridX = thGridX + 8,
-        gridY = thGridY + 5,
+        gridX = m1X,
+        gridY = m1Y,
         gold = 50000,
         map = map
     })
     table.insert(goldMines, mine1)
     
-    -- Mine 2: Upper right quadrant
+    -- Place Mine 2: Upper right quadrant
+    local m2X, m2Y = map:findClearArea(buildingSize, buildingSize, 45, 12, 15)
     local mine2 = GoldMine.new({
-        gridX = 45,
-        gridY = 12,
+        gridX = m2X,
+        gridY = m2Y,
         gold = 75000,
         map = map
     })
     table.insert(goldMines, mine2)
     
-    -- Mine 3: Lower right quadrant
+    -- Place Mine 3: Lower right quadrant
+    local m3X, m3Y = map:findClearArea(buildingSize, buildingSize, 50, 50, 15)
     local mine3 = GoldMine.new({
-        gridX = 50,
-        gridY = 50,
+        gridX = m3X,
+        gridY = m3Y,
         gold = 100000,
         map = map
     })
@@ -307,9 +314,12 @@ function Gameplay.update(dt)
     
     -- Update peons
     for _, peon in ipairs(peons) do
-        local deposited = peon:update(dt, townHall)
-        if deposited > 0 then
-            resources.gold = resources.gold + deposited
+        local goldDep, lumberDep = peon:update(dt, townHall)
+        if goldDep > 0 then
+            resources.gold = resources.gold + goldDep
+        end
+        if lumberDep > 0 then
+            resources.lumber = resources.lumber + lumberDep
         end
     end
     
@@ -461,7 +471,7 @@ function handleRightClick(x, y)
     
     -- Check if clicking on town hall
     if townHall:containsPoint(x, y) then
-        if peon.carryingGold > 0 then
+        if peon.carryingGold > 0 or peon.carryingLumber > 0 then
             peon.state = Peon.STATE_RETURNING
         else
             peon:moveTo(worldX, worldY)
@@ -469,8 +479,17 @@ function handleRightClick(x, y)
         return
     end
     
-    -- Move to location
-    peon:moveTo(worldX, worldY)
+    -- Check if clicking on a tree
+    local gridX, gridY = map:worldToGrid(worldX, worldY)
+    if map:isTileTree(gridX, gridY) then
+        peon:goToTree(gridX, gridY)
+        return
+    end
+    
+    -- Move to location (only if passable)
+    if map:isWorldPosPassable(worldX, worldY) then
+        peon:moveTo(worldX, worldY)
+    end
 end
 
 function Gameplay.mousereleased(x, y, button)

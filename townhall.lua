@@ -166,11 +166,14 @@ end
 function TownHall:updateUI(resources, screenW, screenH, font)
     if self.selected then
         local panelX = screenW - 180
+        -- Position button below selection info, above minimap
+        -- Minimap starts at roughly screenH - 190, so place button well above
+        local buttonY = 70 + 145  -- startY (70) + offset for selection info
         
         if not self.actionButton then
             self.actionButton = Button.new({
                 x = panelX + 10,
-                y = screenH - 80,
+                y = buttonY,
                 width = 150,
                 height = 40,
                 text = "Train Peon (400g)",

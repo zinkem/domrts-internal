@@ -84,6 +84,57 @@ function Map:clearArea(gridX, gridY, gridW, gridH)
     end
 end
 
+function Map:isAreaClear(gridX, gridY, gridW, gridH)
+    for y = gridY, gridY + gridH - 1 do
+        for x = gridX, gridX + gridW - 1 do
+            if x < 1 or x > self.width or y < 1 or y > self.height then
+                return false
+            end
+            if self.tiles[y][x] == Map.TILE_TREE then
+                return false
+            end
+        end
+    end
+    return true
+end
+
+function Map:findClearArea(gridW, gridH, preferX, preferY, searchRadius)
+    searchRadius = searchRadius or 20
+    
+    -- Try preferred position first
+    if preferX and preferY then
+        if self:isAreaClear(preferX, preferY, gridW, gridH) then
+            return preferX, preferY
+        end
+        
+        -- Spiral outward from preferred position
+        for dist = 1, searchRadius do
+            for dx = -dist, dist do
+                for dy = -dist, dist do
+                    if math.abs(dx) == dist or math.abs(dy) == dist then
+                        local testX = preferX + dx
+                        local testY = preferY + dy
+                        if self:isAreaClear(testX, testY, gridW, gridH) then
+                            return testX, testY
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Random search as fallback
+    for attempt = 1, 100 do
+        local testX = math.random(2, self.width - gridW - 1)
+        local testY = math.random(2, self.height - gridH - 1)
+        if self:isAreaClear(testX, testY, gridW, gridH) then
+            return testX, testY
+        end
+    end
+    
+    return nil, nil
+end
+
 function Map:setViewport(x, y, w, h)
     self.viewportX = x
     self.viewportY = y
@@ -146,6 +197,18 @@ function Map:isTilePassable(gridX, gridY)
         return false
     end
     return self.tiles[gridY][gridX] ~= Map.TILE_TREE
+end
+
+function Map:isTileTree(gridX, gridY)
+    if gridX < 1 or gridX > self.width or gridY < 1 or gridY > self.height then
+        return false
+    end
+    return self.tiles[gridY][gridX] == Map.TILE_TREE
+end
+
+function Map:getTileWorldCenter(gridX, gridY)
+    local wx, wy = self:gridToWorld(gridX, gridY)
+    return wx + self.tileSize / 2, wy + self.tileSize / 2
 end
 
 function Map:isWorldPosPassable(worldX, worldY)

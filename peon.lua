@@ -12,6 +12,7 @@ Peon.STATE_IDLE = "Idle"
 Peon.STATE_MOVING = "Moving"
 Peon.STATE_HARVESTING = "Harvesting"
 Peon.STATE_RETURNING = "Returning"
+Peon.STATE_CHOPPING = "Chopping"
 
 Peon.RADIUS = 12  -- Circular collision radius
 
@@ -40,7 +41,7 @@ function Peon.new(params)
     self.targetX = nil
     self.targetY = nil
     
-    -- Harvesting
+    -- Gold harvesting
     self.carryingGold = 0
     self.harvestAmount = 10
     self.harvestTime = 1.0
@@ -48,6 +49,14 @@ function Peon.new(params)
     self.targetMine = nil
     self.targetTownHall = nil
     self.visible = true
+    
+    -- Lumber harvesting
+    self.carryingLumber = 0
+    self.choppingAmount = 10
+    self.choppingTime = 5.0
+    self.choppingTimer = 0
+    self.targetTreeX = nil  -- Grid coords
+    self.targetTreeY = nil
     
     return self
 end
@@ -61,16 +70,19 @@ end
 
 function Peon:update(dt, townHall)
     local goldDeposited = 0
+    local lumberDeposited = 0
     
     if self.state == Peon.STATE_MOVING then
         self:updateMoving(dt)
     elseif self.state == Peon.STATE_HARVESTING then
         self:updateHarvesting(dt)
+    elseif self.state == Peon.STATE_CHOPPING then
+        self:updateChopping(dt)
     elseif self.state == Peon.STATE_RETURNING then
-        goldDeposited = self:updateReturning(dt, townHall)
+        goldDeposited, lumberDeposited = self:updateReturning(dt, townHall)
     end
     
-    return goldDeposited
+    return goldDeposited, lumberDeposited
 end
 
 function Peon:updateMoving(dt)
@@ -83,10 +95,12 @@ function Peon:updateMoving(dt)
     local dy = self.targetY - self.worldY
     local dist = math.sqrt(dx * dx + dy * dy)
     
-    -- Check arrival
+    -- Check arrival threshold based on target
     local arriveThreshold = 8
     if self.targetMine then
         arriveThreshold = self.targetMine.pixelSize / 2 + self.radius
+    elseif self.targetTreeX then
+        arriveThreshold = 20  -- Close to tree tile
     end
     
     if dist <= arriveThreshold then
@@ -94,11 +108,16 @@ function Peon:updateMoving(dt)
             self.state = Peon.STATE_HARVESTING
             self.harvestTimer = 0
             self.visible = false
+        elseif self.targetTreeX and self.map:isTileTree(self.targetTreeX, self.targetTreeY) then
+            self.state = Peon.STATE_CHOPPING
+            self.choppingTimer = 0
         else
             self.state = Peon.STATE_IDLE
             self.targetX = nil
             self.targetY = nil
             self.targetMine = nil
+            self.targetTreeX = nil
+            self.targetTreeY = nil
         end
         return
     end
@@ -107,11 +126,22 @@ function Peon:updateMoving(dt)
     local moveX = (dx / dist) * self.speed * dt
     local moveY = (dy / dist) * self.speed * dt
     
-    -- Check collision with trees
+    -- Check collision with trees (but allow moving toward target tree)
     local newX = self.worldX + moveX
     local newY = self.worldY + moveY
     
-    if self.map and self.map:isWorldPosPassable(newX, newY) then
+    local canPass = true
+    if self.map then
+        local targetGridX, targetGridY = self.map:worldToGrid(newX, newY)
+        -- Allow passing if moving to our target tree
+        if self.targetTreeX and targetGridX == self.targetTreeX and targetGridY == self.targetTreeY then
+            canPass = true
+        else
+            canPass = self.map:isWorldPosPassable(newX, newY)
+        end
+    end
+    
+    if canPass then
         self.worldX = newX
         self.worldY = newY
     else
@@ -139,10 +169,20 @@ function Peon:updateHarvesting(dt)
     end
 end
 
+function Peon:updateChopping(dt)
+    self.choppingTimer = self.choppingTimer + dt
+    
+    if self.choppingTimer >= self.choppingTime then
+        self.carryingLumber = self.choppingAmount
+        self.state = Peon.STATE_RETURNING
+        self.choppingTimer = 0
+    end
+end
+
 function Peon:updateReturning(dt, townHall)
     if not townHall then
         self.state = Peon.STATE_IDLE
-        return 0
+        return 0, 0
     end
     
     self.targetTownHall = townHall
@@ -155,19 +195,25 @@ function Peon:updateReturning(dt, townHall)
     local arriveThreshold = townHall.pixelSize / 2 + self.radius
     
     if dist <= arriveThreshold then
-        -- Deposit gold
-        local deposited = self.carryingGold
+        -- Deposit resources
+        local goldDeposited = self.carryingGold
+        local lumberDeposited = self.carryingLumber
         self.carryingGold = 0
+        self.carryingLumber = 0
         
-        -- Return to mine
+        -- Return to source
         if self.targetMine and not self.targetMine.depleted then
             self:goToMine(self.targetMine)
+        elseif self.targetTreeX and self.map:isTileTree(self.targetTreeX, self.targetTreeY) then
+            self:goToTree(self.targetTreeX, self.targetTreeY)
         else
             self.state = Peon.STATE_IDLE
             self.targetMine = nil
+            self.targetTreeX = nil
+            self.targetTreeY = nil
         end
         
-        return deposited
+        return goldDeposited, lumberDeposited
     end
     
     -- Move toward town hall
@@ -188,7 +234,7 @@ function Peon:updateReturning(dt, townHall)
         end
     end
     
-    return 0
+    return 0, 0
 end
 
 function Peon:draw()
@@ -207,9 +253,11 @@ function Peon:draw()
         love.graphics.circle("line", x, y, self.radius + 4)
     end
     
-    -- Body
+    -- Body color based on what we're carrying
     if self.carryingGold > 0 then
         love.graphics.setColor(0.8, 0.65, 0.2, 1)
+    elseif self.carryingLumber > 0 then
+        love.graphics.setColor(0.5, 0.35, 0.2, 1)
     else
         love.graphics.setColor(0.3, 0.55, 0.3, 1)
     end
@@ -224,10 +272,13 @@ function Peon:draw()
     love.graphics.circle("fill", x - 3, y - 3, 2)
     love.graphics.circle("fill", x + 3, y - 3, 2)
     
-    -- Gold indicator
+    -- Resource indicator
     if self.carryingGold > 0 then
         love.graphics.setColor(1, 0.85, 0, 1)
         love.graphics.circle("fill", x + 8, y - 8, 5)
+    elseif self.carryingLumber > 0 then
+        love.graphics.setColor(0.6, 0.4, 0.2, 1)
+        love.graphics.rectangle("fill", x + 4, y - 12, 8, 4)
     end
     
     love.graphics.setColor(1, 1, 1, 1)
@@ -245,20 +296,40 @@ function Peon:moveTo(worldX, worldY)
     self.targetX = worldX
     self.targetY = worldY
     self.targetMine = nil
+    self.targetTreeX = nil
+    self.targetTreeY = nil
     self.state = Peon.STATE_MOVING
 end
 
 function Peon:goToMine(mine)
     self.targetMine = mine
+    self.targetTreeX = nil
+    self.targetTreeY = nil
     local cx, cy = mine:getWorldCenter()
     self.targetX = cx
     self.targetY = cy
     self.state = Peon.STATE_MOVING
 end
 
+function Peon:goToTree(gridX, gridY)
+    self.targetTreeX = gridX
+    self.targetTreeY = gridY
+    self.targetMine = nil
+    if self.map then
+        self.targetX, self.targetY = self.map:getTileWorldCenter(gridX, gridY)
+    end
+    self.state = Peon.STATE_MOVING
+end
+
 function Peon:getStateText()
-    if self.state == Peon.STATE_RETURNING and self.carryingGold > 0 then
-        return "Carrying Gold"
+    if self.state == Peon.STATE_RETURNING then
+        if self.carryingGold > 0 then
+            return "Carrying Gold"
+        elseif self.carryingLumber > 0 then
+            return "Carrying Lumber"
+        end
+    elseif self.state == Peon.STATE_CHOPPING then
+        return "Chopping"
     end
     return self.state
 end
