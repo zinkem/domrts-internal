@@ -67,34 +67,111 @@ function GoldMine:draw()
     local x, y = self:getScreenPos()
     local size = self.pixelSize
     
+    -- Shadow
+    love.graphics.setColor(0, 0, 0, 0.3)
+    love.graphics.ellipse("fill", x + size/2, y + size + 3, size/2 - 5, 6)
+    
+    -- Rocky mountain/hill base
     if self.depleted then
-        love.graphics.setColor(0.3, 0.3, 0.3, 1)
+        love.graphics.setColor(0.35, 0.33, 0.3, 1)
     else
-        love.graphics.setColor(0.45, 0.35, 0.25, 1)
+        love.graphics.setColor(0.45, 0.4, 0.32, 1)
     end
-    love.graphics.rectangle("fill", x, y, size, size, 4)
     
+    -- Main rocky formation
+    love.graphics.polygon("fill",
+        x + 5, y + size,
+        x, y + size - 20,
+        x + 10, y + 15,
+        x + 25, y + 5,
+        x + size/2, y,
+        x + size - 25, y + 5,
+        x + size - 10, y + 15,
+        x + size, y + size - 20,
+        x + size - 5, y + size
+    )
+    
+    -- Rock texture/layers
+    love.graphics.setColor(0.4, 0.36, 0.28, 1)
+    love.graphics.polygon("fill", x + 15, y + 20, x + 35, y + 12, x + 50, y + 18, x + 40, y + 30, x + 20, y + 28)
+    love.graphics.polygon("fill", x + size - 45, y + 25, x + size - 25, y + 15, x + size - 10, y + 25, x + size - 20, y + 35)
+    love.graphics.polygon("fill", x + 10, y + 50, x + 30, y + 45, x + 25, y + 60, x + 8, y + 58)
+    love.graphics.polygon("fill", x + size - 35, y + 55, x + size - 15, y + 48, x + size - 12, y + 62, x + size - 30, y + 65)
+    
+    -- Gold veins (if not depleted)
     if not self.depleted then
-        love.graphics.setColor(0.9, 0.75, 0.1, 1)
-        love.graphics.rectangle("fill", x + 8, y + 8, 24, 18, 2)
-        love.graphics.rectangle("fill", x + size - 34, y + 22, 22, 16, 2)
-        love.graphics.rectangle("fill", x + 12, y + size - 34, 28, 20, 2)
-        love.graphics.rectangle("fill", x + size - 32, y + size - 30, 20, 18, 2)
+        love.graphics.setColor(0.9, 0.75, 0.15, 1)
+        -- Gold vein streaks
+        love.graphics.setLineWidth(3)
+        love.graphics.line(x + 18, y + 22, x + 28, y + 18)
+        love.graphics.line(x + 22, y + 26, x + 30, y + 28)
+        love.graphics.line(x + size - 30, y + 20, x + size - 18, y + 25)
+        love.graphics.line(x + 12, y + 55, x + 22, y + 52)
+        love.graphics.line(x + size - 28, y + 58, x + size - 18, y + 55)
+        
+        -- Gold nugget highlights
+        love.graphics.setColor(1, 0.85, 0.2, 1)
+        love.graphics.circle("fill", x + 25, y + 20, 3)
+        love.graphics.circle("fill", x + size - 22, y + 22, 2)
+        love.graphics.circle("fill", x + 18, y + 53, 2)
+        love.graphics.circle("fill", x + size - 22, y + 56, 3)
     end
     
-    love.graphics.setColor(0.1, 0.08, 0.05, 1)
-    love.graphics.rectangle("fill", x + size/2 - 18, y + size/2 - 5, 36, size/2 + 5, 3)
+    -- Mine entrance (dark cave opening)
+    love.graphics.setColor(0.08, 0.06, 0.04, 1)
+    love.graphics.rectangle("fill", x + size/2 - 20, y + size/2, 40, size/2)
+    love.graphics.arc("fill", x + size/2, y + size/2, 20, math.pi, 2 * math.pi)
     
-    love.graphics.setColor(0.25, 0.2, 0.1, 1)
-    love.graphics.setLineWidth(2)
-    love.graphics.rectangle("line", x, y, size, size, 4)
+    -- Wooden support beams
+    love.graphics.setColor(0.5, 0.35, 0.2, 1)
+    -- Left beam
+    love.graphics.polygon("fill", x + size/2 - 22, y + size/2 - 5, x + size/2 - 18, y + size/2 - 5, 
+                                   x + size/2 - 18, y + size, x + size/2 - 24, y + size)
+    -- Right beam
+    love.graphics.polygon("fill", x + size/2 + 18, y + size/2 - 5, x + size/2 + 22, y + size/2 - 5,
+                                   x + size/2 + 24, y + size, x + size/2 + 18, y + size)
+    -- Top beam
+    love.graphics.rectangle("fill", x + size/2 - 24, y + size/2 - 10, 48, 8, 2)
     
+    -- Beam details
+    love.graphics.setColor(0.4, 0.28, 0.15, 1)
+    love.graphics.line(x + size/2 - 20, y + size/2 + 10, x + size/2 - 20, y + size - 5)
+    love.graphics.line(x + size/2 + 20, y + size/2 + 10, x + size/2 + 20, y + size - 5)
+    
+    -- Mine cart track rails
+    love.graphics.setColor(0.4, 0.38, 0.35, 1)
+    love.graphics.rectangle("fill", x + size/2 - 15, y + size - 8, 30, 3)
+    love.graphics.setColor(0.5, 0.45, 0.4, 1)
+    love.graphics.rectangle("fill", x + size/2 - 12, y + size - 6, 4, 6)
+    love.graphics.rectangle("fill", x + size/2 + 8, y + size - 6, 4, 6)
+    
+    -- Lantern/torch by entrance
+    if not self.depleted then
+        love.graphics.setColor(0.5, 0.35, 0.2, 1)
+        love.graphics.rectangle("fill", x + size/2 - 28, y + size/2 + 5, 3, 15)
+        love.graphics.setColor(1, 0.7, 0.2, 0.9)
+        love.graphics.circle("fill", x + size/2 - 27, y + size/2 + 3, 5)
+        love.graphics.setColor(1, 0.85, 0.4, 0.4)
+        love.graphics.circle("fill", x + size/2 - 27, y + size/2 + 3, 8)
+    end
+    
+    -- Pick axe leaning against entrance (if not depleted)
+    if not self.depleted then
+        love.graphics.setColor(0.5, 0.35, 0.2, 1)
+        love.graphics.rectangle("fill", x + size/2 + 25, y + size/2 + 15, 3, 25, 1)
+        love.graphics.setColor(0.5, 0.5, 0.55, 1)
+        love.graphics.polygon("fill", x + size/2 + 22, y + size/2 + 12, x + size/2 + 34, y + size/2 + 8,
+                                       x + size/2 + 30, y + size/2 + 18)
+    end
+    
+    -- Selection
     if self.selected then
         love.graphics.setColor(0, 1, 0, 0.8)
         love.graphics.setLineWidth(3)
-        love.graphics.rectangle("line", x - 2, y - 2, size + 4, size + 4, 6)
+        love.graphics.rectangle("line", x - 2, y - 2, size + 4, size + 4, 4)
     end
     
+    -- Gold reserves display
     love.graphics.setColor(1, 0.85, 0, 1)
     local goldText = tostring(self.goldReserves)
     local font = love.graphics.getFont()

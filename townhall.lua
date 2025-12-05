@@ -78,33 +78,103 @@ function TownHall:draw()
     local x, y = self:getScreenPos()
     local size = self.pixelSize
     
-    love.graphics.setColor(0.55, 0.35, 0.2, 1)
-    love.graphics.rectangle("fill", x, y, size, size, 6)
+    -- Shadow
+    love.graphics.setColor(0, 0, 0, 0.3)
+    love.graphics.ellipse("fill", x + size/2, y + size + 5, size/2 - 5, 8)
     
-    love.graphics.setColor(0.35, 0.2, 0.1, 1)
+    -- Main castle base (stone walls)
+    love.graphics.setColor(0.45, 0.42, 0.38, 1)
+    love.graphics.rectangle("fill", x + 8, y + 20, size - 16, size - 20, 2)
+    
+    -- Stone texture pattern
+    love.graphics.setColor(0.4, 0.37, 0.33, 1)
+    for row = 0, 4 do
+        for col = 0, 3 do
+            local offsetX = (row % 2) * 12
+            love.graphics.rectangle("fill", x + 12 + col * 20 + offsetX, y + 25 + row * 14, 16, 10, 1)
+        end
+    end
+    
+    -- Left tower
+    love.graphics.setColor(0.5, 0.47, 0.42, 1)
+    love.graphics.rectangle("fill", x, y + 10, 24, size - 10, 2)
+    -- Tower battlements
+    love.graphics.setColor(0.45, 0.42, 0.38, 1)
+    for i = 0, 2 do
+        love.graphics.rectangle("fill", x + i * 9, y + 2, 6, 12)
+    end
+    -- Tower window
+    love.graphics.setColor(0.2, 0.25, 0.35, 1)
+    love.graphics.rectangle("fill", x + 8, y + 30, 8, 12, 1)
+    love.graphics.setColor(0.6, 0.5, 0.3, 1)
+    love.graphics.rectangle("fill", x + 11, y + 30, 2, 12)
+    
+    -- Right tower  
+    love.graphics.setColor(0.5, 0.47, 0.42, 1)
+    love.graphics.rectangle("fill", x + size - 24, y + 10, 24, size - 10, 2)
+    -- Tower battlements
+    love.graphics.setColor(0.45, 0.42, 0.38, 1)
+    for i = 0, 2 do
+        love.graphics.rectangle("fill", x + size - 24 + i * 9, y + 2, 6, 12)
+    end
+    -- Tower window
+    love.graphics.setColor(0.2, 0.25, 0.35, 1)
+    love.graphics.rectangle("fill", x + size - 16, y + 30, 8, 12, 1)
+    love.graphics.setColor(0.6, 0.5, 0.3, 1)
+    love.graphics.rectangle("fill", x + size - 13, y + 30, 2, 12)
+    
+    -- Center battlements
+    love.graphics.setColor(0.48, 0.45, 0.4, 1)
+    for i = 0, 4 do
+        love.graphics.rectangle("fill", x + 28 + i * 9, y + 12, 6, 10)
+    end
+    
+    -- Main entrance arch
+    love.graphics.setColor(0.15, 0.12, 0.08, 1)
+    love.graphics.rectangle("fill", x + size/2 - 14, y + size - 45, 28, 45)
+    love.graphics.arc("fill", x + size/2, y + size - 45, 14, math.pi, 2 * math.pi)
+    
+    -- Wooden door
+    love.graphics.setColor(0.4, 0.28, 0.15, 1)
+    love.graphics.rectangle("fill", x + size/2 - 12, y + size - 40, 24, 40)
+    -- Door details
+    love.graphics.setColor(0.3, 0.2, 0.1, 1)
+    love.graphics.rectangle("fill", x + size/2 - 1, y + size - 40, 2, 40)
+    -- Door hinges/studs
+    love.graphics.setColor(0.35, 0.3, 0.25, 1)
+    love.graphics.circle("fill", x + size/2 - 8, y + size - 30, 2)
+    love.graphics.circle("fill", x + size/2 + 8, y + size - 30, 2)
+    love.graphics.circle("fill", x + size/2 - 8, y + size - 15, 2)
+    love.graphics.circle("fill", x + size/2 + 8, y + size - 15, 2)
+    
+    -- Banner/flag on center
+    love.graphics.setColor(0.5, 0.35, 0.2, 1)
+    love.graphics.rectangle("fill", x + size/2 - 1, y - 15, 2, 25)
+    love.graphics.setColor(0.8, 0.2, 0.2, 1)
     love.graphics.polygon("fill", 
-        x + size / 2, y - 20,
-        x - 5, y + 20,
-        x + size + 5, y + 20
+        x + size/2 + 1, y - 15,
+        x + size/2 + 16, y - 8,
+        x + size/2 + 1, y
     )
+    love.graphics.setColor(0.9, 0.8, 0.2, 1)
+    love.graphics.circle("fill", x + size/2 + 8, y - 8, 3)
     
-    love.graphics.setColor(0.25, 0.15, 0.08, 1)
-    love.graphics.rectangle("fill", x + size/2 - 13, y + size - 41, 26, 41)
+    -- Torch lights
+    love.graphics.setColor(1, 0.7, 0.3, 0.8)
+    love.graphics.circle("fill", x + 12, y + 55, 4)
+    love.graphics.circle("fill", x + size - 12, y + 55, 4)
+    love.graphics.setColor(1, 0.9, 0.5, 0.4)
+    love.graphics.circle("fill", x + 12, y + 55, 7)
+    love.graphics.circle("fill", x + size - 12, y + 55, 7)
     
-    love.graphics.setColor(0.6, 0.8, 1, 0.8)
-    love.graphics.rectangle("fill", x + 15, y + 30, 20, 20)
-    love.graphics.rectangle("fill", x + size - 35, y + 30, 20, 20)
-    
-    love.graphics.setColor(0.25, 0.15, 0.08, 1)
-    love.graphics.setLineWidth(2)
-    love.graphics.rectangle("line", x, y, size, size, 6)
-    
+    -- Selection highlight
     if self.selected then
         love.graphics.setColor(0, 1, 0, 0.8)
         love.graphics.setLineWidth(3)
-        love.graphics.rectangle("line", x - 3, y - 3, size + 6, size + 6, 8)
+        love.graphics.rectangle("line", x - 3, y - 3, size + 6, size + 6, 4)
     end
     
+    -- Production progress bar
     if self.isProducing then
         local barW = size - 10
         local progress = self.productionTimer / self.productionTime

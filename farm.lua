@@ -81,8 +81,13 @@ function Farm:draw()
     local size = self.pixelSize
     
     if self.isBuilding then
-        love.graphics.setColor(0.4, 0.3, 0.2, 0.6)
+        -- Construction site
+        love.graphics.setColor(0.5, 0.45, 0.3, 0.6)
         love.graphics.rectangle("fill", x, y, size, size, 4)
+        love.graphics.setColor(0.6, 0.5, 0.35, 0.8)
+        -- Lumber stacks
+        love.graphics.rectangle("fill", x + 5, y + 10, 20, 8)
+        love.graphics.rectangle("fill", x + size - 25, y + 15, 20, 8)
         
         local barW = size - 10
         local progress = self.buildProgress / self.buildTime
@@ -91,29 +96,85 @@ function Farm:draw()
         love.graphics.setColor(0.2, 0.6, 0.8, 1)
         love.graphics.rectangle("fill", x + 5, y + size/2 - 4, barW * progress, 8, 2)
     else
-        love.graphics.setColor(0.45, 0.55, 0.25, 1)
-        love.graphics.rectangle("fill", x, y, size, size, 4)
+        -- Shadow
+        love.graphics.setColor(0, 0, 0, 0.25)
+        love.graphics.ellipse("fill", x + size/2, y + size + 2, size/2 - 3, 5)
         
-        love.graphics.setColor(0.6, 0.7, 0.3, 1)
-        for row = 0, 3 do
-            love.graphics.rectangle("fill", x + 4, y + 8 + row * 14, size - 8, 8, 2)
+        -- Ground/field (crop rows)
+        love.graphics.setColor(0.45, 0.38, 0.25, 1)
+        love.graphics.rectangle("fill", x, y + 30, size, size - 30, 2)
+        
+        -- Wheat/crop rows
+        love.graphics.setColor(0.75, 0.65, 0.25, 1)
+        for row = 0, 2 do
+            for col = 0, 5 do
+                local cropX = x + 5 + col * 10
+                local cropY = y + 35 + row * 12
+                -- Wheat stalks
+                love.graphics.line(cropX, cropY + 8, cropX, cropY)
+                love.graphics.line(cropX + 2, cropY + 8, cropX + 2, cropY + 2)
+                love.graphics.ellipse("fill", cropX + 1, cropY - 1, 3, 2)
+            end
         end
         
-        love.graphics.setColor(0.5, 0.35, 0.2, 1)
-        love.graphics.rectangle("fill", x, y, 4, size)
-        love.graphics.rectangle("fill", x + size - 4, y, 4, size)
-        love.graphics.rectangle("fill", x, y, size, 4)
-        love.graphics.rectangle("fill", x, y + size - 4, size, 4)
+        -- Farmhouse base
+        love.graphics.setColor(0.55, 0.4, 0.25, 1)
+        love.graphics.rectangle("fill", x + 8, y + 8, size - 16, 30, 2)
+        
+        -- Wooden plank texture
+        love.graphics.setColor(0.5, 0.36, 0.22, 1)
+        love.graphics.rectangle("fill", x + 8, y + 15, size - 16, 2)
+        love.graphics.rectangle("fill", x + 8, y + 25, size - 16, 2)
+        
+        -- Thatched roof
+        love.graphics.setColor(0.6, 0.55, 0.3, 1)
+        love.graphics.polygon("fill",
+            x + size/2, y - 5,
+            x + 3, y + 12,
+            x + size - 3, y + 12
+        )
+        -- Roof thatch texture
+        love.graphics.setColor(0.55, 0.5, 0.28, 1)
+        love.graphics.line(x + size/2, y - 3, x + 8, y + 10)
+        love.graphics.line(x + size/2, y - 3, x + 20, y + 10)
+        love.graphics.line(x + size/2, y - 3, x + size - 20, y + 10)
+        love.graphics.line(x + size/2, y - 3, x + size - 8, y + 10)
+        
+        -- Door
+        love.graphics.setColor(0.4, 0.28, 0.15, 1)
+        love.graphics.rectangle("fill", x + size/2 - 6, y + 22, 12, 16)
+        love.graphics.setColor(0.3, 0.2, 0.1, 1)
+        love.graphics.rectangle("fill", x + size/2 - 1, y + 22, 2, 16)
+        -- Door handle
+        love.graphics.setColor(0.5, 0.45, 0.3, 1)
+        love.graphics.circle("fill", x + size/2 + 4, y + 30, 2)
+        
+        -- Window
+        love.graphics.setColor(0.5, 0.6, 0.7, 0.8)
+        love.graphics.rectangle("fill", x + 14, y + 14, 10, 10)
+        love.graphics.setColor(0.4, 0.28, 0.15, 1)
+        love.graphics.rectangle("fill", x + 18, y + 14, 2, 10)
+        love.graphics.rectangle("fill", x + 14, y + 18, 10, 2)
+        
+        -- Wooden fence posts
+        love.graphics.setColor(0.5, 0.38, 0.22, 1)
+        love.graphics.rectangle("fill", x + 2, y + 30, 3, size - 32)
+        love.graphics.rectangle("fill", x + size - 5, y + 30, 3, size - 32)
+        love.graphics.rectangle("fill", x + 2, y + 40, size - 4, 2)
+        love.graphics.rectangle("fill", x + 2, y + 52, size - 4, 2)
+        
+        -- Hay bale
+        love.graphics.setColor(0.7, 0.6, 0.3, 1)
+        love.graphics.ellipse("fill", x + size - 12, y + 20, 6, 5)
+        love.graphics.setColor(0.65, 0.55, 0.28, 1)
+        love.graphics.arc("line", x + size - 12, y + 20, 5, 0, math.pi)
     end
     
-    love.graphics.setColor(0.3, 0.25, 0.15, 1)
-    love.graphics.setLineWidth(2)
-    love.graphics.rectangle("line", x, y, size, size, 4)
-    
+    -- Selection
     if self.selected then
         love.graphics.setColor(0, 1, 0, 0.8)
         love.graphics.setLineWidth(3)
-        love.graphics.rectangle("line", x - 2, y - 2, size + 4, size + 4, 6)
+        love.graphics.rectangle("line", x - 2, y - 2, size + 4, size + 4, 4)
     end
     
     love.graphics.setColor(1, 1, 1, 1)

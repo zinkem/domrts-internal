@@ -155,6 +155,7 @@ end
 function Footman:draw()
     local x, y = self:getScreenPos()
     
+    -- Selection circle
     if self.selected then
         love.graphics.setColor(0, 1, 0, 0.4)
         love.graphics.circle("fill", x, y, self.radius + 4)
@@ -163,27 +164,90 @@ function Footman:draw()
         love.graphics.circle("line", x, y, self.radius + 4)
     end
     
-    love.graphics.setColor(0.6, 0.25, 0.25, 1)
-    love.graphics.circle("fill", x, y, self.radius)
+    -- Shadow
+    love.graphics.setColor(0, 0, 0, 0.3)
+    love.graphics.ellipse("fill", x, y + 10, 11, 4)
     
-    love.graphics.setColor(0.7, 0.35, 0.35, 1)
-    love.graphics.arc("fill", x, y, self.radius - 2, -math.pi/2 - 0.5, -math.pi/2 + 0.5)
+    -- Feet (armored boots)
+    love.graphics.setColor(0.4, 0.4, 0.45, 1)
+    love.graphics.ellipse("fill", x - 5, y + 8, 4, 3)
+    love.graphics.ellipse("fill", x + 5, y + 8, 4, 3)
     
-    love.graphics.setColor(0.7, 0.7, 0.75, 1)
-    love.graphics.circle("fill", x, y - 2, 8)
+    -- Legs (chainmail/armor)
+    love.graphics.setColor(0.5, 0.5, 0.55, 1)
+    love.graphics.rectangle("fill", x - 6, y + 1, 5, 9, 1)
+    love.graphics.rectangle("fill", x + 1, y + 1, 5, 9, 1)
     
-    love.graphics.setColor(0.3, 0.3, 0.35, 1)
-    love.graphics.rectangle("fill", x - 5, y - 4, 10, 4, 1)
+    -- Shield (left side)
+    love.graphics.setColor(0.6, 0.2, 0.2, 1)  -- Red shield
+    love.graphics.ellipse("fill", x - 12, y - 2, 6, 10)
+    love.graphics.setColor(0.8, 0.75, 0.2, 1)  -- Gold trim
+    love.graphics.setLineWidth(2)
+    love.graphics.ellipse("line", x - 12, y - 2, 6, 10)
+    -- Shield emblem (lion/cross)
+    love.graphics.setColor(0.9, 0.85, 0.3, 1)
+    love.graphics.rectangle("fill", x - 13, y - 6, 2, 8)
+    love.graphics.rectangle("fill", x - 15, y - 3, 6, 2)
     
-    love.graphics.setColor(0.6, 0.6, 0.65, 1)
-    love.graphics.rectangle("fill", x + 6, y - 10, 3, 16, 1)
-    love.graphics.setColor(0.5, 0.4, 0.3, 1)
-    love.graphics.rectangle("fill", x + 4, y - 2, 7, 4, 1)
+    -- Body (chainmail)
+    love.graphics.setColor(0.55, 0.55, 0.6, 1)
+    love.graphics.rectangle("fill", x - 7, y - 8, 14, 12, 2)
     
-    love.graphics.setColor(0.5, 0.3, 0.3, 1)
-    love.graphics.rectangle("fill", x - 12, y - 6, 6, 14, 2)
-    love.graphics.setColor(0.7, 0.5, 0.2, 1)
-    love.graphics.rectangle("fill", x - 11, y - 2, 4, 6, 1)
+    -- Tabard (red cloth over armor)
+    love.graphics.setColor(0.7, 0.15, 0.15, 1)
+    love.graphics.rectangle("fill", x - 5, y - 6, 10, 10, 1)
+    -- Tabard emblem
+    love.graphics.setColor(0.9, 0.8, 0.2, 1)
+    love.graphics.rectangle("fill", x - 1, y - 5, 2, 8)
+    love.graphics.rectangle("fill", x - 3, y - 2, 6, 2)
+    
+    -- Shoulders (pauldrons)
+    love.graphics.setColor(0.5, 0.5, 0.55, 1)
+    love.graphics.ellipse("fill", x - 9, y - 6, 4, 3)
+    love.graphics.ellipse("fill", x + 9, y - 6, 4, 3)
+    
+    -- Sword arm (right)
+    love.graphics.setColor(0.55, 0.55, 0.6, 1)
+    love.graphics.rectangle("fill", x + 6, y - 6, 5, 10, 1)
+    
+    -- Gauntlet/hand
+    love.graphics.setColor(0.45, 0.45, 0.5, 1)
+    love.graphics.circle("fill", x + 9, y + 4, 3)
+    
+    -- Sword
+    love.graphics.setColor(0.5, 0.4, 0.25, 1)  -- Handle
+    love.graphics.rectangle("fill", x + 11, y, 2, 8, 1)
+    love.graphics.setColor(0.75, 0.7, 0.6, 1)  -- Blade
+    love.graphics.polygon("fill", 
+        x + 10, y - 2,
+        x + 14, y - 2,
+        x + 13, y - 16,
+        x + 11, y - 16
+    )
+    love.graphics.setColor(0.9, 0.85, 0.5, 1)  -- Cross guard
+    love.graphics.rectangle("fill", x + 8, y - 2, 8, 3, 1)
+    
+    -- Head/Helmet
+    love.graphics.setColor(0.5, 0.5, 0.55, 1)
+    love.graphics.ellipse("fill", x, y - 12, 7, 8)
+    
+    -- Helmet visor
+    love.graphics.setColor(0.4, 0.4, 0.45, 1)
+    love.graphics.rectangle("fill", x - 5, y - 14, 10, 5, 1)
+    
+    -- Visor slit (eyes)
+    love.graphics.setColor(0.15, 0.15, 0.2, 1)
+    love.graphics.rectangle("fill", x - 4, y - 13, 8, 2)
+    
+    -- Helmet crest/plume
+    love.graphics.setColor(0.8, 0.2, 0.2, 1)
+    love.graphics.ellipse("fill", x, y - 20, 3, 6)
+    love.graphics.setColor(0.9, 0.25, 0.25, 1)
+    love.graphics.ellipse("fill", x, y - 21, 2, 4)
+    
+    -- Helmet highlight
+    love.graphics.setColor(0.7, 0.7, 0.75, 0.5)
+    love.graphics.arc("fill", x - 2, y - 14, 4, math.pi, math.pi * 1.5)
     
     love.graphics.setColor(1, 1, 1, 1)
 end

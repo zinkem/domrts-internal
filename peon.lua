@@ -177,6 +177,7 @@ function Peon:updateMoving(dt, buildings)
             self.state = Peon.STATE_HARVESTING
             self.harvestTimer = 0
             self.visible = false
+            self.flowField = nil  -- Clear flow field, will need new one for return trip
             return
         end
     end
@@ -191,6 +192,7 @@ function Peon:updateMoving(dt, buildings)
         if tdist <= self.radius + 20 then
             self.state = Peon.STATE_CHOPPING
             self.choppingTimer = 0
+            self.flowField = nil  -- Clear flow field, will need new one for return trip
             return
         end
     end
@@ -204,6 +206,7 @@ function Peon:updateMoving(dt, buildings)
         if bdist <= 40 then
             self.state = Peon.STATE_BUILDING
             self.visible = false
+            self.flowField = nil
             self.buildCallback(self.buildTargetX, self.buildTargetY, self.buildingType, self)
             self.buildCallback = nil
             return
@@ -272,6 +275,7 @@ function Peon:updateHarvesting(dt)
             self.carryingGold = self.targetMine:extractGold(self.harvestAmount)
         end
         self.state = Peon.STATE_RETURNING
+        self.flowField = nil  -- Clear so updateReturning creates new field to town hall
         self.harvestTimer = 0
     end
 end
@@ -281,6 +285,7 @@ function Peon:updateChopping(dt)
     if self.choppingTimer >= self.choppingTime then
         self.carryingLumber = self.choppingAmount
         self.state = Peon.STATE_RETURNING
+        self.flowField = nil  -- Clear so updateReturning creates new field to town hall
         self.choppingTimer = 0
     end
 end
@@ -303,9 +308,13 @@ function Peon:updateReturning(dt, townHall, buildings)
         
         -- Continue harvesting if we have a valid target
         if self.targetMine and not self.targetMine.depleted then
-            self:goToMine(self.targetMine)
+            -- Generate flow field to mine
+            local mineField = FlowField.getField(self.targetMine.gridX + 1, self.targetMine.gridY + 1, self.map, buildings)
+            self:goToMine(self.targetMine, mineField)
         elseif self.targetTreeX and self.map:isTileTree(self.targetTreeX, self.targetTreeY) then
-            self:goToTree(self.targetTreeX, self.targetTreeY)
+            -- Generate flow field to tree
+            local treeField = FlowField.getField(self.targetTreeX, self.targetTreeY, self.map, buildings)
+            self:goToTree(self.targetTreeX, self.targetTreeY, treeField)
         else
             self.state = Peon.STATE_IDLE
             self.targetMine = nil
@@ -371,6 +380,7 @@ function Peon:finishBuilding()
     self.buildTargetX = nil
     self.buildTargetY = nil
     self.buildingType = nil
+    self.flowField = nil
 end
 
 function Peon:draw()
@@ -378,6 +388,7 @@ function Peon:draw()
     
     local x, y = self:getScreenPos()
     
+    -- Selection circle
     if self.selected then
         love.graphics.setColor(0, 1, 0, 0.4)
         love.graphics.circle("fill", x, y, self.radius + 4)
@@ -386,28 +397,91 @@ function Peon:draw()
         love.graphics.circle("line", x, y, self.radius + 4)
     end
     
+    -- Shadow
+    love.graphics.setColor(0, 0, 0, 0.3)
+    love.graphics.ellipse("fill", x, y + 10, 10, 4)
+    
+    -- Feet (brown boots)
+    love.graphics.setColor(0.35, 0.25, 0.15, 1)
+    love.graphics.ellipse("fill", x - 5, y + 8, 4, 3)
+    love.graphics.ellipse("fill", x + 5, y + 8, 4, 3)
+    
+    -- Legs (brown pants)
+    love.graphics.setColor(0.45, 0.35, 0.25, 1)
+    love.graphics.rectangle("fill", x - 6, y + 2, 5, 8, 1)
+    love.graphics.rectangle("fill", x + 1, y + 2, 5, 8, 1)
+    
+    -- Body/tunic
     if self.carryingGold > 0 then
-        love.graphics.setColor(0.8, 0.65, 0.2, 1)
+        love.graphics.setColor(0.7, 0.55, 0.2, 1)  -- Golden tint when carrying gold
     elseif self.carryingLumber > 0 then
-        love.graphics.setColor(0.5, 0.35, 0.2, 1)
+        love.graphics.setColor(0.5, 0.4, 0.25, 1)  -- Brown tint when carrying lumber
     else
-        love.graphics.setColor(0.3, 0.55, 0.3, 1)
+        love.graphics.setColor(0.6, 0.5, 0.35, 1)  -- Normal tan tunic
     end
-    love.graphics.circle("fill", x, y, self.radius)
+    love.graphics.rectangle("fill", x - 7, y - 6, 14, 10, 2)
     
-    love.graphics.setColor(0.9, 0.75, 0.6, 1)
-    love.graphics.circle("fill", x, y - 2, 7)
+    -- Tunic details (belt)
+    love.graphics.setColor(0.35, 0.25, 0.15, 1)
+    love.graphics.rectangle("fill", x - 7, y, 14, 2)
+    love.graphics.setColor(0.8, 0.7, 0.2, 1)
+    love.graphics.circle("fill", x, y + 1, 2)  -- Belt buckle
     
+    -- Arms
+    love.graphics.setColor(0.6, 0.5, 0.35, 1)
+    love.graphics.rectangle("fill", x - 10, y - 4, 4, 8, 1)
+    love.graphics.rectangle("fill", x + 6, y - 4, 4, 8, 1)
+    
+    -- Hands (skin tone)
+    love.graphics.setColor(0.85, 0.7, 0.55, 1)
+    love.graphics.circle("fill", x - 9, y + 4, 3)
+    love.graphics.circle("fill", x + 9, y + 4, 3)
+    
+    -- Head
+    love.graphics.setColor(0.85, 0.7, 0.55, 1)
+    love.graphics.ellipse("fill", x, y - 10, 6, 7)
+    
+    -- Hood/cap
+    love.graphics.setColor(0.5, 0.4, 0.3, 1)
+    love.graphics.arc("fill", x, y - 10, 7, math.pi, 2 * math.pi)
+    love.graphics.rectangle("fill", x - 7, y - 12, 14, 4, 1)
+    
+    -- Face details
     love.graphics.setColor(0, 0, 0, 1)
-    love.graphics.circle("fill", x - 3, y - 3, 2)
-    love.graphics.circle("fill", x + 3, y - 3, 2)
+    love.graphics.circle("fill", x - 2, y - 11, 1.5)  -- Left eye
+    love.graphics.circle("fill", x + 2, y - 11, 1.5)  -- Right eye
+    love.graphics.setColor(0.7, 0.5, 0.4, 1)
+    love.graphics.ellipse("fill", x, y - 8, 2, 1.5)  -- Nose
     
+    -- Tool based on state/carrying
+    if self.state == Peon.STATE_CHOPPING or self.carryingLumber > 0 then
+        -- Axe
+        love.graphics.setColor(0.5, 0.35, 0.2, 1)
+        love.graphics.rectangle("fill", x + 10, y - 8, 2, 14, 1)  -- Handle
+        love.graphics.setColor(0.6, 0.6, 0.65, 1)
+        love.graphics.polygon("fill", x + 9, y - 8, x + 16, y - 6, x + 16, y - 2, x + 9, y - 4)  -- Blade
+    elseif self.state == Peon.STATE_HARVESTING or self.carryingGold > 0 then
+        -- Pickaxe
+        love.graphics.setColor(0.5, 0.35, 0.2, 1)
+        love.graphics.rectangle("fill", x + 10, y - 6, 2, 12, 1)  -- Handle
+        love.graphics.setColor(0.5, 0.5, 0.55, 1)
+        love.graphics.polygon("fill", x + 8, y - 8, x + 18, y - 6, x + 14, y - 2)  -- Pick head
+    end
+    
+    -- Carried resources on back
     if self.carryingGold > 0 then
-        love.graphics.setColor(1, 0.85, 0, 1)
-        love.graphics.circle("fill", x + 8, y - 8, 5)
+        -- Gold sack
+        love.graphics.setColor(0.7, 0.55, 0.15, 1)
+        love.graphics.ellipse("fill", x, y - 2, 6, 5)
+        love.graphics.setColor(0.9, 0.8, 0.2, 1)
+        love.graphics.circle("fill", x - 2, y - 3, 3)
+        love.graphics.circle("fill", x + 2, y - 1, 2)
     elseif self.carryingLumber > 0 then
-        love.graphics.setColor(0.6, 0.4, 0.2, 1)
-        love.graphics.rectangle("fill", x + 4, y - 12, 8, 4)
+        -- Lumber bundle
+        love.graphics.setColor(0.55, 0.4, 0.2, 1)
+        love.graphics.rectangle("fill", x - 4, y - 14, 3, 12, 1)
+        love.graphics.rectangle("fill", x - 1, y - 16, 3, 14, 1)
+        love.graphics.rectangle("fill", x + 2, y - 13, 3, 11, 1)
     end
     
     love.graphics.setColor(1, 1, 1, 1)

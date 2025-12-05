@@ -104,8 +104,14 @@ function Barracks:draw()
     local size = self.pixelSize
     
     if self.isBuilding then
-        love.graphics.setColor(0.4, 0.3, 0.3, 0.6)
+        -- Construction scaffolding
+        love.graphics.setColor(0.5, 0.4, 0.3, 0.6)
         love.graphics.rectangle("fill", x, y, size, size, 4)
+        love.graphics.setColor(0.6, 0.5, 0.3, 0.8)
+        -- Scaffolding poles
+        love.graphics.rectangle("fill", x + 5, y + 5, 4, size - 10)
+        love.graphics.rectangle("fill", x + size - 9, y + 5, 4, size - 10)
+        love.graphics.rectangle("fill", x + 5, y + size/2 - 2, size - 10, 4)
         
         local barW = size - 10
         local progress = self.buildProgress / self.buildTime
@@ -114,34 +120,103 @@ function Barracks:draw()
         love.graphics.setColor(0.2, 0.6, 0.8, 1)
         love.graphics.rectangle("fill", x + 5, y + size/2 - 4, barW * progress, 8, 2)
     else
-        love.graphics.setColor(0.5, 0.4, 0.35, 1)
-        love.graphics.rectangle("fill", x, y, size, size, 6)
+        -- Shadow
+        love.graphics.setColor(0, 0, 0, 0.3)
+        love.graphics.ellipse("fill", x + size/2, y + size + 3, size/2 - 5, 6)
         
-        love.graphics.setColor(0.35, 0.25, 0.2, 1)
-        love.graphics.polygon("fill", x + size/2, y - 15, x - 3, y + 25, x + size + 3, y + 25)
+        -- Main building base (dark stone)
+        love.graphics.setColor(0.38, 0.32, 0.28, 1)
+        love.graphics.rectangle("fill", x + 5, y + 25, size - 10, size - 25, 3)
         
-        love.graphics.setColor(0.25, 0.18, 0.12, 1)
-        love.graphics.rectangle("fill", x + size/2 - 18, y + size - 50, 36, 50)
+        -- Stone texture
+        love.graphics.setColor(0.35, 0.3, 0.26, 1)
+        for row = 0, 3 do
+            for col = 0, 3 do
+                local offsetX = (row % 2) * 10
+                love.graphics.rectangle("fill", x + 10 + col * 18 + offsetX, y + 30 + row * 14, 14, 10, 1)
+            end
+        end
         
-        love.graphics.setColor(0.7, 0.7, 0.75, 1)
+        -- Roof (dark red/maroon military style)
+        love.graphics.setColor(0.45, 0.18, 0.15, 1)
+        love.graphics.polygon("fill", 
+            x + size/2, y - 5,
+            x - 3, y + 30,
+            x + size + 3, y + 30
+        )
+        -- Roof highlight
+        love.graphics.setColor(0.55, 0.22, 0.18, 1)
+        love.graphics.polygon("fill",
+            x + size/2, y - 5,
+            x + size/2 - 30, y + 25,
+            x + size/2, y + 20
+        )
+        
+        -- Entrance
+        love.graphics.setColor(0.12, 0.1, 0.08, 1)
+        love.graphics.rectangle("fill", x + size/2 - 15, y + size - 42, 30, 42)
+        love.graphics.arc("fill", x + size/2, y + size - 42, 15, math.pi, 2 * math.pi)
+        
+        -- Wooden door with iron bars
+        love.graphics.setColor(0.35, 0.25, 0.15, 1)
+        love.graphics.rectangle("fill", x + size/2 - 13, y + size - 38, 26, 38)
+        -- Iron bars
+        love.graphics.setColor(0.3, 0.3, 0.32, 1)
+        love.graphics.rectangle("fill", x + size/2 - 8, y + size - 35, 2, 32)
+        love.graphics.rectangle("fill", x + size/2 + 6, y + size - 35, 2, 32)
+        love.graphics.rectangle("fill", x + size/2 - 12, y + size - 25, 24, 2)
+        
+        -- Crossed swords emblem above door
+        love.graphics.setColor(0.7, 0.65, 0.55, 1)
         love.graphics.setLineWidth(3)
-        love.graphics.line(x + size/2 - 15, y + 35, x + size/2 + 15, y + 55)
-        love.graphics.line(x + size/2 + 15, y + 35, x + size/2 - 15, y + 55)
+        love.graphics.line(x + size/2 - 18, y + 38, x + size/2 + 18, y + 58)
+        love.graphics.line(x + size/2 + 18, y + 38, x + size/2 - 18, y + 58)
+        -- Sword handles
+        love.graphics.setColor(0.5, 0.35, 0.2, 1)
+        love.graphics.circle("fill", x + size/2 - 18, y + 38, 4)
+        love.graphics.circle("fill", x + size/2 + 18, y + 38, 4)
         
-        love.graphics.setColor(0.6, 0.3, 0.3, 1)
-        love.graphics.rectangle("fill", x + size/2 - 8, y + 38, 16, 20, 3)
+        -- Shield emblem
+        love.graphics.setColor(0.6, 0.15, 0.15, 1)
+        love.graphics.ellipse("fill", x + size/2, y + 48, 10, 12)
+        love.graphics.setColor(0.8, 0.7, 0.2, 1)
+        love.graphics.setLineWidth(2)
+        love.graphics.ellipse("line", x + size/2, y + 48, 10, 12)
+        
+        -- Training dummy on left side
+        love.graphics.setColor(0.6, 0.5, 0.35, 1)
+        love.graphics.rectangle("fill", x + 12, y + 60, 4, 30)  -- Post
+        love.graphics.setColor(0.7, 0.6, 0.4, 1)
+        love.graphics.ellipse("fill", x + 14, y + 55, 8, 10)  -- Head
+        love.graphics.rectangle("fill", x + 6, y + 65, 16, 4)  -- Arms
+        
+        -- Weapon rack on right side
+        love.graphics.setColor(0.5, 0.35, 0.2, 1)
+        love.graphics.rectangle("fill", x + size - 25, y + 55, 20, 4)
+        love.graphics.rectangle("fill", x + size - 25, y + 55, 3, 35)
+        love.graphics.rectangle("fill", x + size - 8, y + 55, 3, 35)
+        -- Swords on rack
+        love.graphics.setColor(0.6, 0.6, 0.65, 1)
+        love.graphics.rectangle("fill", x + size - 20, y + 45, 2, 20)
+        love.graphics.rectangle("fill", x + size - 14, y + 47, 2, 18)
+        
+        -- Torches
+        love.graphics.setColor(1, 0.6, 0.2, 0.9)
+        love.graphics.circle("fill", x + 25, y + 45, 4)
+        love.graphics.circle("fill", x + size - 25, y + 45, 4)
+        love.graphics.setColor(1, 0.8, 0.4, 0.4)
+        love.graphics.circle("fill", x + 25, y + 45, 7)
+        love.graphics.circle("fill", x + size - 25, y + 45, 7)
     end
     
-    love.graphics.setColor(0.25, 0.18, 0.12, 1)
-    love.graphics.setLineWidth(2)
-    love.graphics.rectangle("line", x, y, size, size, 6)
-    
+    -- Selection
     if self.selected then
         love.graphics.setColor(0, 1, 0, 0.8)
         love.graphics.setLineWidth(3)
-        love.graphics.rectangle("line", x - 3, y - 3, size + 6, size + 6, 8)
+        love.graphics.rectangle("line", x - 3, y - 3, size + 6, size + 6, 4)
     end
     
+    -- Production progress bar
     if self.completed and self.isProducing then
         local barW = size - 10
         local progress = self.productionTimer / Barracks.FOOTMAN_TIME
