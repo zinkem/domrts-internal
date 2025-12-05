@@ -7,6 +7,9 @@ local Map = require("map")
 local TownHall = require("townhall")
 local GoldMine = require("goldmine")
 local Peon = require("peon")
+local Farm = require("farm")
+local Barracks = require("barracks")
+local Footman = require("footman")
 
 local Gameplay = {}
 
@@ -19,11 +22,31 @@ local resources = {
     lumber = 400
 }
 
+-- Unit capacity
+local BASE_CAPACITY = 4
+local currentPop = 0
+local maxPop = BASE_CAPACITY
+
 local map = nil
 local townHall = nil
 local goldMines = {}
 local peons = {}
-local selectedEntity = nil
+local farms = {}
+local barracks = {}
+local footmen = {}
+local selectedEntities = {}  -- Support multiple selection
+
+-- Building placement
+local isPlacingBuilding = false
+local placingBuildingType = nil
+local placingPeon = nil
+local placementGridX, placementGridY = 0, 0
+local placementValid = false
+
+-- Box selection
+local isBoxSelecting = false
+local boxStartX, boxStartY = 0, 0
+local boxEndX, boxEndY = 0, 0
 
 -- UI Layout
 local UI = {
@@ -36,19 +59,59 @@ local UI = {
 
 local function checkAllMinesDepleted()
     for _, mine in ipairs(goldMines) do
-        if not mine.depleted then
-            return false
-        end
+        if not mine.depleted then return false end
     end
     return true
 end
 
+local function calculatePopulation()
+    currentPop = #peons + #footmen
+    maxPop = BASE_CAPACITY
+    for _, farm in ipairs(farms) do
+        if farm.completed then maxPop = maxPop + Farm.CAPACITY_BONUS end
+    end
+end
+
+local function getAllBuildings()
+    local buildings = {townHall}
+    for _, m in ipairs(goldMines) do table.insert(buildings, m) end
+    for _, f in ipairs(farms) do table.insert(buildings, f) end
+    for _, b in ipairs(barracks) do table.insert(buildings, b) end
+    return buildings
+end
+
+local function separateUnits()
+    local allUnits = {}
+    for _, p in ipairs(peons) do if p.visible then table.insert(allUnits, p) end end
+    for _, f in ipairs(footmen) do table.insert(allUnits, f) end
+    
+    for i = 1, #allUnits do
+        for j = i + 1, #allUnits do
+            local a, b = allUnits[i], allUnits[j]
+            local dx = b.worldX - a.worldX
+            local dy = b.worldY - a.worldY
+            local dist = math.sqrt(dx * dx + dy * dy)
+            local minDist = a.radius + b.radius
+            
+            if dist < minDist and dist > 0 then
+                local overlap = (minDist - dist) / 2
+                local nx, ny = dx / dist, dy / dist
+                a.worldX = a.worldX - nx * overlap
+                a.worldY = a.worldY - ny * overlap
+                b.worldX = b.worldX + nx * overlap
+                b.worldY = b.worldY + ny * overlap
+            elseif dist == 0 then
+                a.worldX = a.worldX + math.random() * 2 - 1
+                a.worldY = a.worldY + math.random() * 2 - 1
+            end
+        end
+    end
+end
+
 local function drawTopBar(screenW)
     local barHeight = 60
-    
     love.graphics.setColor(UI.panelColor)
     love.graphics.rectangle("fill", 0, 0, screenW, barHeight)
-    
     love.graphics.setColor(UI.panelBorder)
     love.graphics.setLineWidth(1)
     love.graphics.line(0, barHeight, screenW, barHeight)
@@ -59,19 +122,16 @@ local function drawTopBar(screenW)
     
     love.graphics.setFont(Game.fonts.small)
     love.graphics.setColor(0.5, 0.8, 0.5, 1)
-    love.graphics.print("WASD/Arrows to scroll | Deplete all mines to WIN!", 250, 22)
+    love.graphics.print("WASD/Arrows: scroll | Drag: box select | Deplete mines to WIN!", 250, 22)
     
     love.graphics.setColor(UI.textColor)
     love.graphics.print(string.format("Time: %02d:%02d", math.floor(elapsedTime/60), math.floor(elapsedTime%60)), screenW - 100, 22)
 end
 
 local function drawInfoPanel(startY, height)
-    local panelW = 200
-    local panelX = 10
-    
+    local panelW, panelX = 200, 10
     love.graphics.setColor(UI.panelColor)
     love.graphics.rectangle("fill", panelX, startY, panelW, height, 8)
-    
     love.graphics.setColor(UI.panelBorder)
     love.graphics.setLineWidth(2)
     love.graphics.rectangle("line", panelX, startY, panelW, height, 8)
@@ -87,37 +147,56 @@ local function drawInfoPanel(startY, height)
     love.graphics.print("Gold:", panelX + 20, y)
     love.graphics.setColor(UI.textColor)
     love.graphics.print(tostring(resources.gold), panelX + 100, y)
-    y = y + 25
+    y = y + 22
     
     love.graphics.setColor(0.6, 0.4, 0.2, 1)
     love.graphics.print("Lumber:", panelX + 20, y)
     love.graphics.setColor(UI.textColor)
     love.graphics.print(tostring(resources.lumber), panelX + 100, y)
-    y = y + 35
+    y = y + 30
     
     love.graphics.setColor(UI.accentColor)
+    love.graphics.print("Population:", panelX + 20, y)
+    love.graphics.setColor(currentPop >= maxPop and {1, 0.4, 0.4, 1} or UI.textColor)
+    love.graphics.print(currentPop .. "/" .. maxPop, panelX + 100, y)
+    y = y + 22
+    
+    love.graphics.setColor(0.3, 0.7, 0.3, 1)
     love.graphics.print("Peons:", panelX + 20, y)
     love.graphics.setColor(UI.textColor)
     love.graphics.print(tostring(#peons), panelX + 100, y)
-    y = y + 25
+    y = y + 22
+    
+    love.graphics.setColor(0.7, 0.3, 0.3, 1)
+    love.graphics.print("Footmen:", panelX + 20, y)
+    love.graphics.setColor(UI.textColor)
+    love.graphics.print(tostring(#footmen), panelX + 100, y)
+    y = y + 22
     
     love.graphics.setColor(UI.accentColor)
     love.graphics.print("Mines:", panelX + 20, y)
     local activeMines = 0
-    for _, m in ipairs(goldMines) do
-        if not m.depleted then activeMines = activeMines + 1 end
-    end
+    for _, m in ipairs(goldMines) do if not m.depleted then activeMines = activeMines + 1 end end
     love.graphics.setColor(UI.textColor)
     love.graphics.print(activeMines .. "/" .. #goldMines, panelX + 100, y)
+    y = y + 22
+    
+    love.graphics.setColor(0.5, 0.6, 0.3, 1)
+    love.graphics.print("Farms:", panelX + 20, y)
+    love.graphics.setColor(UI.textColor)
+    love.graphics.print(tostring(#farms), panelX + 100, y)
+    y = y + 22
+    
+    love.graphics.setColor(0.5, 0.3, 0.3, 1)
+    love.graphics.print("Barracks:", panelX + 20, y)
+    love.graphics.setColor(UI.textColor)
+    love.graphics.print(tostring(#barracks), panelX + 100, y)
 end
 
 local function drawRightPanel(screenW, startY, height)
-    local panelW = 170
-    local panelX = screenW - panelW - 10
-    
+    local panelW, panelX = 170, screenW - 180
     love.graphics.setColor(UI.panelColor)
     love.graphics.rectangle("fill", panelX, startY, panelW, height, 8)
-    
     love.graphics.setColor(UI.panelBorder)
     love.graphics.setLineWidth(2)
     love.graphics.rectangle("line", panelX, startY, panelW, height, 8)
@@ -129,37 +208,44 @@ local function drawRightPanel(screenW, startY, height)
     love.graphics.setFont(Game.fonts.small)
     love.graphics.setColor(UI.textColor)
     
-    if selectedEntity then
-        love.graphics.print("Name: " .. selectedEntity.name, panelX + 15, startY + 50)
-        love.graphics.print("Type: " .. selectedEntity.type, panelX + 15, startY + 75)
+    local selEntity = selectedEntities[1]
+    if selEntity then
+        love.graphics.print("Name: " .. selEntity.name, panelX + 15, startY + 50)
+        love.graphics.print("Type: " .. selEntity.type, panelX + 15, startY + 70)
         
-        if selectedEntity.type == "townhall" then
-            if selectedEntity.isProducing then
-                love.graphics.setColor(0.3, 0.8, 0.3, 1)
-                love.graphics.print("Training: " .. selectedEntity:getProductionProgress() .. "%", panelX + 15, startY + 100)
-            else
-                love.graphics.setColor(0.5, 0.5, 0.55, 1)
-                love.graphics.print("Ready", panelX + 15, startY + 100)
-            end
-        elseif selectedEntity.type == "goldmine" then
+        if #selectedEntities > 1 then
+            love.graphics.setColor(0.6, 0.8, 0.6, 1)
+            love.graphics.print("+" .. (#selectedEntities - 1) .. " more", panelX + 15, startY + 90)
+        elseif selEntity.type == "townhall" then
+            love.graphics.setColor(selEntity.isProducing and {0.3, 0.8, 0.3, 1} or {0.5, 0.5, 0.55, 1})
+            love.graphics.print(selEntity.isProducing and ("Training: " .. selEntity:getProductionProgress() .. "%") or "Ready", panelX + 15, startY + 95)
+        elseif selEntity.type == "goldmine" then
             love.graphics.setColor(1, 0.85, 0, 1)
-            love.graphics.print("Gold: " .. selectedEntity.goldReserves, panelX + 15, startY + 100)
-        elseif selectedEntity.type == "peon" then
+            love.graphics.print("Gold: " .. selEntity.goldReserves, panelX + 15, startY + 95)
+        elseif selEntity.type == "peon" then
             love.graphics.setColor(0.7, 0.8, 0.9, 1)
-            love.graphics.print("Status: " .. selectedEntity:getStateText(), panelX + 15, startY + 100)
-            if selectedEntity.carryingGold > 0 then
-                love.graphics.setColor(1, 0.85, 0, 1)
-                love.graphics.print("Carrying: " .. selectedEntity.carryingGold .. " gold", panelX + 15, startY + 120)
-            elseif selectedEntity.carryingLumber > 0 then
-                love.graphics.setColor(0.6, 0.4, 0.2, 1)
-                love.graphics.print("Carrying: " .. selectedEntity.carryingLumber .. " lumber", panelX + 15, startY + 120)
+            love.graphics.print("Status: " .. selEntity:getStateText(), panelX + 15, startY + 95)
+        elseif selEntity.type == "footman" then
+            love.graphics.setColor(0.8, 0.5, 0.5, 1)
+            love.graphics.print("Status: " .. selEntity:getStateText(), panelX + 15, startY + 95)
+        elseif selEntity.type == "farm" then
+            love.graphics.setColor(0.5, 0.7, 0.4, 1)
+            love.graphics.print(selEntity.completed and ("Capacity: +" .. Farm.CAPACITY_BONUS) or ("Building: " .. selEntity:getBuildProgress() .. "%"), panelX + 15, startY + 95)
+        elseif selEntity.type == "barracks" then
+            if selEntity.completed then
+                love.graphics.setColor(selEntity.isProducing and {0.8, 0.4, 0.4, 1} or {0.5, 0.5, 0.55, 1})
+                love.graphics.print(selEntity.isProducing and ("Training: " .. selEntity:getProductionProgress() .. "%") or "Ready", panelX + 15, startY + 95)
+            else
+                love.graphics.setColor(0.7, 0.7, 0.4, 1)
+                love.graphics.print("Building: " .. selEntity:getBuildProgress() .. "%", panelX + 15, startY + 95)
             end
         end
     else
         love.graphics.setColor(0.5, 0.5, 0.55, 1)
         love.graphics.print("Nothing selected", panelX + 15, startY + 50)
-        love.graphics.print("Left-click: select", panelX + 15, startY + 75)
-        love.graphics.print("Right-click: command", panelX + 15, startY + 95)
+        love.graphics.print("Left-click: select", panelX + 15, startY + 70)
+        love.graphics.print("Drag: box select", panelX + 15, startY + 90)
+        love.graphics.print("Right-click: command", panelX + 15, startY + 110)
     end
     
     -- Minimap
@@ -168,32 +254,25 @@ local function drawRightPanel(screenW, startY, height)
     love.graphics.setFont(Game.fonts.medium)
     love.graphics.print("Minimap", panelX + 15, minimapY)
     
-    local mmX = panelX + 10
-    local mmY = minimapY + 25
-    local mmSize = 150
+    local mmX, mmY, mmSize = panelX + 10, minimapY + 25, 150
     local mmScale = mmSize / map.width
     
     map:drawMinimap(mmX, mmY, mmSize)
-    
-    -- Draw entities on minimap
     townHall:drawOnMinimap(mmX, mmY, mmScale)
-    for _, mine in ipairs(goldMines) do
-        mine:drawOnMinimap(mmX, mmY, mmScale)
-    end
-    for _, peon in ipairs(peons) do
-        peon:drawOnMinimap(mmX, mmY, mmScale)
-    end
+    for _, m in ipairs(goldMines) do m:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, f in ipairs(farms) do f:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, b in ipairs(barracks) do b:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, p in ipairs(peons) do p:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, f in ipairs(footmen) do f:drawOnMinimap(mmX, mmY, mmScale) end
 end
 
 local function drawVictoryScreen()
     local screenW, screenH = love.graphics.getDimensions()
-    
     love.graphics.setColor(0, 0, 0, 0.7)
     love.graphics.rectangle("fill", 0, 0, screenW, screenH)
     
     local boxW, boxH = 400, 200
-    local boxX = (screenW - boxW) / 2
-    local boxY = (screenH - boxH) / 2
+    local boxX, boxY = (screenW - boxW) / 2, (screenH - boxH) / 2
     
     love.graphics.setColor(0.1, 0.25, 0.1, 1)
     love.graphics.rectangle("fill", boxX, boxY, boxW, boxH, 10)
@@ -203,21 +282,121 @@ local function drawVictoryScreen()
     
     love.graphics.setFont(Game.fonts.title)
     love.graphics.setColor(1, 0.85, 0, 1)
-    local title = "VICTORY!"
-    love.graphics.print(title, (screenW - Game.fonts.title:getWidth(title)) / 2, boxY + 30)
+    love.graphics.print("VICTORY!", (screenW - Game.fonts.title:getWidth("VICTORY!")) / 2, boxY + 30)
     
     love.graphics.setFont(Game.fonts.medium)
     love.graphics.setColor(1, 1, 1, 1)
-    local msg = "All gold mines depleted!"
-    love.graphics.print(msg, (screenW - Game.fonts.medium:getWidth(msg)) / 2, boxY + 100)
-    
-    local gold = "Final Gold: " .. resources.gold
-    love.graphics.print(gold, (screenW - Game.fonts.medium:getWidth(gold)) / 2, boxY + 130)
+    love.graphics.print("All gold mines depleted!", (screenW - Game.fonts.medium:getWidth("All gold mines depleted!")) / 2, boxY + 100)
+    love.graphics.print("Final Gold: " .. resources.gold, (screenW - Game.fonts.medium:getWidth("Final Gold: " .. resources.gold)) / 2, boxY + 130)
     
     love.graphics.setFont(Game.fonts.small)
     love.graphics.setColor(0.7, 0.7, 0.7, 1)
-    local hint = "Press SPACE to continue"
-    love.graphics.print(hint, (screenW - Game.fonts.small:getWidth(hint)) / 2, boxY + 165)
+    love.graphics.print("Press SPACE to continue", (screenW - Game.fonts.small:getWidth("Press SPACE to continue")) / 2, boxY + 165)
+end
+
+local function drawBuildingPlacement()
+    if not isPlacingBuilding then return end
+    
+    local mx, my = love.mouse.getPosition()
+    if not map:isInViewport(mx, my) then return end
+    
+    local worldX, worldY = map:screenToWorld(mx, my)
+    local gridX, gridY = map:worldToGrid(worldX, worldY)
+    local buildSize = placingBuildingType == "farm" and 2 or 3
+    
+    placementValid = map:isAreaClear(gridX, gridY, buildSize, buildSize)
+    placementGridX, placementGridY = gridX, gridY
+    
+    local screenX, screenY = map:worldToScreen(map:gridToWorld(gridX, gridY))
+    local pixelSize = buildSize * 32
+    
+    love.graphics.setColor(placementValid and {0, 1, 0, 0.4} or {1, 0, 0, 0.4})
+    love.graphics.rectangle("fill", screenX, screenY, pixelSize, pixelSize)
+    love.graphics.setColor(1, 1, 1, 0.8)
+    love.graphics.setLineWidth(2)
+    love.graphics.rectangle("line", screenX, screenY, pixelSize, pixelSize)
+    
+    love.graphics.setFont(Game.fonts.small)
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.print("Left-click to place " .. placingBuildingType .. " | Right-click to cancel", map.viewportX + 10, map.viewportY + map.viewportH - 25)
+end
+
+local function drawBoxSelection()
+    if not isBoxSelecting then return end
+    love.graphics.setColor(0, 1, 0, 0.2)
+    local x1, y1 = math.min(boxStartX, boxEndX), math.min(boxStartY, boxEndY)
+    local w, h = math.abs(boxEndX - boxStartX), math.abs(boxEndY - boxStartY)
+    love.graphics.rectangle("fill", x1, y1, w, h)
+    love.graphics.setColor(0, 1, 0, 0.8)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", x1, y1, w, h)
+end
+
+local function startBuildingPlacement(peon, buildingType)
+    isPlacingBuilding = true
+    placingBuildingType = buildingType
+    placingPeon = peon
+end
+
+local function cancelBuildingPlacement()
+    isPlacingBuilding = false
+    placingBuildingType = nil
+    placingPeon = nil
+end
+
+local function createBuilding(gridX, gridY, buildingType, peon)
+    if buildingType == "farm" then
+        local farm = Farm.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        farm.builderPeon = peon
+        table.insert(farms, farm)
+    elseif buildingType == "barracks" then
+        local barrack = Barracks.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        barrack.builderPeon = peon
+        table.insert(barracks, barrack)
+    end
+end
+
+local function findNearestTree(worldX, worldY)
+    local gridX, gridY = map:worldToGrid(worldX, worldY)
+    
+    -- If clicked tile is a tree, use it
+    if map:isTileTree(gridX, gridY) then
+        return gridX, gridY
+    end
+    
+    -- Search in expanding rings for nearest tree
+    for radius = 1, 15 do
+        local bestDist = math.huge
+        local bestX, bestY = nil, nil
+        
+        for dy = -radius, radius do
+            for dx = -radius, radius do
+                -- Only check tiles on the ring edge
+                if math.abs(dx) == radius or math.abs(dy) == radius then
+                    local tx, ty = gridX + dx, gridY + dy
+                    if map:isTileTree(tx, ty) then
+                        -- Calculate distance from original click
+                        local dist = dx * dx + dy * dy
+                        if dist < bestDist then
+                            bestDist = dist
+                            bestX, bestY = tx, ty
+                        end
+                    end
+                end
+            end
+        end
+        
+        if bestX then
+            return bestX, bestY
+        end
+    end
+    
+    return nil, nil
+end
+
+local function clearSelection()
+    for _, e in ipairs(selectedEntities) do e.selected = false end
+    selectedEntities = {}
 end
 
 function Gameplay.load()
@@ -228,61 +407,42 @@ function Gameplay.load()
     resources.gold = 1000
     resources.lumber = 400
     peons = {}
+    footmen = {}
+    farms = {}
+    barracks = {}
     goldMines = {}
-    selectedEntity = nil
+    selectedEntities = {}
+    isPlacingBuilding = false
+    isBoxSelecting = false
     
-    -- Create map (generates trees)
     map = Map.new()
+    map:setViewport(220, 70, screenW - 400, screenH - 90)
     
-    -- Set viewport (game area between panels)
-    local viewX = 220
-    local viewY = 70
-    local viewW = screenW - 400
-    local viewH = screenH - 90
-    map:setViewport(viewX, viewY, viewW, viewH)
-    
-    -- Find clear positions for buildings (after trees are generated)
-    local buildingSize = 3  -- All buildings are 3x3
-    
-    -- Place Town Hall near center-left of map
+    local buildingSize = 3
     local thGridX, thGridY = map:findClearArea(buildingSize, buildingSize, 10, 30, 15)
-    townHall = TownHall.new({
-        gridX = thGridX,
-        gridY = thGridY,
-        map = map
-    })
+    townHall = TownHall.new({gridX = thGridX, gridY = thGridY, map = map})
     
-    -- Place Mine 1: close to town hall (5 tiles diagonal)
     local m1X, m1Y = map:findClearArea(buildingSize, buildingSize, thGridX + 8, thGridY + 5, 10)
-    local mine1 = GoldMine.new({
-        gridX = m1X,
-        gridY = m1Y,
-        gold = 50000,
-        map = map
-    })
-    table.insert(goldMines, mine1)
+    table.insert(goldMines, GoldMine.new({gridX = m1X, gridY = m1Y, gold = 50000, map = map}))
     
-    -- Place Mine 2: Upper right quadrant
     local m2X, m2Y = map:findClearArea(buildingSize, buildingSize, 45, 12, 15)
-    local mine2 = GoldMine.new({
-        gridX = m2X,
-        gridY = m2Y,
-        gold = 75000,
-        map = map
-    })
-    table.insert(goldMines, mine2)
+    table.insert(goldMines, GoldMine.new({gridX = m2X, gridY = m2Y, gold = 75000, map = map}))
     
-    -- Place Mine 3: Lower right quadrant
     local m3X, m3Y = map:findClearArea(buildingSize, buildingSize, 50, 50, 15)
-    local mine3 = GoldMine.new({
-        gridX = m3X,
-        gridY = m3Y,
-        gold = 100000,
-        map = map
-    })
-    table.insert(goldMines, mine3)
+    table.insert(goldMines, GoldMine.new({gridX = m3X, gridY = m3Y, gold = 100000, map = map}))
     
-    -- Center camera on town hall
+    -- Spawn 3 starting peons (away from town hall)
+    local spawnX, spawnY = townHall:getSpawnPos()
+    for i = 1, 3 do
+        table.insert(peons, Peon.new({
+            worldX = spawnX + (i - 1) * 35,
+            worldY = spawnY + (i - 2) * 30,
+            map = map
+        }))
+    end
+    
+    calculatePopulation()
+    
     local thCenterX, thCenterY = townHall:getWorldCenter()
     map:centerOn(thCenterX, thCenterY)
 end
@@ -291,45 +451,72 @@ function Gameplay.update(dt)
     if victory then return end
     
     elapsedTime = elapsedTime + dt
-    
-    -- Update map (scrolling)
     map:update(dt)
+    calculatePopulation()
     
-    -- Update town hall
-    if townHall:update(dt) then
-        -- Spawn peon
+    local buildings = getAllBuildings()
+    
+    -- Town hall
+    if townHall:update(dt) and currentPop < maxPop then
         local spawnX, spawnY = townHall:getSpawnPos()
-        local peon = Peon.new({
-            worldX = spawnX,
-            worldY = spawnY,
-            map = map
-        })
-        table.insert(peons, peon)
+        table.insert(peons, Peon.new({worldX = spawnX, worldY = spawnY, map = map}))
+        calculatePopulation()
     end
     
-    -- Update gold mines
-    for _, mine in ipairs(goldMines) do
-        mine:update(dt)
+    -- Gold mines
+    for _, mine in ipairs(goldMines) do mine:update(dt) end
+    
+    -- Farms
+    for _, farm in ipairs(farms) do
+        if farm:update(dt) and farm.builderPeon then
+            farm.builderPeon:finishBuilding()
+            farm.builderPeon = nil
+            calculatePopulation()
+        end
     end
     
-    -- Update peons
+    -- Barracks
+    for _, barrack in ipairs(barracks) do
+        local footmanReady, buildComplete = barrack:update(dt)
+        if buildComplete and barrack.builderPeon then
+            barrack.builderPeon:finishBuilding()
+            barrack.builderPeon = nil
+        end
+        if footmanReady and currentPop < maxPop then
+            local spawnX, spawnY = barrack:getSpawnPos()
+            table.insert(footmen, Footman.new({worldX = spawnX, worldY = spawnY, map = map}))
+            calculatePopulation()
+        end
+    end
+    
+    -- Peons
     for _, peon in ipairs(peons) do
-        local goldDep, lumberDep = peon:update(dt, townHall)
-        if goldDep > 0 then
-            resources.gold = resources.gold + goldDep
-        end
-        if lumberDep > 0 then
-            resources.lumber = resources.lumber + lumberDep
-        end
+        local goldDep, lumberDep = peon:update(dt, townHall, buildings)
+        resources.gold = resources.gold + goldDep
+        resources.lumber = resources.lumber + lumberDep
     end
+    
+    -- Footmen
+    for _, footman in ipairs(footmen) do
+        footman:update(dt, buildings)
+    end
+    
+    -- Separate overlapping units
+    separateUnits()
     
     -- Update selected entity UI
     local screenW, screenH = love.graphics.getDimensions()
-    if selectedEntity and selectedEntity.updateUI then
-        selectedEntity:updateUI(resources, screenW, screenH, Game.fonts.small)
+    local selEntity = selectedEntities[1]
+    if selEntity and selEntity.updateUI then
+        if selEntity.type == "peon" then
+            selEntity:updateUI(resources, screenW, screenH, Game.fonts.small, startBuildingPlacement)
+        elseif selEntity.type == "townhall" or selEntity.type == "barracks" then
+            selEntity:updateUI(resources, screenW, screenH, Game.fonts.small, currentPop, maxPop)
+        else
+            selEntity:updateUI(resources, screenW, screenH, Game.fonts.small)
+        end
     end
     
-    -- Check victory
     if checkAllMinesDepleted() then
         victory = true
         Game.finalTime = elapsedTime
@@ -339,56 +526,48 @@ end
 function Gameplay.draw()
     local screenW, screenH = love.graphics.getDimensions()
     
-    -- Background
     love.graphics.setColor(UI.panelColor)
     love.graphics.rectangle("fill", 0, 0, screenW, screenH)
     
-    -- Draw map (tiles)
     map:draw()
     
-    -- Draw entities (with scissor still active from map)
     love.graphics.setScissor(map.viewportX, map.viewportY, map.viewportW, map.viewportH)
     
+    for _, farm in ipairs(farms) do farm:draw() end
+    for _, barrack in ipairs(barracks) do barrack:draw() end
     townHall:draw()
-    for _, mine in ipairs(goldMines) do
-        mine:draw()
-    end
-    for _, peon in ipairs(peons) do
-        peon:draw()
-    end
+    for _, mine in ipairs(goldMines) do mine:draw() end
+    for _, peon in ipairs(peons) do peon:draw() end
+    for _, footman in ipairs(footmen) do footman:draw() end
+    
+    drawBuildingPlacement()
+    drawBoxSelection()
     
     love.graphics.setScissor()
     
-    -- Draw UI panels
     drawTopBar(screenW)
     drawInfoPanel(70, screenH - 90)
     drawRightPanel(screenW, 70, screenH - 90)
     
-    -- Draw entity action buttons
-    if selectedEntity and selectedEntity.drawUI then
-        selectedEntity:drawUI()
-    end
+    local selEntity = selectedEntities[1]
+    if selEntity and selEntity.drawUI then selEntity:drawUI() end
     
-    -- Victory overlay
-    if victory then
-        drawVictoryScreen()
-    end
+    if victory then drawVictoryScreen() end
     
     love.graphics.setColor(1, 1, 1, 1)
 end
 
 function Gameplay.keypressed(key)
     if victory then
-        if key == "space" or key == "return" then
-            Game.SceneManager.switch("victory")
-        end
+        if key == "space" or key == "return" then Game.SceneManager.switch("victory") end
         return
     end
     
     if key == "escape" then
-        if selectedEntity then
-            selectedEntity.selected = false
-            selectedEntity = nil
+        if isPlacingBuilding then
+            cancelBuildingPlacement()
+        else
+            clearSelection()
         end
     end
 end
@@ -396,105 +575,194 @@ end
 function Gameplay.mousepressed(x, y, button)
     if victory then return end
     
-    -- Handle entity UI clicks
-    if selectedEntity and selectedEntity.mousepressed then
-        selectedEntity:mousepressed(x, y, button)
-    end
-    
-    -- Check minimap click first
-    if button == 1 and map:minimapClick(x, y) then
+    -- Building placement
+    if isPlacingBuilding then
+        if button == 1 and placementValid and map:isInViewport(x, y) then
+            if placingBuildingType == "farm" then
+                resources.gold = resources.gold - Farm.COST_GOLD
+                resources.lumber = resources.lumber - Farm.COST_LUMBER
+            else
+                resources.gold = resources.gold - Barracks.COST_GOLD
+                resources.lumber = resources.lumber - Barracks.COST_LUMBER
+            end
+            placingPeon:goToBuild(placementGridX, placementGridY, placingBuildingType, createBuilding)
+            cancelBuildingPlacement()
+            return
+        elseif button == 2 then
+            cancelBuildingPlacement()
+            return
+        end
         return
     end
     
-    -- Check if click is in viewport
-    if not map:isInViewport(x, y) then
-        return
-    end
+    -- Entity UI clicks
+    local selEntity = selectedEntities[1]
+    if selEntity and selEntity.mousepressed then selEntity:mousepressed(x, y, button) end
+    
+    -- Minimap
+    if button == 1 and map:minimapClick(x, y) then return end
+    
+    if not map:isInViewport(x, y) then return end
     
     if button == 1 then
-        handleLeftClick(x, y)
+        -- Start box selection
+        isBoxSelecting = true
+        boxStartX, boxStartY = x, y
+        boxEndX, boxEndY = x, y
     elseif button == 2 then
         handleRightClick(x, y)
     end
 end
 
-function handleLeftClick(x, y)
-    -- Deselect current
-    if selectedEntity then
-        selectedEntity.selected = false
-        selectedEntity = nil
+function Gameplay.mousemoved(x, y, dx, dy)
+    if isBoxSelecting then
+        boxEndX, boxEndY = x, y
     end
+end
+
+function Gameplay.mousereleased(x, y, button)
+    local selEntity = selectedEntities[1]
+    if selEntity and selEntity.mousereleased then selEntity:mousereleased(x, y, button) end
     
-    -- Check peons first
+    if button == 1 and isBoxSelecting then
+        isBoxSelecting = false
+        
+        local boxW = math.abs(boxEndX - boxStartX)
+        local boxH = math.abs(boxEndY - boxStartY)
+        
+        if boxW < 5 and boxH < 5 then
+            -- Single click
+            handleLeftClick(x, y)
+        else
+            -- Box selection
+            clearSelection()
+            
+            -- Select units in box (peons and footmen only)
+            for _, peon in ipairs(peons) do
+                if peon:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
+                    peon.selected = true
+                    table.insert(selectedEntities, peon)
+                end
+            end
+            for _, footman in ipairs(footmen) do
+                if footman:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
+                    footman.selected = true
+                    table.insert(selectedEntities, footman)
+                end
+            end
+        end
+    end
+end
+
+function handleLeftClick(x, y)
+    clearSelection()
+    
+    -- Check peons
     for _, peon in ipairs(peons) do
         if peon.visible and peon:containsPoint(x, y) then
             peon.selected = true
-            selectedEntity = peon
+            table.insert(selectedEntities, peon)
             return
         end
     end
     
-    -- Check town hall
+    -- Check footmen
+    for _, footman in ipairs(footmen) do
+        if footman:containsPoint(x, y) then
+            footman.selected = true
+            table.insert(selectedEntities, footman)
+            return
+        end
+    end
+    
+    -- Check buildings
     if townHall:containsPoint(x, y) then
         townHall.selected = true
-        selectedEntity = townHall
+        table.insert(selectedEntities, townHall)
         return
     end
     
-    -- Check gold mines
+    for _, barrack in ipairs(barracks) do
+        if barrack:containsPoint(x, y) then
+            barrack.selected = true
+            table.insert(selectedEntities, barrack)
+            return
+        end
+    end
+    
+    for _, farm in ipairs(farms) do
+        if farm:containsPoint(x, y) then
+            farm.selected = true
+            table.insert(selectedEntities, farm)
+            return
+        end
+    end
+    
     for _, mine in ipairs(goldMines) do
         if mine:containsPoint(x, y) then
             mine.selected = true
-            selectedEntity = mine
+            table.insert(selectedEntities, mine)
             return
         end
     end
 end
 
 function handleRightClick(x, y)
-    if not selectedEntity or selectedEntity.type ~= "peon" then
-        return
-    end
+    if #selectedEntities == 0 then return end
     
-    local peon = selectedEntity
-    
-    -- Convert screen to world coords for move target
     local worldX, worldY = map:screenToWorld(x, y)
     
-    -- Check if clicking on a gold mine
-    for _, mine in ipairs(goldMines) do
-        if mine:containsPoint(x, y) and not mine.depleted then
-            peon:goToMine(mine)
-            return
+    -- Command all selected units
+    for _, entity in ipairs(selectedEntities) do
+        if entity.type == "peon" then
+            local peon = entity
+            
+            -- Check mine
+            for _, mine in ipairs(goldMines) do
+                if mine:containsPoint(x, y) and not mine.depleted then
+                    peon:goToMine(mine)
+                    goto continue
+                end
+            end
+            
+            -- Check town hall
+            if townHall:containsPoint(x, y) then
+                if peon.carryingGold > 0 or peon.carryingLumber > 0 then
+                    peon.state = Peon.STATE_RETURNING
+                else
+                    peon:moveTo(worldX, worldY)
+                end
+                goto continue
+            end
+            
+            -- Check for tree - find nearest tree to click point
+            local treeX, treeY = findNearestTree(worldX, worldY)
+            if treeX then
+                peon:goToTree(treeX, treeY)
+                goto continue
+            end
+            
+            -- Move (only if passable and not clicking on a building)
+            local clickedOnBuilding = false
+            for _, farm in ipairs(farms) do
+                if farm:containsPoint(x, y) then clickedOnBuilding = true break end
+            end
+            for _, barrack in ipairs(barracks) do
+                if barrack:containsPoint(x, y) then clickedOnBuilding = true break end
+            end
+            
+            if not clickedOnBuilding and map:isWorldPosPassable(worldX, worldY) then
+                peon:moveTo(worldX, worldY)
+            end
+            
+        elseif entity.type == "footman" then
+            -- Footmen can only move, not interact with buildings
+            if map:isWorldPosPassable(worldX, worldY) then
+                entity:moveTo(worldX, worldY)
+            end
         end
-    end
-    
-    -- Check if clicking on town hall
-    if townHall:containsPoint(x, y) then
-        if peon.carryingGold > 0 or peon.carryingLumber > 0 then
-            peon.state = Peon.STATE_RETURNING
-        else
-            peon:moveTo(worldX, worldY)
-        end
-        return
-    end
-    
-    -- Check if clicking on a tree
-    local gridX, gridY = map:worldToGrid(worldX, worldY)
-    if map:isTileTree(gridX, gridY) then
-        peon:goToTree(gridX, gridY)
-        return
-    end
-    
-    -- Move to location (only if passable)
-    if map:isWorldPosPassable(worldX, worldY) then
-        peon:moveTo(worldX, worldY)
-    end
-end
-
-function Gameplay.mousereleased(x, y, button)
-    if selectedEntity and selectedEntity.mousereleased then
-        selectedEntity:mousereleased(x, y, button)
+        
+        ::continue::
     end
 end
 
