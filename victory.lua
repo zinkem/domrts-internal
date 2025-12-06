@@ -1,220 +1,306 @@
 --[[
-    Victory Scene
-    Displays the player's winning time and options to continue
+    Victory Screen
+    Medieval stone-themed victory/results screen
 ]]
-
-local Button = require("button")
 
 local Victory = {}
 
-local playAgainButton
-local mainMenuButton
-
-local celebrationTime = 0
-local stars = {}
-local starCount = 30
-
-local colors = {
-    background = {0.05, 0.08, 0.12},
-    title = {1, 0.85, 0.3},
-    score = {0.9, 0.9, 0.95},
-    scoreLabel = {0.6, 0.7, 0.8}
+-- UI colors (same as main game)
+local UI = {
+    stoneLight = {0.32, 0.30, 0.26, 1},
+    stoneMid = {0.20, 0.18, 0.16, 1},
+    stoneDark = {0.10, 0.09, 0.08, 1},
+    stoneHighlight = {0.48, 0.44, 0.38, 1},
+    stoneShadow = {0.05, 0.04, 0.03, 1},
+    metalGold = {0.72, 0.58, 0.26, 1},
+    metalGoldLight = {0.88, 0.72, 0.42, 1},
+    metalBronze = {0.50, 0.38, 0.20, 1},
+    metalBronzeLight = {0.65, 0.50, 0.30, 1},
+    metalBronzeDark = {0.30, 0.22, 0.10, 1},
+    textLight = {0.92, 0.88, 0.80, 1},
+    textGold = {1, 0.82, 0.25, 1},
 }
 
-local function createStar()
-    local screenW, screenH = love.graphics.getDimensions()
-    return {
-        x = math.random(0, screenW),
-        y = math.random(0, screenH),
-        size = math.random(2, 5),
-        speed = math.random(50, 150),
-        angle = math.random() * math.pi * 2,
-        rotSpeed = (math.random() - 0.5) * 4,
-        alpha = math.random(50, 100) / 100,
-        color = {
-            math.random(80, 100) / 100,
-            math.random(70, 90) / 100,
-            math.random(20, 50) / 100
-        }
-    }
+-- Hash function for procedural effects
+local function hash(a, b)
+    local h = (a * 374761393 + b * 668265263) % 2147483647
+    h = ((h * 1274126177) % 2147483647)
+    return (h % 1000) / 1000
 end
 
-local function drawStar(x, y, innerRadius, outerRadius, points)
-    local vertices = {}
-    for i = 0, points * 2 - 1 do
-        local angle = (i * math.pi / points) - math.pi / 2
-        local radius = i % 2 == 0 and outerRadius or innerRadius
-        table.insert(vertices, x + math.cos(angle) * radius)
-        table.insert(vertices, y + math.sin(angle) * radius)
+local animTimer = 0
+local particles = {}
+
+-- Draw stone panel
+local function drawStonePanel(x, y, w, h, cornerRadius)
+    cornerRadius = cornerRadius or 6
+    
+    -- Drop shadow
+    love.graphics.setColor(0, 0, 0, 0.5)
+    love.graphics.rectangle("fill", x + 5, y + 5, w, h, cornerRadius)
+    
+    -- Main panel with gradient
+    for i = 0, h - 1 do
+        local t = i / h
+        local r = UI.stoneMid[1] * (1 - t * 0.25)
+        local g = UI.stoneMid[2] * (1 - t * 0.25)
+        local b = UI.stoneMid[3] * (1 - t * 0.25)
+        love.graphics.setColor(r, g, b, 1)
+        love.graphics.rectangle("fill", x, y + i, w, 1, i == 0 and cornerRadius or 0)
     end
-    if #vertices >= 6 then
-        love.graphics.polygon("fill", vertices)
+    
+    -- Stone texture
+    local numBlotches = math.floor(w * h / 600)
+    for i = 1, numBlotches do
+        local bx = x + hash(i, 1) * w
+        local by = y + hash(1, i) * h
+        local bsize = 6 + hash(i, i) * 12
+        local colorVar = (hash(i * 3, i * 5) - 0.5) * 0.05
+        
+        love.graphics.setColor(UI.stoneMid[1] + colorVar, UI.stoneMid[2] + colorVar, UI.stoneMid[3] + colorVar, 0.12)
+        love.graphics.ellipse("fill", bx, by, bsize, bsize * 0.6)
     end
+    
+    -- Cracks
+    local numCracks = 2 + math.floor(hash(w, 1) * 3)
+    for c = 1, numCracks do
+        local cx = x + 15 + hash(c, 100) * (w - 30)
+        local cy = y + 15 + hash(100, c) * (h - 30)
+        local angle = hash(c, 101) * math.pi * 2
+        local length = 8 + hash(c, 102) * 15
+        
+        love.graphics.setColor(0, 0, 0, 0.15)
+        love.graphics.setLineWidth(1)
+        local px, py = cx, cy
+        for s = 1, math.floor(length / 4) do
+            angle = angle + (hash(c * s, s) - 0.5) * 0.5
+            local nx = px + math.cos(angle) * 4
+            local ny = py + math.sin(angle) * 3
+            if nx > x + 8 and nx < x + w - 8 and ny > y + 8 and ny < y + h - 8 then
+                love.graphics.line(px, py, nx, ny)
+                px, py = nx, ny
+            end
+        end
+    end
+    
+    -- Beveled border
+    love.graphics.setColor(UI.stoneHighlight[1], UI.stoneHighlight[2], UI.stoneHighlight[3], 0.4)
+    love.graphics.setLineWidth(2)
+    love.graphics.line(x + cornerRadius, y + 1, x + w - cornerRadius, y + 1)
+    love.graphics.line(x + 1, y + cornerRadius, x + 1, y + h - cornerRadius)
+    
+    love.graphics.setColor(UI.stoneShadow[1], UI.stoneShadow[2], UI.stoneShadow[3], 0.6)
+    love.graphics.line(x + cornerRadius, y + h - 1, x + w - cornerRadius, y + h - 1)
+    love.graphics.line(x + w - 1, y + cornerRadius, x + w - 1, y + h - cornerRadius)
+    
+    -- Metal trim
+    love.graphics.setColor(UI.metalBronze)
+    love.graphics.rectangle("fill", x, y + h - 5, w, 5)
+    love.graphics.setColor(UI.metalBronzeLight[1], UI.metalBronzeLight[2], UI.metalBronzeLight[3], 0.5)
+    love.graphics.rectangle("fill", x, y + h - 5, w, 1)
 end
 
-local function formatTime(seconds)
-    local mins = math.floor(seconds / 60)
-    local secs = math.floor(seconds % 60)
-    local ms = math.floor((seconds % 1) * 1000)
-    return string.format("%02d:%02d.%03d", mins, secs, ms)
+-- Draw rivet
+local function drawRivet(cx, cy, radius)
+    love.graphics.setColor(UI.metalGold)
+    love.graphics.circle("fill", cx, cy, radius)
+    love.graphics.setColor(UI.metalGoldLight[1], UI.metalGoldLight[2], UI.metalGoldLight[3], 0.7)
+    love.graphics.circle("fill", cx - radius * 0.3, cy - radius * 0.3, radius * 0.4)
+    love.graphics.setColor(0, 0, 0, 0.3)
+    love.graphics.arc("fill", cx, cy, radius * 0.8, math.pi * 0.3, math.pi * 0.7)
 end
 
-local function getPerformanceMessage(seconds)
-    if seconds < 1 then
-        return "Lightning Fast!"
-    elseif seconds < 3 then
-        return "Speed Demon!"
-    elseif seconds < 5 then
-        return "Quick Clicker!"
-    elseif seconds < 10 then
-        return "Nice Work!"
-    else
-        return "You took your time!"
-    end
+-- Spawn celebration particle
+local function spawnParticle(x, y)
+    table.insert(particles, {
+        x = x,
+        y = y,
+        vx = (math.random() - 0.5) * 100,
+        vy = -50 - math.random() * 100,
+        size = 2 + math.random() * 3,
+        life = 1.5 + math.random(),
+        maxLife = 1.5 + math.random(),
+        color = math.random() > 0.5 and "gold" or "orange"
+    })
 end
 
 function Victory.load()
+    animTimer = 0
+    particles = {}
+    
+    -- Spawn initial celebration particles
     local screenW, screenH = love.graphics.getDimensions()
-    
-    celebrationTime = 0
-    
-    stars = {}
-    for i = 1, starCount do
-        table.insert(stars, createStar())
+    for i = 1, 30 do
+        spawnParticle(screenW / 2 + (math.random() - 0.5) * 200, screenH / 2)
     end
-    
-    local buttonWidth = 220
-    local buttonHeight = 50
-    local centerX = (screenW - buttonWidth) / 2
-    
-    playAgainButton = Button.new({
-        x = centerX,
-        y = screenH / 2 + 100,
-        width = buttonWidth,
-        height = buttonHeight,
-        text = "Play Again",
-        font = Game.fonts.medium,
-        colors = {
-            normal = {0.3, 0.6, 0.4, 1},
-            hover = {0.4, 0.7, 0.5, 1},
-            pressed = {0.2, 0.5, 0.3, 1},
-            text = {1, 1, 1, 1},
-            border = {0.2, 0.4, 0.3, 1}
-        },
-        onClick = function()
-            Game.SceneManager.switch("gameplay")
-        end
-    })
-    
-    mainMenuButton = Button.new({
-        x = centerX,
-        y = screenH / 2 + 170,
-        width = buttonWidth,
-        height = buttonHeight,
-        text = "Main Menu",
-        font = Game.fonts.medium,
-        onClick = function()
-            Game.SceneManager.switch("title")
-        end
-    })
 end
 
 function Victory.update(dt)
-    celebrationTime = celebrationTime + dt
+    animTimer = animTimer + dt
     
+    -- Spawn more particles occasionally
     local screenW, screenH = love.graphics.getDimensions()
-    
-    for i, star in ipairs(stars) do
-        star.x = star.x + math.cos(star.angle) * star.speed * dt
-        star.y = star.y + math.sin(star.angle) * star.speed * dt
-        star.angle = star.angle + star.rotSpeed * dt
-        
-        if star.x < -20 then star.x = screenW + 20 end
-        if star.x > screenW + 20 then star.x = -20 end
-        if star.y < -20 then star.y = screenH + 20 end
-        if star.y > screenH + 20 then star.y = -20 end
+    if math.random() < dt * 5 then
+        spawnParticle(screenW / 2 + (math.random() - 0.5) * 300, screenH / 2 + 50)
     end
     
-    playAgainButton:update(dt)
-    mainMenuButton:update(dt)
+    -- Update particles
+    for i = #particles, 1, -1 do
+        local p = particles[i]
+        p.x = p.x + p.vx * dt
+        p.y = p.y + p.vy * dt
+        p.vy = p.vy + 100 * dt  -- Gravity
+        p.life = p.life - dt
+        
+        if p.life <= 0 then
+            table.remove(particles, i)
+        end
+    end
 end
 
 function Victory.draw()
     local screenW, screenH = love.graphics.getDimensions()
     
-    love.graphics.setBackgroundColor(colors.background)
-    love.graphics.clear(colors.background)
+    -- Dark overlay
+    love.graphics.setColor(0, 0, 0, 0.85)
+    love.graphics.rectangle("fill", 0, 0, screenW, screenH)
     
-    for i, star in ipairs(stars) do
-        love.graphics.push()
-        love.graphics.translate(star.x, star.y)
-        love.graphics.rotate(star.angle)
-        love.graphics.setColor(star.color[1], star.color[2], star.color[3], star.alpha)
-        drawStar(0, 0, star.size, star.size * 2, 5)
-        love.graphics.pop()
+    -- Background texture
+    for i = 1, 30 do
+        local px = hash(i, 1) * screenW
+        local py = hash(1, i) * screenH
+        local size = 10 + hash(i, i) * 30
+        love.graphics.setColor(UI.stoneLight[1], UI.stoneLight[2], UI.stoneLight[3], 0.03)
+        love.graphics.ellipse("fill", px, py, size, size * 0.7)
     end
     
-    love.graphics.setFont(Game.fonts.title)
-    local titleScale = 1 + math.sin(celebrationTime * 3) * 0.05
+    -- Particles (behind panel)
+    for _, p in ipairs(particles) do
+        local alpha = (p.life / p.maxLife) * 0.8
+        if p.color == "gold" then
+            love.graphics.setColor(1, 0.85, 0.2, alpha)
+        else
+            love.graphics.setColor(1, 0.5, 0.1, alpha)
+        end
+        love.graphics.circle("fill", p.x, p.y, p.size)
+    end
+    
+    -- Main panel
+    local panelW, panelH = 480, 380
+    local panelX = (screenW - panelW) / 2
+    local panelY = (screenH - panelH) / 2
+    
+    drawStonePanel(panelX, panelY, panelW, panelH, 10)
+    
+    -- Corner rivets
+    local rivetOffset = 15
+    drawRivet(panelX + rivetOffset, panelY + rivetOffset, 5)
+    drawRivet(panelX + panelW - rivetOffset, panelY + rivetOffset, 5)
+    drawRivet(panelX + rivetOffset, panelY + panelH - rivetOffset, 5)
+    drawRivet(panelX + panelW - rivetOffset, panelY + panelH - rivetOffset, 5)
+    
+    -- Victory title with glow
+    local titleFont = Game.fonts and Game.fonts.title or love.graphics.getFont()
+    love.graphics.setFont(titleFont)
+    
     local title = "VICTORY!"
-    local titleWidth = Game.fonts.title:getWidth(title)
-    local titleX = screenW / 2
-    local titleY = screenH / 4
+    local titleW = titleFont:getWidth(title)
+    local titleX = (screenW - titleW) / 2
+    local titleY = panelY + 25
     
-    love.graphics.setColor(1, 0.8, 0.2, 0.3)
-    love.graphics.push()
-    love.graphics.translate(titleX, titleY)
-    love.graphics.scale(titleScale * 1.1, titleScale * 1.1)
-    love.graphics.print(title, -titleWidth / 2, -Game.fonts.title:getHeight() / 2)
-    love.graphics.pop()
+    -- Title glow (pulsing)
+    local glowPulse = 0.6 + math.sin(animTimer * 3) * 0.4
+    love.graphics.setColor(1, 0.85, 0.2, 0.3 * glowPulse)
+    for dx = -3, 3 do
+        for dy = -3, 3 do
+            if dx ~= 0 or dy ~= 0 then
+                love.graphics.print(title, titleX + dx, titleY + dy)
+            end
+        end
+    end
     
-    love.graphics.setColor(colors.title)
-    love.graphics.push()
-    love.graphics.translate(titleX, titleY)
-    love.graphics.scale(titleScale, titleScale)
-    love.graphics.print(title, -titleWidth / 2, -Game.fonts.title:getHeight() / 2)
-    love.graphics.pop()
+    -- Title shadow
+    love.graphics.setColor(0, 0, 0, 0.5)
+    love.graphics.print(title, titleX + 3, titleY + 3)
     
-    love.graphics.setFont(Game.fonts.medium)
-    love.graphics.setColor(colors.scoreLabel)
-    local scoreLabel = "Your Time:"
-    local scoreLabelWidth = Game.fonts.medium:getWidth(scoreLabel)
-    love.graphics.print(scoreLabel, (screenW - scoreLabelWidth) / 2, screenH / 2 - 30)
+    -- Title main
+    love.graphics.setColor(1, 0.85, 0.2, 1)
+    love.graphics.print(title, titleX, titleY)
     
-    love.graphics.setFont(Game.fonts.large)
-    love.graphics.setColor(colors.score)
-    local timeStr = formatTime(Game.finalTime or 0)
-    local timeWidth = Game.fonts.large:getWidth(timeStr)
-    love.graphics.print(timeStr, (screenW - timeWidth) / 2, screenH / 2 + 10)
+    -- Subtitle
+    local medFont = Game.fonts and Game.fonts.medium or love.graphics.getFont()
+    love.graphics.setFont(medFont)
+    local subtitle = "All enemy buildings destroyed!"
+    local subtitleW = medFont:getWidth(subtitle)
     
-    love.graphics.setFont(Game.fonts.medium)
-    local performanceMsg = getPerformanceMessage(Game.finalTime or 0)
-    love.graphics.setColor(0.7, 0.8, 0.9, 0.8 + math.sin(celebrationTime * 2) * 0.2)
-    local msgWidth = Game.fonts.medium:getWidth(performanceMsg)
-    love.graphics.print(performanceMsg, (screenW - msgWidth) / 2, screenH / 2 + 60)
+    love.graphics.setColor(UI.textLight)
+    love.graphics.print(subtitle, (screenW - subtitleW) / 2, titleY + 75)
     
-    playAgainButton:draw()
-    mainMenuButton:draw()
+    -- Decorative line
+    love.graphics.setColor(UI.metalBronze)
+    love.graphics.setLineWidth(2)
+    local lineY = titleY + 110
+    love.graphics.line(panelX + 40, lineY, panelX + panelW - 40, lineY)
+    drawRivet(panelX + 40, lineY, 3)
+    drawRivet(panelX + panelW - 40, lineY, 3)
     
-    love.graphics.setColor(1, 1, 1, 1)
+    -- Stats
+    local smallFont = Game.fonts and Game.fonts.small or love.graphics.getFont()
+    love.graphics.setFont(smallFont)
+    
+    local statsY = lineY + 20
+    local lineHeight = 26
+    local leftX = panelX + 50
+    local rightX = panelX + panelW / 2 + 20
+    
+    -- Time
+    local finalTime = Game.finalTime or 0
+    local minutes = math.floor(finalTime / 60)
+    local seconds = math.floor(finalTime % 60)
+    local timeStr = string.format("Time: %d:%02d", minutes, seconds)
+    
+    love.graphics.setColor(UI.textLight)
+    love.graphics.print(timeStr, leftX, statsY)
+    
+    -- Stats from Game (if available)
+    local stats = Game.gameStats or {
+        unitsKilled = 0,
+        unitsLost = 0,
+        buildingsDestroyed = 0,
+        buildingsLost = 0
+    }
+    
+    love.graphics.setColor(UI.textLight[1], UI.textLight[2], UI.textLight[3], 0.9)
+    love.graphics.print("Units Killed: " .. (stats.unitsKilled or 0), leftX, statsY + lineHeight)
+    love.graphics.print("Units Lost: " .. (stats.unitsLost or 0), leftX, statsY + lineHeight * 2)
+    love.graphics.print("Buildings Destroyed: " .. (stats.buildingsDestroyed or 0), leftX, statsY + lineHeight * 3)
+    love.graphics.print("Buildings Lost: " .. (stats.buildingsLost or 0), leftX, statsY + lineHeight * 4)
+    
+    -- Resources
+    local resources = Game.finalResources or {gold = 0, lumber = 0}
+    love.graphics.setColor(1, 0.85, 0.3, 1)
+    love.graphics.print("Final Gold: " .. (resources.gold or 0), rightX, statsY + lineHeight)
+    love.graphics.setColor(0.65, 0.5, 0.3, 1)
+    love.graphics.print("Final Lumber: " .. (resources.lumber or 0), rightX, statsY + lineHeight * 2)
+    
+    -- Continue prompt (pulsing)
+    local promptAlpha = 0.5 + math.sin(animTimer * 2) * 0.3
+    love.graphics.setColor(UI.textLight[1], UI.textLight[2], UI.textLight[3], promptAlpha)
+    local prompt = "Press SPACE to return to title"
+    local promptW = smallFont:getWidth(prompt)
+    love.graphics.print(prompt, (screenW - promptW) / 2, panelY + panelH - 40)
 end
 
 function Victory.keypressed(key)
-    if key == "escape" then
+    if key == "space" or key == "return" or key == "escape" then
         Game.SceneManager.switch("title")
-    elseif key == "return" or key == "space" then
-        Game.SceneManager.switch("gameplay")
     end
 end
 
 function Victory.mousepressed(x, y, button)
-    playAgainButton:mousepressed(x, y, button)
-    mainMenuButton:mousepressed(x, y, button)
-end
-
-function Victory.mousereleased(x, y, button)
-    playAgainButton:mousereleased(x, y, button)
-    mainMenuButton:mousereleased(x, y, button)
+    if button == 1 then
+        Game.SceneManager.switch("title")
+    end
 end
 
 return Victory

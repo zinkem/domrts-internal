@@ -36,7 +36,7 @@ function Farm.new(params)
     -- Combat stats
     self.maxHp = 50
     self.hp = self.maxHp
-    self.sightRadius = 2
+    self.sightRadius = 5
     
     self.isBuilding = params.isBuilding or false
     self.buildProgress = params.buildProgress or 0

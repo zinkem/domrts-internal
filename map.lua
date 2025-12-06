@@ -18,6 +18,11 @@ Map.TILE_GRASS = 1
 Map.TILE_TREE = 2
 Map.TILE_STUMP = 3
 
+-- Fog of war states
+Map.FOG_UNEXPLORED = 0  -- Black, never seen
+Map.FOG_EXPLORED = 1    -- Dimmed, seen before but no vision
+Map.FOG_VISIBLE = 2     -- Full visibility, unit nearby
+
 -- Constants
 Map.TILE_SIZE = 32
 Map.WIDTH = 64
@@ -37,6 +42,8 @@ function Map.new()
     self.cameraX = 0
     self.cameraY = 0
     self.scrollSpeed = 400
+    self.edgeScrollSpeed = 350  -- Edge scroll slightly slower
+    self.edgeScrollMargin = 20  -- Pixels from edge to trigger scroll
     
     -- Viewport (set by gameplay)
     self.viewportX = 0
@@ -49,6 +56,16 @@ function Map.new()
     
     -- Tree health tracking (harvests remaining)
     self.treeHealth = {}
+    
+    -- Fog of war
+    self.fogEnabled = true
+    self.fog = {}
+    for y = 1, self.height do
+        self.fog[y] = {}
+        for x = 1, self.width do
+            self.fog[y][x] = Map.FOG_UNEXPLORED
+        end
+    end
     
     -- Perlin noise seed
     self.noiseSeed = math.random(0, 1000)
@@ -264,7 +281,7 @@ function Map:isWorldPosPassable(worldX, worldY)
     return self:isTilePassable(gridX, gridY)
 end
 
-function Map:update(dt)
+function Map:update(dt, disableEdgeScroll)
     -- Update animation time for tree sway
     Map.animTime = Map.animTime + dt
     if DrawUtils then
@@ -286,6 +303,41 @@ function Map:update(dt)
         dy = self.scrollSpeed * dt
     end
     
+    -- Edge scrolling (when mouse near edge of screen or outside window)
+    if not disableEdgeScroll then
+        local mx, my = love.mouse.getPosition()
+        local ww, wh = love.graphics.getDimensions()
+        local inWindow = mx >= 0 and mx <= ww and my >= 0 and my <= wh
+        
+        -- Check if mouse is in viewport area (not in UI)
+        local inViewport = mx >= self.viewportX and mx <= self.viewportX + self.viewportW and
+                          my >= self.viewportY and my <= self.viewportY + self.viewportH
+        
+        if inViewport or not inWindow then
+            local edgeDx, edgeDy = 0, 0
+            
+            -- Left edge or off left
+            if mx < self.viewportX + self.edgeScrollMargin or (not inWindow and mx < 0) then
+                edgeDx = -self.edgeScrollSpeed * dt
+            end
+            -- Right edge or off right  
+            if mx > self.viewportX + self.viewportW - self.edgeScrollMargin or (not inWindow and mx > ww) then
+                edgeDx = self.edgeScrollSpeed * dt
+            end
+            -- Top edge or off top
+            if my < self.viewportY + self.edgeScrollMargin or (not inWindow and my < 0) then
+                edgeDy = -self.edgeScrollSpeed * dt
+            end
+            -- Bottom edge or off bottom
+            if my > self.viewportY + self.viewportH - self.edgeScrollMargin or (not inWindow and my > wh) then
+                edgeDy = self.edgeScrollSpeed * dt
+            end
+            
+            dx = dx + edgeDx
+            dy = dy + edgeDy
+        end
+    end
+    
     if dx ~= 0 or dy ~= 0 then
         self:scroll(dx, dy)
     end
@@ -297,6 +349,72 @@ function Map:update(dt)
     elseif self.minimapDragging and not love.mouse.isDown(1) then
         self.minimapDragging = false
     end
+end
+
+-- Update fog of war based on unit positions
+function Map:updateFog(units, buildings, playerTeam)
+    if not self.fogEnabled then return end
+    
+    -- Reset all visible tiles to explored (they were seen but no longer have vision)
+    for y = 1, self.height do
+        for x = 1, self.width do
+            if self.fog[y][x] == Map.FOG_VISIBLE then
+                self.fog[y][x] = Map.FOG_EXPLORED
+            end
+        end
+    end
+    
+    -- Grant vision from player units
+    for _, unit in ipairs(units) do
+        if unit.team == playerTeam and not (unit.isDead and unit:isDead()) then
+            local sightRadius = unit.sightRadius or 4  -- Default 4 tiles
+            local gridX, gridY = self:worldToGrid(unit.worldX, unit.worldY)
+            self:revealArea(gridX, gridY, sightRadius)
+        end
+    end
+    
+    -- Grant vision from player buildings
+    for _, building in ipairs(buildings) do
+        if building.team == playerTeam and not (building.isDead and building:isDead()) then
+            local sightRadius = building.sightRadius or 5  -- Buildings see a bit further
+            local cx, cy = building:getWorldCenter()
+            local gridX, gridY = self:worldToGrid(cx, cy)
+            self:revealArea(gridX, gridY, sightRadius)
+        end
+    end
+end
+
+-- Reveal area around a point
+function Map:revealArea(centerX, centerY, radius)
+    local radiusSq = radius * radius
+    for dy = -radius, radius do
+        for dx = -radius, radius do
+            if dx * dx + dy * dy <= radiusSq then
+                local x = centerX + dx
+                local y = centerY + dy
+                if x >= 1 and x <= self.width and y >= 1 and y <= self.height then
+                    self.fog[y][x] = Map.FOG_VISIBLE
+                end
+            end
+        end
+    end
+end
+
+-- Check fog state
+function Map:getTileFog(gridX, gridY)
+    if gridX < 1 or gridX > self.width or gridY < 1 or gridY > self.height then
+        return Map.FOG_UNEXPLORED
+    end
+    return self.fog[gridY][gridX]
+end
+
+function Map:isTileVisible(gridX, gridY)
+    return self:getTileFog(gridX, gridY) == Map.FOG_VISIBLE
+end
+
+function Map:isTileExplored(gridX, gridY)
+    local fog = self:getTileFog(gridX, gridY)
+    return fog == Map.FOG_VISIBLE or fog == Map.FOG_EXPLORED
 end
 
 function Map:draw()
@@ -472,6 +590,30 @@ function Map:draw()
         end
     end
     
+    --===========================================
+    -- PASS 3: Draw fog of war overlay
+    --===========================================
+    if self.fogEnabled then
+        for y = startY, endY do
+            for x = startX, endX do
+                local fogState = self.fog[y] and self.fog[y][x] or Map.FOG_UNEXPLORED
+                local worldX, worldY = self:gridToWorld(x, y)
+                local screenX, screenY = self:worldToScreen(worldX, worldY)
+                
+                if fogState == Map.FOG_UNEXPLORED then
+                    -- Completely black
+                    love.graphics.setColor(0, 0, 0, 1)
+                    love.graphics.rectangle("fill", screenX, screenY, self.tileSize, self.tileSize)
+                elseif fogState == Map.FOG_EXPLORED then
+                    -- Dimmed overlay (semi-transparent dark)
+                    love.graphics.setColor(0, 0, 0, 0.6)
+                    love.graphics.rectangle("fill", screenX, screenY, self.tileSize, self.tileSize)
+                end
+                -- FOG_VISIBLE = no overlay, full visibility
+            end
+        end
+    end
+    
     love.graphics.setScissor()
     love.graphics.setColor(1, 1, 1, 1)
 end
@@ -522,15 +664,28 @@ function Map:drawMinimap(x, y, size)
     
     local scale = size / self.width
     
-    love.graphics.setColor(0.1, 0.2, 0.1, 1)
+    -- Background (unexplored - black)
+    love.graphics.setColor(0.02, 0.02, 0.02, 1)
     love.graphics.rectangle("fill", x, y, size, size, 4)
     
-    -- Draw trees only (grass is background)
+    -- Draw terrain based on fog state
     for ty = 1, self.height do
         for tx = 1, self.width do
-            if self.tiles[ty][tx] == Map.TILE_TREE then
-                love.graphics.setColor(0.1, 0.3, 0.1, 1)
-                love.graphics.rectangle("fill", x + (tx-1) * scale, y + (ty-1) * scale, scale, scale)
+            local fogState = self.fog[ty] and self.fog[ty][tx] or Map.FOG_UNEXPLORED
+            
+            if fogState ~= Map.FOG_UNEXPLORED then
+                local px = x + (tx-1) * scale
+                local py = y + (ty-1) * scale
+                
+                -- Dim explored tiles, full brightness for visible
+                local brightness = fogState == Map.FOG_VISIBLE and 1 or 0.5
+                
+                if self.tiles[ty][tx] == Map.TILE_TREE then
+                    love.graphics.setColor(0.1 * brightness, 0.3 * brightness, 0.1 * brightness, 1)
+                else
+                    love.graphics.setColor(0.1 * brightness, 0.2 * brightness, 0.1 * brightness, 1)
+                end
+                love.graphics.rectangle("fill", px, py, scale + 0.5, scale + 0.5)
             end
         end
     end

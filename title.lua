@@ -1,265 +1,407 @@
 --[[
-    Title Screen Scene
-    Features animated background, menu buttons, settings toggles
+    Title Screen
+    Medieval stone-themed title screen with animated background
 ]]
-
-local Button = require("button")
-local RadioGroup = require("radio_group")
-local ConfirmModal = require("confirm_modal")
 
 local Title = {}
 
+-- Import UI drawing utilities
+local UIDraw
+pcall(function() UIDraw = require("ui_draw") end)
+
+-- Import audio
+local Audio
+pcall(function() Audio = require("audio") end)
+
+-- Local state
+local animTimer = 0
 local particles = {}
-local particleCount = 50
+local buttons = {}
 
-local newGameButton
-local exitButton
-local musicToggle
-local soundToggle
-local exitConfirmModal
-
-local titleWave = 0
-local backgroundHue = 0
-
-local colors = {
-    background = {0.08, 0.1, 0.15},
-    title = {0.9, 0.85, 0.7},
-    titleGlow = {1, 0.9, 0.6, 0.3},
-    copyright = {0.5, 0.5, 0.55, 1}
+-- UI colors (same as main game)
+local UI = {
+    stoneLight = {0.32, 0.30, 0.26, 1},
+    stoneMid = {0.20, 0.18, 0.16, 1},
+    stoneDark = {0.10, 0.09, 0.08, 1},
+    stoneHighlight = {0.48, 0.44, 0.38, 1},
+    stoneShadow = {0.05, 0.04, 0.03, 1},
+    metalGold = {0.72, 0.58, 0.26, 1},
+    metalGoldLight = {0.88, 0.72, 0.42, 1},
+    metalBronze = {0.50, 0.38, 0.20, 1},
+    metalBronzeLight = {0.65, 0.50, 0.30, 1},
+    metalBronzeDark = {0.30, 0.22, 0.10, 1},
+    textLight = {0.92, 0.88, 0.80, 1},
+    textGold = {1, 0.82, 0.25, 1},
 }
 
-local function createParticle()
-    return {
-        x = math.random(0, love.graphics.getWidth()),
-        y = math.random(0, love.graphics.getHeight()),
-        size = math.random(2, 6),
-        speed = math.random(20, 60),
-        alpha = math.random(30, 80) / 100,
-        wobble = math.random() * math.pi * 2,
-        wobbleSpeed = math.random(1, 3)
-    }
+-- Hash function for procedural effects
+local function hash(a, b)
+    local h = (a * 374761393 + b * 668265263) % 2147483647
+    h = ((h * 1274126177) % 2147483647)
+    return (h % 1000) / 1000
 end
 
-local function hslToRgb(h, s, l)
-    if s == 0 then
-        return l, l, l
+-- Draw stone panel (simplified from ui_draw)
+local function drawStonePanel(x, y, w, h, cornerRadius, subtle)
+    cornerRadius = cornerRadius or 6
+    
+    -- Drop shadow
+    love.graphics.setColor(0, 0, 0, 0.4)
+    love.graphics.rectangle("fill", x + 4, y + 4, w, h, cornerRadius)
+    
+    -- Main panel with vertical gradient
+    local steps = h
+    for i = 0, steps - 1 do
+        local t = i / steps
+        local r = UI.stoneMid[1] * (1 - t * 0.3)
+        local g = UI.stoneMid[2] * (1 - t * 0.3)
+        local b = UI.stoneMid[3] * (1 - t * 0.3)
+        love.graphics.setColor(r, g, b, 1)
+        love.graphics.rectangle("fill", x, y + i, w, 1, i == 0 and cornerRadius or 0)
     end
     
-    local function hue2rgb(p, q, t)
-        if t < 0 then t = t + 1 end
-        if t > 1 then t = t - 1 end
-        if t < 1/6 then return p + (q - p) * 6 * t end
-        if t < 1/2 then return q end
-        if t < 2/3 then return p + (q - p) * (2/3 - t) * 6 end
-        return p
+    -- Stone texture (if not subtle)
+    if not subtle then
+        -- Color blotches
+        local numBlotches = math.floor(w * h / 800)
+        for i = 1, numBlotches do
+            local bx = x + hash(i, 1) * w
+            local by = y + hash(1, i) * h
+            local bsize = 8 + hash(i, i) * 15
+            local colorVar = (hash(i * 3, i * 5) - 0.5) * 0.06
+            
+            love.graphics.setColor(UI.stoneMid[1] + colorVar, UI.stoneMid[2] + colorVar, UI.stoneMid[3] + colorVar, 0.15)
+            love.graphics.ellipse("fill", bx, by, bsize, bsize * 0.6)
+        end
+        
+        -- Sparse cracks
+        local numCracks = 3 + math.floor(hash(w, 1) * 4)
+        for c = 1, numCracks do
+            local cx = x + 10 + hash(c, 100) * (w - 20)
+            local cy = y + 10 + hash(100, c) * (h - 20)
+            local angle = hash(c, 101) * math.pi * 2
+            local length = 10 + hash(c, 102) * 20
+            
+            love.graphics.setColor(0, 0, 0, 0.2)
+            love.graphics.setLineWidth(1)
+            local px, py = cx, cy
+            for s = 1, math.floor(length / 4) do
+                angle = angle + (hash(c * s, s) - 0.5) * 0.5
+                local nx = px + math.cos(angle) * 4
+                local ny = py + math.sin(angle) * 3
+                if nx > x + 5 and nx < x + w - 5 and ny > y + 5 and ny < y + h - 5 then
+                    love.graphics.line(px, py, nx, ny)
+                    px, py = nx, ny
+                end
+            end
+        end
     end
     
-    local q = l < 0.5 and l * (1 + s) or l + s - l * s
-    local p = 2 * l - q
+    -- Beveled border
+    -- Top/left highlight
+    love.graphics.setColor(UI.stoneHighlight[1], UI.stoneHighlight[2], UI.stoneHighlight[3], 0.5)
+    love.graphics.setLineWidth(2)
+    love.graphics.line(x + cornerRadius, y + 1, x + w - cornerRadius, y + 1)
+    love.graphics.line(x + 1, y + cornerRadius, x + 1, y + h - cornerRadius)
     
-    return hue2rgb(p, q, h + 1/3), hue2rgb(p, q, h), hue2rgb(p, q, h - 1/3)
+    -- Bottom/right shadow
+    love.graphics.setColor(UI.stoneShadow[1], UI.stoneShadow[2], UI.stoneShadow[3], 0.7)
+    love.graphics.line(x + cornerRadius, y + h - 1, x + w - cornerRadius, y + h - 1)
+    love.graphics.line(x + w - 1, y + cornerRadius, x + w - 1, y + h - cornerRadius)
+    
+    -- Metal trim at bottom
+    love.graphics.setColor(UI.metalBronze)
+    love.graphics.rectangle("fill", x, y + h - 4, w, 4)
+    love.graphics.setColor(UI.metalBronzeLight[1], UI.metalBronzeLight[2], UI.metalBronzeLight[3], 0.5)
+    love.graphics.rectangle("fill", x, y + h - 4, w, 1)
+end
+
+-- Draw a rivet
+local function drawRivet(cx, cy, radius)
+    love.graphics.setColor(UI.metalGold)
+    love.graphics.circle("fill", cx, cy, radius)
+    love.graphics.setColor(UI.metalGoldLight[1], UI.metalGoldLight[2], UI.metalGoldLight[3], 0.7)
+    love.graphics.circle("fill", cx - radius * 0.3, cy - radius * 0.3, radius * 0.4)
+    love.graphics.setColor(0, 0, 0, 0.3)
+    love.graphics.arc("fill", cx, cy, radius * 0.8, math.pi * 0.3, math.pi * 0.7)
+end
+
+-- Draw button
+local function drawButton(btn, mx, my)
+    local x, y, w, h = btn.x, btn.y, btn.w, btn.h
+    local hovered = mx >= x and mx <= x + w and my >= y and my <= y + h
+    
+    -- Button background
+    if hovered then
+        love.graphics.setColor(UI.stoneLight[1] + 0.05, UI.stoneLight[2] + 0.05, UI.stoneLight[3] + 0.05, 1)
+    else
+        love.graphics.setColor(UI.stoneMid)
+    end
+    love.graphics.rectangle("fill", x, y, w, h, 6)
+    
+    -- Beveled border
+    if hovered then
+        love.graphics.setColor(UI.metalGold[1], UI.metalGold[2], UI.metalGold[3], 0.8)
+    else
+        love.graphics.setColor(UI.metalBronze)
+    end
+    love.graphics.setLineWidth(2)
+    love.graphics.rectangle("line", x, y, w, h, 6)
+    
+    -- Highlight
+    love.graphics.setColor(UI.stoneHighlight[1], UI.stoneHighlight[2], UI.stoneHighlight[3], 0.4)
+    love.graphics.line(x + 6, y + 2, x + w - 6, y + 2)
+    
+    -- Text
+    local font = Game.fonts and Game.fonts.medium or love.graphics.getFont()
+    love.graphics.setFont(font)
+    local textW = font:getWidth(btn.text)
+    local textH = font:getHeight()
+    
+    -- Text shadow
+    love.graphics.setColor(0, 0, 0, 0.5)
+    love.graphics.print(btn.text, x + (w - textW) / 2 + 1, y + (h - textH) / 2 + 1)
+    
+    -- Text
+    if hovered then
+        love.graphics.setColor(UI.textGold)
+    else
+        love.graphics.setColor(UI.textLight)
+    end
+    love.graphics.print(btn.text, x + (w - textW) / 2, y + (h - textH) / 2)
+    
+    return hovered
+end
+
+-- Spawn ambient particles
+local function spawnParticle()
+    local screenW, screenH = love.graphics.getDimensions()
+    table.insert(particles, {
+        x = math.random(0, screenW),
+        y = screenH + 10,
+        vx = (math.random() - 0.5) * 20,
+        vy = -30 - math.random() * 40,
+        size = 1 + math.random() * 2,
+        life = 3 + math.random() * 2,
+        maxLife = 3 + math.random() * 2,
+        type = math.random() > 0.7 and "ember" or "dust"
+    })
 end
 
 function Title.load()
-    local screenW, screenH = love.graphics.getDimensions()
-    
+    animTimer = 0
     particles = {}
-    for i = 1, particleCount do
-        table.insert(particles, createParticle())
+    
+    -- Initialize audio if available
+    if Audio and Audio.init then
+        Audio.init()
     end
     
-    local buttonWidth = 250
-    local buttonHeight = 55
-    local centerX = (screenW - buttonWidth) / 2
+    -- Start music
+    if Audio and Audio.playRandomMusic then
+        Audio.playRandomMusic()
+    end
     
-    newGameButton = Button.new({
-        x = centerX,
-        y = screenH / 2 + 20,
-        width = buttonWidth,
-        height = buttonHeight,
-        text = "New Game",
-        font = Game.fonts.medium,
-        onClick = function()
-            Game.SceneManager.switch("gameplay")
-        end
-    })
+    -- Setup buttons
+    local screenW, screenH = love.graphics.getDimensions()
+    local btnW, btnH = 200, 50
+    local btnX = (screenW - btnW) / 2
+    local btnY = screenH * 0.55
     
-    exitButton = Button.new({
-        x = centerX,
-        y = screenH / 2 + 90,
-        width = buttonWidth,
-        height = buttonHeight,
-        text = "Exit to Desktop",
-        font = Game.fonts.medium,
-        colors = {
-            normal = {0.5, 0.3, 0.3, 1},
-            hover = {0.6, 0.4, 0.4, 1},
-            pressed = {0.4, 0.2, 0.2, 1},
-            text = {1, 1, 1, 1},
-            border = {0.4, 0.25, 0.25, 1}
+    buttons = {
+        {
+            text = "Start Game",
+            x = btnX, y = btnY, w = btnW, h = btnH,
+            action = function()
+                Game.SceneManager.switch("gameplay")
+            end
         },
-        onClick = function()
-            exitConfirmModal:show()
-        end
-    })
-    
-    musicToggle = RadioGroup.new({
-        x = centerX - 20,
-        y = screenH / 2 + 180,
-        label = "Music",
-        options = {"On", "Off"},
-        selected = Game.settings.musicEnabled and 1 or 2,
-        font = Game.fonts.small,
-        onChange = function(index, option)
-            Game.settings.musicEnabled = (index == 1)
-        end
-    })
-    
-    soundToggle = RadioGroup.new({
-        x = centerX - 20,
-        y = screenH / 2 + 220,
-        label = "Sound",
-        options = {"On", "Off"},
-        selected = Game.settings.soundEnabled and 1 or 2,
-        font = Game.fonts.small,
-        onChange = function(index, option)
-            Game.settings.soundEnabled = (index == 1)
-        end
-    })
-    
-    exitConfirmModal = ConfirmModal.new({
-        message = "Are you sure you want to quit?",
-        confirmText = "Quit",
-        cancelText = "Cancel",
-        font = Game.fonts.medium,
-        onConfirm = function()
-            love.event.quit()
-        end,
-        onCancel = function() end
-    })
-    
-    titleWave = 0
-    backgroundHue = 0
+        {
+            text = "Settings",
+            x = btnX, y = btnY + 70, w = btnW, h = btnH,
+            action = function()
+                -- Toggle settings (simple for now)
+                Game.settings.musicEnabled = not Game.settings.musicEnabled
+            end
+        }
+    }
 end
 
 function Title.update(dt)
-    titleWave = titleWave + dt * 2
-    backgroundHue = backgroundHue + dt * 0.05
+    animTimer = animTimer + dt
     
-    for i, p in ipairs(particles) do
-        p.y = p.y - p.speed * dt
-        p.wobble = p.wobble + p.wobbleSpeed * dt
-        p.x = p.x + math.sin(p.wobble) * 0.5
+    -- Update audio
+    if Audio and Audio.update then
+        Audio.update(dt)
+    end
+    
+    -- Spawn particles occasionally
+    if math.random() < dt * 2 then
+        spawnParticle()
+    end
+    
+    -- Update particles
+    for i = #particles, 1, -1 do
+        local p = particles[i]
+        p.x = p.x + p.vx * dt
+        p.y = p.y + p.vy * dt
+        p.life = p.life - dt
         
-        if p.y < -10 then
-            p.y = love.graphics.getHeight() + 10
-            p.x = math.random(0, love.graphics.getWidth())
+        if p.life <= 0 then
+            table.remove(particles, i)
         end
     end
-    
-    if not exitConfirmModal:isActive() then
-        newGameButton:update(dt)
-        exitButton:update(dt)
-        musicToggle:update(dt)
-        soundToggle:update(dt)
-    end
-    
-    exitConfirmModal:update(dt)
 end
 
 function Title.draw()
     local screenW, screenH = love.graphics.getDimensions()
+    local mx, my = love.mouse.getPosition()
     
-    local bgR = 0.08 + math.sin(backgroundHue) * 0.02
-    local bgG = 0.1 + math.sin(backgroundHue + 1) * 0.02
-    local bgB = 0.18 + math.sin(backgroundHue + 2) * 0.03
-    love.graphics.setBackgroundColor(bgR, bgG, bgB)
-    love.graphics.clear(bgR, bgG, bgB)
+    -- Dark stone background
+    love.graphics.setColor(UI.stoneDark)
+    love.graphics.rectangle("fill", 0, 0, screenW, screenH)
     
-    for i, p in ipairs(particles) do
-        local hue = (backgroundHue + p.x / screenW) % 1
-        local r, g, b = hslToRgb(hue, 0.5, 0.6)
-        love.graphics.setColor(r, g, b, p.alpha)
+    -- Background texture
+    for i = 1, 50 do
+        local px = hash(i, 1) * screenW
+        local py = hash(1, i) * screenH
+        local size = 5 + hash(i, i) * 20
+        local dark = hash(i * 3, i * 5) > 0.5
+        
+        if dark then
+            love.graphics.setColor(0, 0, 0, 0.1)
+        else
+            love.graphics.setColor(UI.stoneLight[1], UI.stoneLight[2], UI.stoneLight[3], 0.05)
+        end
+        love.graphics.ellipse("fill", px, py, size, size * 0.7)
+    end
+    
+    -- Animated particles (background embers/dust)
+    for _, p in ipairs(particles) do
+        local alpha = (p.life / p.maxLife) * 0.6
+        if p.type == "ember" then
+            love.graphics.setColor(1, 0.6, 0.2, alpha)
+        else
+            love.graphics.setColor(0.8, 0.75, 0.65, alpha * 0.5)
+        end
         love.graphics.circle("fill", p.x, p.y, p.size)
     end
     
-    love.graphics.setFont(Game.fonts.title)
-    local title = "ADVENTURE AWAITS"
-    local titleWidth = Game.fonts.title:getWidth(title)
-    local titleX = (screenW - titleWidth) / 2
-    local titleY = screenH / 4
+    -- Main title panel
+    local panelW, panelH = 500, 400
+    local panelX = (screenW - panelW) / 2
+    local panelY = (screenH - panelH) / 2 - 30
     
-    love.graphics.setColor(colors.titleGlow)
-    for i = 1, #title do
-        local char = title:sub(i, i)
-        local charX = titleX + Game.fonts.title:getWidth(title:sub(1, i - 1))
-        local charOffset = math.sin(titleWave + i * 0.3) * 5
-        love.graphics.print(char, charX, titleY + charOffset)
+    drawStonePanel(panelX, panelY, panelW, panelH, 10)
+    
+    -- Corner rivets
+    local rivetOffset = 15
+    drawRivet(panelX + rivetOffset, panelY + rivetOffset, 5)
+    drawRivet(panelX + panelW - rivetOffset, panelY + rivetOffset, 5)
+    drawRivet(panelX + rivetOffset, panelY + panelH - rivetOffset, 5)
+    drawRivet(panelX + panelW - rivetOffset, panelY + panelH - rivetOffset, 5)
+    
+    -- Title text with glow
+    local titleFont = Game.fonts and Game.fonts.title or love.graphics.getFont()
+    love.graphics.setFont(titleFont)
+    
+    local title = "DOMINION"
+    local titleW = titleFont:getWidth(title)
+    local titleX = (screenW - titleW) / 2
+    local titleY = panelY + 40
+    
+    -- Title glow
+    local glowPulse = 0.7 + math.sin(animTimer * 2) * 0.3
+    love.graphics.setColor(UI.metalGold[1], UI.metalGold[2], UI.metalGold[3], 0.3 * glowPulse)
+    for dx = -2, 2 do
+        for dy = -2, 2 do
+            if dx ~= 0 or dy ~= 0 then
+                love.graphics.print(title, titleX + dx, titleY + dy)
+            end
+        end
     end
     
-    love.graphics.setColor(colors.title)
-    for i = 1, #title do
-        local char = title:sub(i, i)
-        local charX = titleX + Game.fonts.title:getWidth(title:sub(1, i - 1))
-        local charOffset = math.sin(titleWave + i * 0.3) * 5
-        love.graphics.print(char, charX, titleY + charOffset)
+    -- Title shadow
+    love.graphics.setColor(0, 0, 0, 0.6)
+    love.graphics.print(title, titleX + 3, titleY + 3)
+    
+    -- Title main
+    love.graphics.setColor(UI.textGold)
+    love.graphics.print(title, titleX, titleY)
+    
+    -- Subtitle
+    local subtitleFont = Game.fonts and Game.fonts.medium or love.graphics.getFont()
+    love.graphics.setFont(subtitleFont)
+    local subtitle = "A Real-Time Strategy Game"
+    local subtitleW = subtitleFont:getWidth(subtitle)
+    
+    love.graphics.setColor(0, 0, 0, 0.4)
+    love.graphics.print(subtitle, (screenW - subtitleW) / 2 + 1, titleY + 70 + 1)
+    love.graphics.setColor(UI.textLight[1], UI.textLight[2], UI.textLight[3], 0.8)
+    love.graphics.print(subtitle, (screenW - subtitleW) / 2, titleY + 70)
+    
+    -- Decorative line
+    love.graphics.setColor(UI.metalBronze)
+    love.graphics.setLineWidth(2)
+    local lineY = titleY + 110
+    love.graphics.line(panelX + 50, lineY, panelX + panelW - 50, lineY)
+    
+    -- Line rivets
+    drawRivet(panelX + 50, lineY, 3)
+    drawRivet(panelX + panelW - 50, lineY, 3)
+    
+    -- Buttons
+    for _, btn in ipairs(buttons) do
+        drawButton(btn, mx, my)
     end
     
-    love.graphics.setFont(Game.fonts.medium)
-    love.graphics.setColor(0.7, 0.7, 0.75, 0.8 + math.sin(titleWave * 1.5) * 0.2)
-    local subtitle = "Press New Game to Begin"
-    local subtitleWidth = Game.fonts.medium:getWidth(subtitle)
-    love.graphics.print(subtitle, (screenW - subtitleWidth) / 2, titleY + 80)
+    -- Settings indicator
+    local settingsFont = Game.fonts and Game.fonts.small or love.graphics.getFont()
+    love.graphics.setFont(settingsFont)
+    local musicStatus = Game.settings.musicEnabled and "Music: ON" or "Music: OFF"
+    local soundStatus = Game.settings.soundEnabled and "Sound: ON" or "Sound: OFF"
     
-    newGameButton:draw()
-    exitButton:draw()
-    musicToggle:draw()
-    soundToggle:draw()
+    love.graphics.setColor(UI.textLight[1], UI.textLight[2], UI.textLight[3], 0.6)
+    love.graphics.print(musicStatus .. "  |  " .. soundStatus, panelX + 20, panelY + panelH - 35)
     
-    love.graphics.setFont(Game.fonts.small)
-    love.graphics.setColor(colors.copyright)
-    local copyright = "© 2025 zinkem"
-    local copyrightWidth = Game.fonts.small:getWidth(copyright)
-    love.graphics.print(copyright, (screenW - copyrightWidth) / 2, screenH - 40)
+    -- Version/credits
+    love.graphics.setColor(UI.textLight[1], UI.textLight[2], UI.textLight[3], 0.4)
+    love.graphics.print("Made with LÖVE", screenW - 120, screenH - 25)
     
-    exitConfirmModal:draw()
-    
-    love.graphics.setColor(1, 1, 1, 1)
+    -- Controls hint
+    local controlsY = panelY + panelH + 20
+    love.graphics.setColor(UI.textLight[1], UI.textLight[2], UI.textLight[3], 0.5)
+    local controlsText = "Controls: Click to select, Right-click to command, Arrow keys to scroll"
+    local controlsW = settingsFont:getWidth(controlsText)
+    love.graphics.print(controlsText, (screenW - controlsW) / 2, controlsY)
 end
 
 function Title.keypressed(key)
-    if exitConfirmModal:isActive() then
-        exitConfirmModal:keypressed(key)
-        return
-    end
-    
-    if key == "escape" then
-        exitConfirmModal:show()
-    elseif key == "return" or key == "space" then
+    if key == "return" or key == "space" then
         Game.SceneManager.switch("gameplay")
+    elseif key == "m" then
+        Game.settings.musicEnabled = not Game.settings.musicEnabled
+    elseif key == "s" then
+        Game.settings.soundEnabled = not Game.settings.soundEnabled
     end
 end
 
 function Title.mousepressed(x, y, button)
-    if exitConfirmModal:isActive() then
-        exitConfirmModal:mousepressed(x, y, button)
-        return
+    if button == 1 then
+        for _, btn in ipairs(buttons) do
+            if x >= btn.x and x <= btn.x + btn.w and
+               y >= btn.y and y <= btn.y + btn.h then
+                if btn.action then
+                    btn.action()
+                end
+                return
+            end
+        end
     end
-    
-    newGameButton:mousepressed(x, y, button)
-    exitButton:mousepressed(x, y, button)
-    musicToggle:mousepressed(x, y, button)
-    soundToggle:mousepressed(x, y, button)
 end
 
-function Title.mousereleased(x, y, button)
-    if exitConfirmModal:isActive() then
-        exitConfirmModal:mousereleased(x, y, button)
-        return
-    end
-    
-    newGameButton:mousereleased(x, y, button)
-    exitButton:mousereleased(x, y, button)
+function Title.unload()
+    -- Don't stop music - let it continue into gameplay
 end
 
 return Title

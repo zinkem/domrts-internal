@@ -45,6 +45,10 @@ local Effects, DrawUtils
 pcall(function() Effects = require("effects") end)
 pcall(function() DrawUtils = require("draw_utils") end)
 
+-- Audio system (optional)
+local Audio
+pcall(function() Audio = require("audio") end)
+
 local Gameplay = {}
 
 -- Game state
@@ -134,6 +138,7 @@ local UI = {
     stoneMid = {0.35, 0.32, 0.28, 1},
     stoneDark = {0.25, 0.22, 0.18, 1},
     stoneAccent = {0.55, 0.52, 0.45, 1},
+    stoneHighlight = {0.6, 0.58, 0.52, 1},
     
     -- Metal colors
     metalGold = {0.85, 0.7, 0.35, 1},
@@ -157,10 +162,33 @@ local UI = {
 
 -- Notification system
 local notifications = {}
-local NOTIFICATION_DURATION = 3.0
+local NOTIFICATION_DURATION = 4.0
+local NOTIFICATION_SLIDE_TIME = 0.3
+local NOTIFICATION_HEIGHT = 36
+local NOTIFICATION_SPACING = 4
+local MAX_NOTIFICATIONS = 6
 
 local function addNotification(message)
-    table.insert(notifications, {text = message, timer = NOTIFICATION_DURATION})
+    -- Create new notification with slide animation
+    local notif = {
+        text = message, 
+        timer = NOTIFICATION_DURATION,
+        slideProgress = 0,  -- 0 = off screen, 1 = fully visible
+        targetSlot = 1
+    }
+    
+    -- Shift existing notifications up
+    for _, existing in ipairs(notifications) do
+        existing.targetSlot = existing.targetSlot + 1
+    end
+    
+    -- Insert at front
+    table.insert(notifications, 1, notif)
+    
+    -- Remove oldest if too many
+    while #notifications > MAX_NOTIFICATIONS do
+        table.remove(notifications)
+    end
 end
 
 local function checkAllMinesDepleted()
@@ -337,25 +365,83 @@ local function drawMinimap(screenW)
     local mmScale = mmSize / map.width
     map:drawMinimap(mmX, mmY, mmSize)
     
+    local playerTeam = Teams and Teams.PLAYER or 1
+    
+    -- Helper to check if entity should show on minimap
+    local function isMinimapVisible(entity, requireVisible)
+        if not map.fogEnabled then return true end
+        if entity.team == playerTeam then return true end
+        
+        local wx, wy
+        if entity.getWorldCenter then
+            wx, wy = entity:getWorldCenter()
+        else
+            wx, wy = entity.worldX, entity.worldY
+        end
+        local gx, gy = map:worldToGrid(wx, wy)
+        
+        if requireVisible then
+            return map:isTileVisible(gx, gy)
+        else
+            return map:isTileExplored(gx, gy)
+        end
+    end
+    
     -- Draw all entities on minimap
     townHall:drawOnMinimap(mmX, mmY, mmScale)
-    for _, m in ipairs(goldMines) do m:drawOnMinimap(mmX, mmY, mmScale) end
-    for _, f in ipairs(farms) do f:drawOnMinimap(mmX, mmY, mmScale) end
-    for _, b in ipairs(barracks) do b:drawOnMinimap(mmX, mmY, mmScale) end
-    for _, b in ipairs(lumberMills) do b:drawOnMinimap(mmX, mmY, mmScale) end
-    for _, b in ipairs(blacksmiths) do b:drawOnMinimap(mmX, mmY, mmScale) end
-    for _, b in ipairs(scoutTowers) do b:drawOnMinimap(mmX, mmY, mmScale) end
-    for _, b in ipairs(archeryRanges) do b:drawOnMinimap(mmX, mmY, mmScale) end
-    for _, b in ipairs(stables) do b:drawOnMinimap(mmX, mmY, mmScale) end
-    for _, b in ipairs(siegeWorkshops) do b:drawOnMinimap(mmX, mmY, mmScale) end
-    for _, b in ipairs(townHalls) do b:drawOnMinimap(mmX, mmY, mmScale) end
-    for _, p in ipairs(peons) do p:drawOnMinimap(mmX, mmY, mmScale) end
-    for _, f in ipairs(footmen) do f:drawOnMinimap(mmX, mmY, mmScale) end
-    for _, a in ipairs(archers) do a:drawOnMinimap(mmX, mmY, mmScale) end
-    for _, k in ipairs(knights) do k:drawOnMinimap(mmX, mmY, mmScale) end
-    for _, f in ipairs(flyingScouts) do f:drawOnMinimap(mmX, mmY, mmScale) end
-    for _, b in ipairs(ballistas) do b:drawOnMinimap(mmX, mmY, mmScale) end
-    for _, k in ipairs(kamikazes) do k:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, m in ipairs(goldMines) do 
+        if isMinimapVisible(m, false) then m:drawOnMinimap(mmX, mmY, mmScale) end
+    end
+    for _, f in ipairs(farms) do 
+        if isMinimapVisible(f, false) then f:drawOnMinimap(mmX, mmY, mmScale) end
+    end
+    for _, b in ipairs(barracks) do 
+        if isMinimapVisible(b, false) then b:drawOnMinimap(mmX, mmY, mmScale) end
+    end
+    for _, b in ipairs(lumberMills) do 
+        if isMinimapVisible(b, false) then b:drawOnMinimap(mmX, mmY, mmScale) end
+    end
+    for _, b in ipairs(blacksmiths) do 
+        if isMinimapVisible(b, false) then b:drawOnMinimap(mmX, mmY, mmScale) end
+    end
+    for _, b in ipairs(scoutTowers) do 
+        if isMinimapVisible(b, false) then b:drawOnMinimap(mmX, mmY, mmScale) end
+    end
+    for _, b in ipairs(archeryRanges) do 
+        if isMinimapVisible(b, false) then b:drawOnMinimap(mmX, mmY, mmScale) end
+    end
+    for _, b in ipairs(stables) do 
+        if isMinimapVisible(b, false) then b:drawOnMinimap(mmX, mmY, mmScale) end
+    end
+    for _, b in ipairs(siegeWorkshops) do 
+        if isMinimapVisible(b, false) then b:drawOnMinimap(mmX, mmY, mmScale) end
+    end
+    for _, b in ipairs(townHalls) do 
+        if isMinimapVisible(b, false) then b:drawOnMinimap(mmX, mmY, mmScale) end
+    end
+    
+    -- Units require visibility (not just explored)
+    for _, p in ipairs(peons) do 
+        if isMinimapVisible(p, true) then p:drawOnMinimap(mmX, mmY, mmScale) end
+    end
+    for _, f in ipairs(footmen) do 
+        if isMinimapVisible(f, true) then f:drawOnMinimap(mmX, mmY, mmScale) end
+    end
+    for _, a in ipairs(archers) do 
+        if isMinimapVisible(a, true) then a:drawOnMinimap(mmX, mmY, mmScale) end
+    end
+    for _, k in ipairs(knights) do 
+        if isMinimapVisible(k, true) then k:drawOnMinimap(mmX, mmY, mmScale) end
+    end
+    for _, f in ipairs(flyingScouts) do 
+        if isMinimapVisible(f, true) then f:drawOnMinimap(mmX, mmY, mmScale) end
+    end
+    for _, b in ipairs(ballistas) do 
+        if isMinimapVisible(b, true) then b:drawOnMinimap(mmX, mmY, mmScale) end
+    end
+    for _, k in ipairs(kamikazes) do 
+        if isMinimapVisible(k, true) then k:drawOnMinimap(mmX, mmY, mmScale) end
+    end
 end
 
 local function drawBottomPanel(screenW, screenH)
@@ -438,101 +524,181 @@ end
 
 local function drawVictoryScreen()
     local screenW, screenH = love.graphics.getDimensions()
-    love.graphics.setColor(0, 0, 0, 0.8)
+    
+    -- Dark overlay with stone tint
+    love.graphics.setColor(0.02, 0.03, 0.02, 0.9)
     love.graphics.rectangle("fill", 0, 0, screenW, screenH)
     
-    local boxW, boxH = 450, 320
+    local boxW, boxH = 480, 360
     local boxX, boxY = (screenW - boxW) / 2, (screenH - boxH) / 2
     
-    -- Victory box
-    love.graphics.setColor(0.1, 0.25, 0.1, 1)
-    love.graphics.rectangle("fill", boxX, boxY, boxW, boxH, 10)
-    love.graphics.setColor(0.3, 0.7, 0.3, 1)
-    love.graphics.setLineWidth(4)
-    love.graphics.rectangle("line", boxX, boxY, boxW, boxH, 10)
+    -- Draw stone panel using UIDraw
+    UIDraw.drawStonePanel(boxX, boxY, boxW, boxH, 10)
     
-    -- Title
+    -- Corner rivets
+    local function drawRivet(cx, cy, radius)
+        love.graphics.setColor(0.72, 0.58, 0.26, 1)
+        love.graphics.circle("fill", cx, cy, radius)
+        love.graphics.setColor(0.88, 0.72, 0.42, 0.7)
+        love.graphics.circle("fill", cx - radius * 0.3, cy - radius * 0.3, radius * 0.4)
+    end
+    local ro = 15
+    drawRivet(boxX + ro, boxY + ro, 5)
+    drawRivet(boxX + boxW - ro, boxY + ro, 5)
+    drawRivet(boxX + ro, boxY + boxH - ro, 5)
+    drawRivet(boxX + boxW - ro, boxY + boxH - ro, 5)
+    
+    -- Title with glow
     love.graphics.setFont(Game.fonts.title)
-    love.graphics.setColor(1, 0.85, 0, 1)
-    love.graphics.print("VICTORY!", (screenW - Game.fonts.title:getWidth("VICTORY!")) / 2, boxY + 20)
+    local title = "VICTORY!"
+    local titleW = Game.fonts.title:getWidth(title)
+    local titleX = (screenW - titleW) / 2
+    local titleY = boxY + 25
+    
+    -- Glow effect
+    local glowPulse = 0.6 + math.sin(elapsedTime * 3) * 0.4
+    love.graphics.setColor(1, 0.85, 0.2, 0.25 * glowPulse)
+    for dx = -2, 2 do
+        for dy = -2, 2 do
+            if dx ~= 0 or dy ~= 0 then
+                love.graphics.print(title, titleX + dx, titleY + dy)
+            end
+        end
+    end
+    love.graphics.setColor(0, 0, 0, 0.5)
+    love.graphics.print(title, titleX + 2, titleY + 2)
+    love.graphics.setColor(1, 0.85, 0.2, 1)
+    love.graphics.print(title, titleX, titleY)
     
     -- Message
     love.graphics.setFont(Game.fonts.medium)
-    love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.print("All enemy buildings destroyed!", (screenW - Game.fonts.medium:getWidth("All enemy buildings destroyed!")) / 2, boxY + 70)
+    love.graphics.setColor(0.92, 0.88, 0.80, 1)
+    local msg = "All enemy buildings destroyed!"
+    love.graphics.print(msg, (screenW - Game.fonts.medium:getWidth(msg)) / 2, titleY + 75)
+    
+    -- Decorative line
+    love.graphics.setColor(0.50, 0.38, 0.20, 1)
+    love.graphics.setLineWidth(2)
+    local lineY = titleY + 105
+    love.graphics.line(boxX + 40, lineY, boxX + boxW - 40, lineY)
+    drawRivet(boxX + 40, lineY, 3)
+    drawRivet(boxX + boxW - 40, lineY, 3)
     
     -- Stats
     love.graphics.setFont(Game.fonts.small)
-    love.graphics.setColor(0.9, 0.9, 0.8, 1)
-    local statsY = boxY + 110
-    local lineHeight = 22
+    love.graphics.setColor(0.92, 0.88, 0.80, 0.9)
+    local statsY = lineY + 20
+    local lineHeight = 24
+    local leftX = boxX + 50
+    local rightX = boxX + boxW / 2 + 20
     
     local minutes = math.floor(elapsedTime / 60)
     local seconds = math.floor(elapsedTime % 60)
     local timeStr = string.format("Time: %d:%02d", minutes, seconds)
-    love.graphics.print(timeStr, boxX + 40, statsY)
+    love.graphics.print(timeStr, leftX, statsY)
     
-    love.graphics.print("Units Killed: " .. gameStats.unitsKilled, boxX + 40, statsY + lineHeight)
-    love.graphics.print("Units Lost: " .. gameStats.unitsLost, boxX + 40, statsY + lineHeight * 2)
-    love.graphics.print("Buildings Destroyed: " .. gameStats.buildingsDestroyed, boxX + 40, statsY + lineHeight * 3)
-    love.graphics.print("Buildings Lost: " .. gameStats.buildingsLost, boxX + 40, statsY + lineHeight * 4)
+    love.graphics.print("Units Killed: " .. gameStats.unitsKilled, leftX, statsY + lineHeight)
+    love.graphics.print("Units Lost: " .. gameStats.unitsLost, leftX, statsY + lineHeight * 2)
+    love.graphics.print("Buildings Destroyed: " .. gameStats.buildingsDestroyed, leftX, statsY + lineHeight * 3)
+    love.graphics.print("Buildings Lost: " .. gameStats.buildingsLost, leftX, statsY + lineHeight * 4)
     
     love.graphics.setColor(1, 0.85, 0.3, 1)
-    love.graphics.print("Final Gold: " .. resources.gold, boxX + 250, statsY + lineHeight)
-    love.graphics.setColor(0.6, 0.45, 0.25, 1)
-    love.graphics.print("Final Lumber: " .. resources.lumber, boxX + 250, statsY + lineHeight * 2)
+    love.graphics.print("Final Gold: " .. resources.gold, rightX, statsY + lineHeight)
+    love.graphics.setColor(0.65, 0.5, 0.3, 1)
+    love.graphics.print("Final Lumber: " .. resources.lumber, rightX, statsY + lineHeight * 2)
     
-    -- Continue prompt
+    -- Continue prompt (pulsing)
+    local promptAlpha = 0.5 + math.sin(elapsedTime * 2) * 0.3
     love.graphics.setFont(Game.fonts.small)
-    love.graphics.setColor(0.7, 0.7, 0.7, 1)
-    love.graphics.print("Press SPACE to return to title", (screenW - Game.fonts.small:getWidth("Press SPACE to return to title")) / 2, boxY + boxH - 35)
+    love.graphics.setColor(0.92, 0.88, 0.80, promptAlpha)
+    local prompt = "Press SPACE to return to title"
+    love.graphics.print(prompt, (screenW - Game.fonts.small:getWidth(prompt)) / 2, boxY + boxH - 40)
 end
 
 local function drawDefeatScreen()
     local screenW, screenH = love.graphics.getDimensions()
-    love.graphics.setColor(0, 0, 0, 0.8)
+    
+    -- Dark overlay with red tint
+    love.graphics.setColor(0.03, 0.02, 0.02, 0.9)
     love.graphics.rectangle("fill", 0, 0, screenW, screenH)
     
-    local boxW, boxH = 450, 320
+    local boxW, boxH = 480, 360
     local boxX, boxY = (screenW - boxW) / 2, (screenH - boxH) / 2
     
-    -- Defeat box
-    love.graphics.setColor(0.25, 0.1, 0.1, 1)
-    love.graphics.rectangle("fill", boxX, boxY, boxW, boxH, 10)
-    love.graphics.setColor(0.7, 0.2, 0.2, 1)
-    love.graphics.setLineWidth(4)
-    love.graphics.rectangle("line", boxX, boxY, boxW, boxH, 10)
+    -- Draw stone panel using UIDraw
+    UIDraw.drawStonePanel(boxX, boxY, boxW, boxH, 10)
     
-    -- Title
+    -- Corner rivets (darker for defeat)
+    local function drawRivet(cx, cy, radius)
+        love.graphics.setColor(0.5, 0.35, 0.2, 1)
+        love.graphics.circle("fill", cx, cy, radius)
+        love.graphics.setColor(0.6, 0.45, 0.3, 0.5)
+        love.graphics.circle("fill", cx - radius * 0.3, cy - radius * 0.3, radius * 0.4)
+    end
+    local ro = 15
+    drawRivet(boxX + ro, boxY + ro, 5)
+    drawRivet(boxX + boxW - ro, boxY + ro, 5)
+    drawRivet(boxX + ro, boxY + boxH - ro, 5)
+    drawRivet(boxX + boxW - ro, boxY + boxH - ro, 5)
+    
+    -- Title with dark glow
     love.graphics.setFont(Game.fonts.title)
-    love.graphics.setColor(0.8, 0.2, 0.2, 1)
-    love.graphics.print("DEFEAT", (screenW - Game.fonts.title:getWidth("DEFEAT")) / 2, boxY + 20)
+    local title = "DEFEAT"
+    local titleW = Game.fonts.title:getWidth(title)
+    local titleX = (screenW - titleW) / 2
+    local titleY = boxY + 25
+    
+    -- Dark glow effect
+    love.graphics.setColor(0.3, 0.1, 0.1, 0.4)
+    for dx = -2, 2 do
+        for dy = -2, 2 do
+            if dx ~= 0 or dy ~= 0 then
+                love.graphics.print(title, titleX + dx, titleY + dy)
+            end
+        end
+    end
+    love.graphics.setColor(0, 0, 0, 0.5)
+    love.graphics.print(title, titleX + 2, titleY + 2)
+    love.graphics.setColor(0.8, 0.25, 0.2, 1)
+    love.graphics.print(title, titleX, titleY)
     
     -- Message
     love.graphics.setFont(Game.fonts.medium)
-    love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.print("Your Town Hall was destroyed!", (screenW - Game.fonts.medium:getWidth("Your Town Hall was destroyed!")) / 2, boxY + 70)
+    love.graphics.setColor(0.92, 0.88, 0.80, 1)
+    local msg = "Your Town Hall was destroyed!"
+    love.graphics.print(msg, (screenW - Game.fonts.medium:getWidth(msg)) / 2, titleY + 75)
+    
+    -- Decorative line
+    love.graphics.setColor(0.40, 0.28, 0.15, 1)
+    love.graphics.setLineWidth(2)
+    local lineY = titleY + 105
+    love.graphics.line(boxX + 40, lineY, boxX + boxW - 40, lineY)
+    drawRivet(boxX + 40, lineY, 3)
+    drawRivet(boxX + boxW - 40, lineY, 3)
     
     -- Stats
     love.graphics.setFont(Game.fonts.small)
-    love.graphics.setColor(0.9, 0.9, 0.8, 1)
-    local statsY = boxY + 110
-    local lineHeight = 22
+    love.graphics.setColor(0.92, 0.88, 0.80, 0.9)
+    local statsY = lineY + 20
+    local lineHeight = 24
+    local leftX = boxX + 50
     
     local minutes = math.floor(elapsedTime / 60)
     local seconds = math.floor(elapsedTime % 60)
     local timeStr = string.format("Time: %d:%02d", minutes, seconds)
-    love.graphics.print(timeStr, boxX + 40, statsY)
+    love.graphics.print(timeStr, leftX, statsY)
     
-    love.graphics.print("Units Killed: " .. gameStats.unitsKilled, boxX + 40, statsY + lineHeight)
-    love.graphics.print("Units Lost: " .. gameStats.unitsLost, boxX + 40, statsY + lineHeight * 2)
-    love.graphics.print("Buildings Destroyed: " .. gameStats.buildingsDestroyed, boxX + 40, statsY + lineHeight * 3)
-    love.graphics.print("Buildings Lost: " .. gameStats.buildingsLost, boxX + 40, statsY + lineHeight * 4)
+    love.graphics.print("Units Killed: " .. gameStats.unitsKilled, leftX, statsY + lineHeight)
+    love.graphics.print("Units Lost: " .. gameStats.unitsLost, leftX, statsY + lineHeight * 2)
+    love.graphics.print("Buildings Destroyed: " .. gameStats.buildingsDestroyed, leftX, statsY + lineHeight * 3)
+    love.graphics.print("Buildings Lost: " .. gameStats.buildingsLost, leftX, statsY + lineHeight * 4)
     
-    -- Continue prompt
+    -- Continue prompt (pulsing)
+    local promptAlpha = 0.5 + math.sin(elapsedTime * 2) * 0.3
     love.graphics.setFont(Game.fonts.small)
-    love.graphics.setColor(0.7, 0.7, 0.7, 1)
-    love.graphics.print("Press SPACE to return to title", (screenW - Game.fonts.small:getWidth("Press SPACE to return to title")) / 2, boxY + boxH - 35)
+    love.graphics.setColor(0.92, 0.88, 0.80, promptAlpha)
+    local prompt = "Press SPACE to return to title"
+    love.graphics.print(prompt, (screenW - Game.fonts.small:getWidth(prompt)) / 2, boxY + boxH - 40)
 end
 
 local function getBuildingSize(buildingType)
@@ -1143,6 +1309,10 @@ function Gameplay.load()
     -- Initialize visual effects system
     if Effects then Effects.init() end
     
+    -- Initialize audio system
+    if Audio and Audio.init then Audio.init() end
+    if Audio and Audio.playRandomMusic then Audio.playRandomMusic() end
+    
     -- Pathfinding computed on-demand, no need to invalidate
     
     elapsedTime = 0
@@ -1207,22 +1377,56 @@ function Gameplay.load()
     local m1X, m1Y = map:findClearArea(buildingSize, buildingSize, thGridX + 8, thGridY + 5, 10)
     table.insert(goldMines, GoldMine.new({gridX = m1X, gridY = m1Y, gold = 50000, map = map}))
     
-    -- Player starting peons - send to closest mine
+    -- Player starting farm (already built)
+    local farmX, farmY = map:findClearArea(2, 2, thGridX + 4, thGridY - 3, 6)
+    if farmX then
+        local startFarm = Farm.new({gridX = farmX, gridY = farmY, map = map, isBuilding = false, team = playerTeam})
+        startFarm.completed = true
+        table.insert(farms, startFarm)
+    end
+    
+    -- Player starting peons - 7 total, 6 on gold, 1 on lumber (every 7th)
     local spawnX, spawnY = townHall:getSpawnPos()
-    for i = 1, 3 do
+    for i = 1, 7 do
         local newPeon = Peon.new({
-            worldX = spawnX + (i - 1) * 35,
-            worldY = spawnY + (i - 2) * 30,
+            worldX = spawnX + ((i - 1) % 4) * 35,
+            worldY = spawnY + math.floor((i - 1) / 4) * 30,
             map = map,
             team = playerTeam
         })
         setupPeonCallbacks(newPeon)
         pushUnitOutOfBuildings(newPeon)
         table.insert(peons, newPeon)
-        -- Auto-send to closest mine
-        local closestMine = findClosestMine(newPeon.worldX, newPeon.worldY)
-        if closestMine then
-            newPeon:goToMine(closestMine)
+        
+        -- 7th peon goes to lumber
+        if i == 7 then
+            -- Find a nearby tree
+            local treeX, treeY = nil, nil
+            local peonGridX = math.floor(newPeon.worldX / 32) + 1
+            local peonGridY = math.floor(newPeon.worldY / 32) + 1
+            for radius = 3, 15 do
+                for dx = -radius, radius do
+                    for dy = -radius, radius do
+                        local checkX = peonGridX + dx
+                        local checkY = peonGridY + dy
+                        if map:isTileTree(checkX, checkY) then
+                            treeX, treeY = checkX, checkY
+                            break
+                        end
+                    end
+                    if treeX then break end
+                end
+                if treeX then break end
+            end
+            if treeX then
+                newPeon:goToTree(treeX, treeY)
+            end
+        else
+            -- Send to closest mine
+            local closestMine = findClosestMine(newPeon.worldX, newPeon.worldY)
+            if closestMine then
+                newPeon:goToMine(closestMine)
+            end
         end
     end
     
@@ -1239,12 +1443,12 @@ function Gameplay.load()
     local m3X, m3Y = map:findClearArea(buildingSize, buildingSize, 32, 32, 15)
     table.insert(goldMines, GoldMine.new({gridX = m3X, gridY = m3Y, gold = 100000, map = map}))
     
-    -- Enemy starting peons - send most to mine, keep one idle for building
+    -- Enemy starting peons - 7 total, 6 on gold, 1 on lumber (every 7th)
     local enemySpawnX, enemySpawnY = enemyTownHall:getSpawnPos()
-    for i = 1, 3 do
+    for i = 1, 7 do
         local newPeon = Peon.new({
-            worldX = enemySpawnX + (i - 1) * 35,
-            worldY = enemySpawnY + (i - 2) * 30,
+            worldX = enemySpawnX + ((i - 1) % 4) * 35,
+            worldY = enemySpawnY + math.floor((i - 1) / 4) * 30,
             map = map,
             team = enemyTeam
         })
@@ -1252,14 +1456,44 @@ function Gameplay.load()
         setupPeonCallbacks(newPeon)
         pushUnitOutOfBuildings(newPeon)
         table.insert(peons, newPeon)
-        -- Send first 2 peons to mine, keep 3rd idle for building
-        if i <= 2 then
+        
+        -- 7th peon goes to lumber
+        if i == 7 then
+            local treeX, treeY = nil, nil
+            local peonGridX = math.floor(newPeon.worldX / 32) + 1
+            local peonGridY = math.floor(newPeon.worldY / 32) + 1
+            for radius = 3, 15 do
+                for dx = -radius, radius do
+                    for dy = -radius, radius do
+                        local checkX = peonGridX + dx
+                        local checkY = peonGridY + dy
+                        if map:isTileTree(checkX, checkY) then
+                            treeX, treeY = checkX, checkY
+                            break
+                        end
+                    end
+                    if treeX then break end
+                end
+                if treeX then break end
+            end
+            if treeX then
+                newPeon:goToTree(treeX, treeY)
+            end
+        else
+            -- Send to closest mine
             local closestMine = findClosestMine(newPeon.worldX, newPeon.worldY)
             if closestMine then
                 newPeon:goToMine(closestMine)
             end
         end
-        -- 3rd peon stays idle so AI can use it to build farm/barracks
+    end
+    
+    -- Enemy starting farm (already built)
+    local enemyFarmX, enemyFarmY = map:findClearArea(2, 2, enemyThGridX - 4, enemyThGridY - 3, 6)
+    if enemyFarmX then
+        local enemyFarm = Farm.new({gridX = enemyFarmX, gridY = enemyFarmY, map = map, isBuilding = false, team = enemyTeam})
+        enemyFarm.completed = true
+        table.insert(farms, enemyFarm)
     end
     
     -- Initialize AI controller
@@ -1269,7 +1503,9 @@ function Gameplay.load()
             townHall = enemyTownHall,
             map = map,
             startGold = 1000,
-            startLumber = 400
+            startLumber = 400,
+            startingPeons = 7,
+            personality = "blinky"  -- Aggressive 4-grunt rush
         })
     end
     
@@ -1319,8 +1555,21 @@ function Gameplay.update(dt)
     if Effects then Effects.update(gameDt) end
     if DrawUtils then DrawUtils.update(gameDt) end
     
+    -- Update audio (check if music ended, play next)
+    if Audio and Audio.update then Audio.update(gameDt) end
+    
     elapsedTime = elapsedTime + gameDt
-    map:update(dt)  -- Camera stays at real-time for responsiveness
+    
+    -- Disable edge scroll when placing buildings, dragging map, or in UI
+    local disableEdgeScroll = isPlacingBuilding or input.isMapDragging or isBoxSelecting
+    map:update(dt, disableEdgeScroll)  -- Camera stays at real-time for responsiveness
+    
+    -- Update fog of war
+    local playerTeam = Teams and Teams.PLAYER or 1
+    local allUnits = getAllUnits()
+    local allBuildings = getAllBuildings()
+    map:updateFog(allUnits, allBuildings, playerTeam)
+    
     calculatePopulation()
     updateRequirementsState()
     
@@ -1635,8 +1884,19 @@ function Gameplay.update(dt)
     
     -- Update notifications
     for i = #notifications, 1, -1 do
-        notifications[i].timer = notifications[i].timer - gameDt
-        if notifications[i].timer <= 0 then
+        local notif = notifications[i]
+        notif.timer = notif.timer - gameDt
+        
+        -- Slide in animation
+        if notif.slideProgress < 1 then
+            notif.slideProgress = math.min(1, notif.slideProgress + gameDt / NOTIFICATION_SLIDE_TIME)
+        end
+        
+        -- Animate slot position
+        notif.currentSlot = notif.currentSlot or notif.targetSlot
+        notif.currentSlot = notif.currentSlot + (notif.targetSlot - notif.currentSlot) * math.min(1, gameDt * 8)
+        
+        if notif.timer <= 0 then
             table.remove(notifications, i)
         end
     end
@@ -1658,27 +1918,88 @@ function Gameplay.draw()
     
     love.graphics.setScissor(map.viewportX, map.viewportY, map.viewportW, map.viewportH)
     
-    -- Draw all buildings
-    for _, farm in ipairs(farms) do farm:draw() end
-    for _, barrack in ipairs(barracks) do barrack:draw() end
-    for _, building in ipairs(lumberMills) do building:draw() end
-    for _, building in ipairs(blacksmiths) do building:draw() end
-    for _, building in ipairs(scoutTowers) do building:draw() end
-    for _, building in ipairs(archeryRanges) do building:draw() end
-    for _, building in ipairs(stables) do building:draw() end
-    for _, building in ipairs(siegeWorkshops) do building:draw() end
-    for _, building in ipairs(townHalls) do building:draw() end
-    townHall:draw()
-    for _, mine in ipairs(goldMines) do mine:draw() end
+    local playerTeam = Teams and Teams.PLAYER or 1
     
-    -- Draw all units
-    for _, peon in ipairs(peons) do peon:draw() end
-    for _, footman in ipairs(footmen) do footman:draw() end
-    for _, archer in ipairs(archers) do archer:draw() end
-    for _, knight in ipairs(knights) do knight:draw() end
-    for _, unit in ipairs(flyingScouts) do unit:draw() end
-    for _, unit in ipairs(ballistas) do unit:draw() end
-    for _, unit in ipairs(kamikazes) do unit:draw() end
+    -- Helper to check if entity is visible based on fog
+    local function isEntityVisible(entity, requireVisible)
+        if not map.fogEnabled then return true end
+        
+        -- Player entities always visible
+        if entity.team == playerTeam then return true end
+        
+        -- Get entity grid position
+        local wx, wy
+        if entity.getWorldCenter then
+            wx, wy = entity:getWorldCenter()
+        else
+            wx, wy = entity.worldX, entity.worldY
+        end
+        local gx, gy = map:worldToGrid(wx, wy)
+        
+        if requireVisible then
+            -- Units require full visibility
+            return map:isTileVisible(gx, gy)
+        else
+            -- Buildings just need to be explored
+            return map:isTileExplored(gx, gy)
+        end
+    end
+    
+    -- Draw all buildings (visible if explored)
+    for _, farm in ipairs(farms) do 
+        if isEntityVisible(farm, false) then farm:draw() end
+    end
+    for _, barrack in ipairs(barracks) do 
+        if isEntityVisible(barrack, false) then barrack:draw() end
+    end
+    for _, building in ipairs(lumberMills) do 
+        if isEntityVisible(building, false) then building:draw() end
+    end
+    for _, building in ipairs(blacksmiths) do 
+        if isEntityVisible(building, false) then building:draw() end
+    end
+    for _, building in ipairs(scoutTowers) do 
+        if isEntityVisible(building, false) then building:draw() end
+    end
+    for _, building in ipairs(archeryRanges) do 
+        if isEntityVisible(building, false) then building:draw() end
+    end
+    for _, building in ipairs(stables) do 
+        if isEntityVisible(building, false) then building:draw() end
+    end
+    for _, building in ipairs(siegeWorkshops) do 
+        if isEntityVisible(building, false) then building:draw() end
+    end
+    for _, building in ipairs(townHalls) do 
+        if isEntityVisible(building, false) then building:draw() end
+    end
+    townHall:draw()  -- Player's town hall always visible
+    for _, mine in ipairs(goldMines) do 
+        if isEntityVisible(mine, false) then mine:draw() end
+    end
+    
+    -- Draw all units (enemy units require visible, player units always shown)
+    for _, peon in ipairs(peons) do 
+        if isEntityVisible(peon, true) then peon:draw() end
+    end
+    for _, footman in ipairs(footmen) do 
+        if isEntityVisible(footman, true) then footman:draw() end
+    end
+    for _, archer in ipairs(archers) do 
+        if isEntityVisible(archer, true) then archer:draw() end
+    end
+    for _, knight in ipairs(knights) do 
+        if isEntityVisible(knight, true) then knight:draw() end
+    end
+    for _, unit in ipairs(flyingScouts) do 
+        if isEntityVisible(unit, true) then unit:draw() end
+    end
+    for _, unit in ipairs(ballistas) do 
+        if isEntityVisible(unit, true) then unit:draw() end
+    end
+    for _, unit in ipairs(kamikazes) do 
+        if isEntityVisible(unit, true) then unit:draw() end
+    end
     
     -- Draw particle effects (dust, sparks, etc)
     if Effects then Effects.draw(map) end
@@ -1697,21 +2018,46 @@ function Gameplay.draw()
     local selEntity = selectedEntities[1]
     if selEntity and selEntity.drawUI then selEntity:drawUI() end
     
-    -- Draw notifications
+    -- Draw notifications (slide in from left, stack up)
     love.graphics.setFont(Game.fonts.medium)
+    local notifBaseY = screenH - 200  -- Start from lower left
+    
     for i, notif in ipairs(notifications) do
-        local alpha = math.min(1, notif.timer)
-        local y = screenH / 2 - 50 + (i - 1) * 30
-        -- Stone-themed notification background
-        love.graphics.setColor(UI.stoneDark[1], UI.stoneDark[2], UI.stoneDark[3], alpha * 0.9)
+        local slot = notif.currentSlot or notif.targetSlot
+        local y = notifBaseY - (slot - 1) * (NOTIFICATION_HEIGHT + NOTIFICATION_SPACING)
+        
+        -- Fade out near end
+        local fadeAlpha = 1
+        if notif.timer < 0.5 then
+            fadeAlpha = notif.timer / 0.5
+        end
+        
+        -- Slide in from left
+        local slideEase = 1 - (1 - notif.slideProgress) * (1 - notif.slideProgress)  -- Ease out
         local textW = Game.fonts.medium:getWidth(notif.text)
-        love.graphics.rectangle("fill", (screenW - textW) / 2 - 15, y - 8, textW + 30, 34, 4)
-        love.graphics.setColor(UI.metalBronze[1], UI.metalBronze[2], UI.metalBronze[3], alpha)
+        local boxW = textW + 30
+        local offscreenX = -boxW - 20
+        local onscreenX = 20
+        local x = offscreenX + (onscreenX - offscreenX) * slideEase
+        
+        -- Stone-themed notification background
+        love.graphics.setColor(UI.stoneDark[1], UI.stoneDark[2], UI.stoneDark[3], fadeAlpha * 0.95)
+        love.graphics.rectangle("fill", x, y, boxW, NOTIFICATION_HEIGHT, 4)
+        
+        -- Border
+        love.graphics.setColor(UI.metalBronze[1], UI.metalBronze[2], UI.metalBronze[3], fadeAlpha * 0.8)
         love.graphics.setLineWidth(2)
-        love.graphics.rectangle("line", (screenW - textW) / 2 - 15, y - 8, textW + 30, 34, 4)
-        -- Text
-        love.graphics.setColor(UI.textLight[1], UI.textLight[2], UI.textLight[3], alpha)
-        love.graphics.print(notif.text, (screenW - textW) / 2, y)
+        love.graphics.rectangle("line", x, y, boxW, NOTIFICATION_HEIGHT, 4)
+        
+        -- Highlight on top edge
+        love.graphics.setColor(UI.stoneHighlight[1], UI.stoneHighlight[2], UI.stoneHighlight[3], fadeAlpha * 0.3)
+        love.graphics.line(x + 4, y + 1, x + boxW - 4, y + 1)
+        
+        -- Text with shadow
+        love.graphics.setColor(0, 0, 0, fadeAlpha * 0.5)
+        love.graphics.print(notif.text, x + 16, y + 9)
+        love.graphics.setColor(UI.textLight[1], UI.textLight[2], UI.textLight[3], fadeAlpha)
+        love.graphics.print(notif.text, x + 15, y + 8)
     end
     
     if victory then drawVictoryScreen() end
@@ -1770,6 +2116,10 @@ function Gameplay.keypressed(key)
     elseif key == "3" then
         Game.settings.gameSpeed = 2.0
         addNotification("Game Speed: Fast (2x)")
+    elseif key == "f" then
+        -- Toggle fog of war (for testing)
+        map.fogEnabled = not map.fogEnabled
+        addNotification("Fog of War: " .. (map.fogEnabled and "ON" or "OFF"))
     end
 end
 

@@ -44,7 +44,7 @@ function Unit.new(params)
     self.damage = params.damage or 1
     self.attackSpeed = params.attackSpeed or 1.0  -- Attacks per second
     self.attackCooldown = 0
-    self.sightRadius = params.sightRadius or 2  -- Tiles
+    self.sightRadius = params.sightRadius or 5  -- Tiles - decent vision range
     self.attackTarget = nil
     self.isAttacking = false
     
@@ -90,11 +90,109 @@ function Unit:setAttackTarget(target)
 end
 
 function Unit:getAttackRange()
-    return self.radius + 20  -- Melee range
+    return self.radius + 4  -- Tight melee range (about 18 pixels)
 end
 
 function Unit:getSightRangePixels()
     return self.sightRadius * 32  -- Convert tiles to pixels
+end
+
+function Unit:canMoveTo(newX, newY, buildings)
+    -- Check terrain passability
+    if self.map and not self.map:isWorldPosPassable(newX, newY) then
+        return false
+    end
+    
+    -- Check building collisions
+    if buildings then
+        for _, b in ipairs(buildings) do
+            -- Skip attack target - we want to approach it
+            if b == self.attackTarget then
+                goto continue
+            end
+            
+            if b.getWorldBounds then
+                local bx1, by1, bx2, by2 = b:getWorldBounds()
+                -- Simple circle vs rectangle collision
+                local closestX = math.max(bx1, math.min(newX, bx2))
+                local closestY = math.max(by1, math.min(newY, by2))
+                local dx = newX - closestX
+                local dy = newY - closestY
+                local distSq = dx * dx + dy * dy
+                if distSq < self.radius * self.radius then
+                    return false
+                end
+            end
+            
+            ::continue::
+        end
+    end
+    
+    return true
+end
+
+-- Try to move at full speed in the given direction
+-- If blocked, find alternative directions that maintain full speed (like Peon)
+function Unit:tryMove(dirX, dirY, moveSpeed, buildings)
+    local moveX = dirX * moveSpeed
+    local moveY = dirY * moveSpeed
+    local newX = self.worldX + moveX
+    local newY = self.worldY + moveY
+    
+    -- First try direct movement
+    if self:canMoveTo(newX, newY, buildings) then
+        self.worldX = newX
+        self.worldY = newY
+        return true
+    end
+    
+    -- Blocked - try sliding along walls at FULL SPEED
+    -- Test 8 alternative directions, pick best one that's closest to intended direction
+    local alternatives = {
+        {dx = 1, dy = 0},
+        {dx = -1, dy = 0},
+        {dx = 0, dy = 1},
+        {dx = 0, dy = -1},
+        {dx = 0.707, dy = 0.707},
+        {dx = -0.707, dy = 0.707},
+        {dx = 0.707, dy = -0.707},
+        {dx = -0.707, dy = -0.707},
+    }
+    
+    -- Sort by how aligned they are with intended direction (dot product)
+    table.sort(alternatives, function(a, b)
+        local dotA = a.dx * dirX + a.dy * dirY
+        local dotB = b.dx * dirX + b.dy * dirY
+        return dotA > dotB
+    end)
+    
+    -- Try each alternative at full speed
+    for _, alt in ipairs(alternatives) do
+        local dot = alt.dx * dirX + alt.dy * dirY
+        -- Only use alternatives that are at least somewhat aligned (dot > 0)
+        if dot > 0.1 then
+            local altX = self.worldX + alt.dx * moveSpeed
+            local altY = self.worldY + alt.dy * moveSpeed
+            if self:canMoveTo(altX, altY, buildings) then
+                self.worldX = altX
+                self.worldY = altY
+                return true
+            end
+        end
+    end
+    
+    -- Still stuck - try smaller movements in the intended direction
+    for fraction = 0.75, 0.25, -0.25 do
+        local smallX = self.worldX + moveX * fraction
+        local smallY = self.worldY + moveY * fraction
+        if self:canMoveTo(smallX, smallY, buildings) then
+            self.worldX = smallX
+            self.worldY = smallY
+            return true
+        end
+    end
+    
+    return false  -- Completely stuck
 end
 
 function Unit:distanceTo(target)
@@ -114,9 +212,15 @@ function Unit:distanceTo(target)
     else
         tx, ty = target.worldX, target.worldY
     end
+    
+    -- Calculate center-to-center distance
     local dx = tx - self.worldX
     local dy = ty - self.worldY
-    return math.sqrt(dx * dx + dy * dy)
+    local centerDist = math.sqrt(dx * dx + dy * dy)
+    
+    -- Subtract target's radius to get edge-to-center distance
+    local targetRadius = target.radius or 0
+    return math.max(0, centerDist - targetRadius)
 end
 
 function Unit:updateAttacking(dt, buildings, allUnits, allBuildings)
@@ -140,9 +244,14 @@ function Unit:updateAttacking(dt, buildings, allUnits, allBuildings)
             if target.takeDamage then
                 target:takeDamage(self.damage)
                 self.attackCooldown = 1.0 / self.attackSpeed
+                self.lastAttackHit = true  -- Flag for animation
                 
                 -- Visual effects
                 if Effects then
+                    -- Damage flash on target
+                    Effects.damageFlash(target)
+                    
+                    -- Blood particles
                     local tx = target.worldX or (target.getWorldCenter and select(1, target:getWorldCenter()))
                     local ty = target.worldY or (target.getWorldCenter and select(2, target:getWorldCenter()))
                     if tx and ty then
@@ -177,11 +286,21 @@ function Unit:updateAttacking(dt, buildings, allUnits, allBuildings)
         if not self.path then
             self.targetX = tx
             self.targetY = ty
-            self.path = Pathfinding.findPath(self.worldX, self.worldY, tx, ty, buildings, self.map, self.radius)
+            -- Filter out target building from pathfinding so we can path TO it, not around it
+            local pathBuildings = buildings
+            if target.getWorldBounds and buildings then
+                pathBuildings = {}
+                for _, b in ipairs(buildings) do
+                    if b ~= target then
+                        table.insert(pathBuildings, b)
+                    end
+                end
+            end
+            self.path = Pathfinding.findPath(self.worldX, self.worldY, tx, ty, pathBuildings, self.map, self.radius)
             self.currentWaypoint = 1
         end
         
-        -- Move along path
+        -- Move along path (or fallback to direct movement)
         if self.path then
             local dirX, dirY = Pathfinding.getDirection(self.worldX, self.worldY, self.path, self.currentWaypoint)
             if dirX then
@@ -191,14 +310,18 @@ function Unit:updateAttacking(dt, buildings, allUnits, allBuildings)
                 end
                 
                 local moveSpeed = self.speed * dt
-                local newX = self.worldX + dirX * moveSpeed
-                local newY = self.worldY + dirY * moveSpeed
-                
-                -- Simple collision check
-                if self.map and self.map:isWorldPosPassable(newX, newY) then
-                    self.worldX = newX
-                    self.worldY = newY
-                end
+                self:tryMove(dirX, dirY, moveSpeed, buildings)
+            end
+        else
+            -- Fallback: direct movement toward target (no pathfinding)
+            local dx = tx - self.worldX
+            local dy = ty - self.worldY
+            local len = math.sqrt(dx * dx + dy * dy)
+            if len > 0 then
+                local dirX = dx / len
+                local dirY = dy / len
+                local moveSpeed = self.speed * dt
+                self:tryMove(dirX, dirY, moveSpeed, buildings)
             end
         end
     end
@@ -335,14 +458,14 @@ function Unit:updateMoving(dt, buildings)
             end
             
             local moveSpeed = self.speed * dt
-            local newX = self.worldX + dirX * moveSpeed
-            local newY = self.worldY + dirY * moveSpeed
-            
-            if self.map and self.map:isWorldPosPassable(newX, newY) then
-                self.worldX = newX
-                self.worldY = newY
-            end
+            self:tryMove(dirX, dirY, moveSpeed, buildings)
         end
+    else
+        -- Fallback: direct movement
+        local dirX = dx / dist
+        local dirY = dy / dist
+        local moveSpeed = self.speed * dt
+        self:tryMove(dirX, dirY, moveSpeed, buildings)
     end
 end
 
@@ -420,14 +543,14 @@ function Unit:updateAttackMoving(dt, buildings, allUnits, allBuildings)
             end
             
             local moveSpeed = self.speed * dt
-            local newX = self.worldX + dirX * moveSpeed
-            local newY = self.worldY + dirY * moveSpeed
-            
-            if self.map and self.map:isWorldPosPassable(newX, newY) then
-                self.worldX = newX
-                self.worldY = newY
-            end
+            self:tryMove(dirX, dirY, moveSpeed, buildings)
         end
+    else
+        -- Fallback: direct movement
+        local dirX = dx / dist
+        local dirY = dy / dist
+        local moveSpeed = self.speed * dt
+        self:tryMove(dirX, dirY, moveSpeed, buildings)
     end
 end
 

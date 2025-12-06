@@ -37,7 +37,7 @@ function Footman.new(params)
     self.hp = self.maxHp
     self.damage = 2
     self.attackSpeed = 1.0
-    self.sightRadius = 2
+    self.sightRadius = 5
     
     -- Animation properties
     self.animTimer = 0
@@ -66,8 +66,8 @@ function Footman:update(dt, buildings, allUnits, allBuildings)
         end
     end
     
-    -- Track when we're about to attack (check cooldown)
-    local wasReadyToAttack = self.attackCooldown <= 0
+    -- Clear lastAttackHit flag before update (it's set in Unit.updateAttacking)
+    self.lastAttackHit = false
     
     -- Track movement for dust
     local moveDistSq = (self.worldX - (self.lastWorldX or self.worldX))^2 + 
@@ -83,10 +83,17 @@ function Footman:update(dt, buildings, allUnits, allBuildings)
     -- Call parent Unit update for combat logic
     Unit.update(self, dt, buildings, allUnits, allBuildings)
     
-    -- Check if we just attacked (cooldown went from 0 to >0)
-    if wasReadyToAttack and self.attackCooldown > 0 then
+    -- Check if we just hit something (lastAttackHit is set in Unit.updateAttacking)
+    if self.lastAttackHit then
         self.isSwinging = true
         self.attackAnimTimer = 0.3  -- Swing duration
+        
+        -- Play hit sound
+        local Audio
+        pcall(function() Audio = require("audio") end)
+        if Audio and Audio.playHit then
+            Audio.playHit()
+        end
     end
 end
 
@@ -222,18 +229,49 @@ function Footman:draw()
         local swordAngle = math.sin((self.animTimer or 0) * 2) * 0.05
         local swingOffset = 0
         local swingAngle = 0
+        local swingProgress = 0
         
         -- Attack swing animation
         if self.isSwinging and self.attackAnimTimer then
-            local swingProgress = 1 - (self.attackAnimTimer / 0.3)  -- 0 to 1
+            swingProgress = 1 - (self.attackAnimTimer / 0.3)  -- 0 to 1
             -- Swing arc: start at rest, swing down and forward
             swingAngle = math.sin(swingProgress * math.pi) * 1.5  -- Big rotation
             swingOffset = math.sin(swingProgress * math.pi) * 8  -- Move forward
         end
         
+        -- Motion blur trail (draw before sword)
+        if self.isSwinging and swingProgress > 0.1 and swingProgress < 0.9 then
+            local blurCount = 4
+            for i = 1, blurCount do
+                local trailProgress = swingProgress - (i * 0.08)
+                if trailProgress > 0 then
+                    local trailAngle = math.sin(trailProgress * math.pi) * 1.5
+                    local trailOffset = math.sin(trailProgress * math.pi) * 8
+                    local alpha = (1 - i / blurCount) * 0.4
+                    
+                    love.graphics.push()
+                    love.graphics.translate(x + 9 + trailOffset, y + 4 - armSwing * 0.3)
+                    love.graphics.rotate(swordAngle + trailAngle)
+                    -- Ghost blade
+                    love.graphics.setColor(0.9, 0.95, 1, alpha)
+                    love.graphics.setLineWidth(2)
+                    love.graphics.line(0, -2, 0, -18)
+                    love.graphics.pop()
+                end
+            end
+        end
+        
         love.graphics.push()
         love.graphics.translate(x + 9 + swingOffset, y + 4 - armSwing * 0.3)
         love.graphics.rotate(swordAngle + swingAngle)
+        
+        -- Blade glow during swing
+        if self.isSwinging then
+            love.graphics.setColor(1, 1, 0.9, 0.5)
+            love.graphics.setLineWidth(6)
+            love.graphics.line(0, -2, 0, -16)
+        end
+        
         -- Blade
         love.graphics.setColor(0.7, 0.7, 0.75, 1)
         love.graphics.setLineWidth(3)
@@ -250,12 +288,6 @@ function Footman:draw()
         love.graphics.setColor(0.65, 0.55, 0.25, 1)
         love.graphics.line(-4, 0, 4, 0)
         love.graphics.pop()
-        
-        -- Swing effect flash
-        if self.isSwinging then
-            love.graphics.setColor(1, 1, 0.8, 0.3)
-            love.graphics.arc("fill", x + 12, y - 5, 15, -math.pi * 0.3, math.pi * 0.3)
-        end
         
         -- Head
         love.graphics.setColor(0.85, 0.72, 0.58, 1)

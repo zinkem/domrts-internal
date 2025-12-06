@@ -18,7 +18,7 @@ function GoldMine.new(params)
     self.map = params.map
     self.pixelSize = self.gridSize * 32
     
-    self.goldReserves = params.gold or 100000
+    self.goldReserves = params.gold or 12500  -- About 1,250 harvests at 10 gold each
     self.maxGold = self.goldReserves
     self.selected = false
     self.depleted = false
@@ -169,14 +169,16 @@ function GoldMine:draw()
         love.graphics.setColor(0, 1, 0, 0.8)
         love.graphics.setLineWidth(3)
         love.graphics.rectangle("line", x - 2, y - 2, size + 4, size + 4, 4)
+        
+        -- Gold reserves display (only when selected)
+        love.graphics.setColor(0, 0, 0, 0.6)
+        local goldText = tostring(self.goldReserves) .. " gold"
+        local font = love.graphics.getFont()
+        local textW = font:getWidth(goldText)
+        love.graphics.rectangle("fill", x + (size - textW) / 2 - 4, y - 22, textW + 8, 18, 3)
+        love.graphics.setColor(1, 0.85, 0, 1)
+        love.graphics.print(goldText, x + (size - textW) / 2, y - 20)
     end
-    
-    -- Gold reserves display
-    love.graphics.setColor(1, 0.85, 0, 1)
-    local goldText = tostring(self.goldReserves)
-    local font = love.graphics.getFont()
-    local textW = font:getWidth(goldText)
-    love.graphics.print(goldText, x + (size - textW) / 2, y - 18)
     
     love.graphics.setColor(1, 1, 1, 1)
 end

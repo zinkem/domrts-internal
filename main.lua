@@ -226,7 +226,7 @@ Game.SceneManager = SceneManager
 
 -- Love2D callbacks
 function love.load()
-    love.window.setTitle("Love2D Game")
+    love.window.setTitle("Dominion")
     love.window.setMode(1280, 720, {
         resizable = false,
         vsync = true
@@ -238,6 +238,13 @@ function love.load()
         large = love.graphics.newFont(32),
         title = love.graphics.newFont(64)
     }
+    
+    -- Initialize audio system
+    local Audio
+    pcall(function() Audio = require("audio") end)
+    if Audio and Audio.init then
+        Audio.init()
+    end
     
     -- Load and register scenes
     Game.SceneManager.register("title", require("title"))

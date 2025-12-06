@@ -56,7 +56,7 @@ function Peon.new(params)
     self.damage = 1
     self.attackSpeed = 1.0  -- Attacks per second
     self.attackCooldown = 0
-    self.sightRadius = 2  -- Tiles
+    self.sightRadius = 5  -- Tiles
     self.attackTarget = nil
     self.isAttacking = false
     
@@ -334,6 +334,14 @@ function Peon:update(dt, buildings, townHall, goldMine, resources, allUnits, all
     -- Update animation timer
     self.animTimer = self.animTimer + dt
     
+    -- Update flash timer
+    if self.flashTimer and self.flashTimer > 0 then
+        self.flashTimer = self.flashTimer - dt
+        if self.flashTimer <= 0 then
+            self.damageFlash = false
+        end
+    end
+    
     -- Update attack cooldown
     if self.attackCooldown > 0 then
         self.attackCooldown = self.attackCooldown - dt
@@ -489,15 +497,32 @@ function Peon:updateHarvesting(dt, resources)
     self.harvestTimer = self.harvestTimer + dt
     
     if self.harvestTimer >= self.harvestTime then
-        self.carryingGold = self.harvestAmount
+        -- Actually extract gold from the mine
+        local goldExtracted = self.harvestAmount
+        if self.targetMine and self.targetMine.extractGold then
+            goldExtracted = self.targetMine:extractGold(self.harvestAmount)
+        end
+        
+        self.carryingGold = goldExtracted
         self.visible = true
         self.state = Peon.STATE_RETURNING
+        
+        -- If mine is depleted, clear target
+        if self.targetMine and self.targetMine.depleted then
+            self.targetMine = nil
+        end
     end
 end
 
 function Peon:updateReturning(dt, buildings, townHall, resources)
-    if not townHall then
+    -- If no town hall, drop gold and go idle
+    if not townHall or (townHall.isDead and townHall:isDead()) then
+        self.carryingGold = 0
+        self.carryingLumber = 0
         self.state = Peon.STATE_IDLE
+        self.targetMine = nil
+        self.targetTreeX = nil
+        self.targetTreeY = nil
         return
     end
     
@@ -510,7 +535,9 @@ function Peon:updateReturning(dt, buildings, townHall, resources)
                 resources.gold = resources.gold + self.carryingGold
             end
             self.carryingGold = 0
-            if self.targetMine then
+            
+            -- Check if mine is still valid
+            if self.targetMine and not self.targetMine.depleted then
                 local cx, cy = self.targetMine:getWorldCenter()
                 self.targetX = cx
                 self.targetY = cy
@@ -518,6 +545,8 @@ function Peon:updateReturning(dt, buildings, townHall, resources)
                 self.currentWaypoint = 1
                 self.state = Peon.STATE_MOVING
             else
+                -- Mine depleted or gone, go idle
+                self.targetMine = nil
                 self.state = Peon.STATE_IDLE
             end
         elseif self.carryingLumber > 0 then
@@ -728,7 +757,7 @@ function Peon:setAttackTarget(target)
 end
 
 function Peon:getAttackRange()
-    return self.radius + 20  -- Melee range
+    return self.radius + 4  -- Tight melee range (about 18 pixels)
 end
 
 function Peon:getSightRangePixels()
@@ -752,9 +781,15 @@ function Peon:distanceTo(target)
     else
         tx, ty = target.worldX, target.worldY
     end
+    
+    -- Calculate center-to-center distance
     local dx = tx - self.worldX
     local dy = ty - self.worldY
-    return math.sqrt(dx * dx + dy * dy)
+    local centerDist = math.sqrt(dx * dx + dy * dy)
+    
+    -- Subtract target's radius to get edge-to-center distance
+    local targetRadius = target.radius or 0
+    return math.max(0, centerDist - targetRadius)
 end
 
 function Peon:updateAttacking(dt, buildings, allUnits, allBuildings)
@@ -864,10 +899,9 @@ end
 function Peon:takeDamage(amount)
     self.hp = self.hp - amount
     
-    -- Flash effect
-    if DrawUtils then
-        self.flashTimer = 0.1
-    end
+    -- Flash effect (always set, even without DrawUtils)
+    self.flashTimer = 0.15
+    self.damageFlash = true  -- Extra flag for visible feedback
     
     -- Aggro back if not already attacking
     if self.state ~= Peon.STATE_ATTACKING then
@@ -1114,6 +1148,13 @@ function Peon:draw()
     else
         -- Fallback: just draw body
         drawBody()
+        
+        -- Manual flash effect if damaged
+        if self.flashTimer and self.flashTimer > 0 then
+            local x, y = self:getScreenPos()
+            love.graphics.setColor(1, 0.3, 0.3, 0.5)
+            love.graphics.circle("fill", x, y, self.radius + 5)
+        end
     end
     
     love.graphics.setLineWidth(1)

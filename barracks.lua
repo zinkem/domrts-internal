@@ -43,7 +43,7 @@ function Barracks.new(params)
     -- Combat stats
     self.maxHp = 80
     self.hp = self.maxHp
-    self.sightRadius = 2
+    self.sightRadius = 6
     
     self.isBuilding = params.isBuilding or false
     self.buildProgress = params.buildProgress or 0
@@ -158,15 +158,16 @@ function Barracks:draw()
             end
         end
         
-        -- Roof (dark red/maroon military style)
-        love.graphics.setColor(0.45, 0.18, 0.15, 1)
+        -- Roof (team colored)
+        local teamColors = Teams and Teams.getColors(self.team) or {dark = {0.3, 0.3, 0.35, 1}, primary = {0.4, 0.4, 0.45, 1}}
+        love.graphics.setColor(teamColors.dark[1], teamColors.dark[2], teamColors.dark[3], 1)
         love.graphics.polygon("fill", 
             x + size/2, y - 5,
             x - 3, y + 30,
             x + size + 3, y + 30
         )
         -- Roof highlight
-        love.graphics.setColor(0.55, 0.22, 0.18, 1)
+        love.graphics.setColor(teamColors.primary[1], teamColors.primary[2], teamColors.primary[3], 1)
         love.graphics.polygon("fill",
             x + size/2, y - 5,
             x + size/2 - 30, y + 25,

@@ -51,7 +51,7 @@ function TownHall.new(params)
     -- Combat stats
     self.maxHp = 150
     self.hp = self.maxHp
-    self.sightRadius = 2  -- Tiles
+    self.sightRadius = 8  -- Buildings see further
     
     -- Tier system: 1 = Town Hall, 2 = Hold, 3 = Keep
     self.tier = 1
