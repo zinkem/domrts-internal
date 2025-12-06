@@ -618,6 +618,11 @@ local function pushUnitOutOfBuildings(unit)
         local pushedThisPass = false
         
         for _, b in ipairs(buildings) do
+            -- Skip pushing peon away from its target mine
+            if unit.targetMine and b == unit.targetMine then
+                goto continue
+            end
+            
             if b.getWorldBounds then
                 local bx1, by1, bx2, by2 = b:getWorldBounds()
                 local closestX = math.max(bx1, math.min(unit.worldX, bx2))
@@ -674,6 +679,8 @@ local function pushUnitOutOfBuildings(unit)
                     end
                 end
             end
+            
+            ::continue::
         end
         
         if not pushedThisPass then

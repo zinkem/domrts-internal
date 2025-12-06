@@ -142,6 +142,11 @@ function Peon:canMoveTo(newX, newY, buildings)
     if not buildings then return true end
     
     for _, b in ipairs(buildings) do
+        -- Skip collision check for target mine (peon needs to walk into it)
+        if self.targetMine and b == self.targetMine then
+            goto continue
+        end
+        
         local currentPen = self:getBuildingPenetration(self.worldX, self.worldY, b)
         local newPen = self:getBuildingPenetration(newX, newY, b)
         
@@ -157,6 +162,8 @@ function Peon:canMoveTo(newX, newY, buildings)
                 return false
             end
         end
+        
+        ::continue::
     end
     
     return true
@@ -293,9 +300,9 @@ function Peon:updateMoving(dt, buildings, goldMine)
         return
     end
     
-    -- Check if we should stop for a mine
-    if self.targetMine and goldMine then
-        if self:isTouchingBuilding(goldMine, 4) then
+    -- Check if we should stop for a mine (use self.targetMine, not the parameter)
+    if self.targetMine then
+        if self:isTouchingBuilding(self.targetMine, 4) then
             self.visible = false
             self.state = Peon.STATE_HARVESTING
             self.harvestTimer = 0

@@ -82,6 +82,36 @@ SELECTION SYSTEM (gameplay.lua):
     Right-click context: move/harvest/attack based on target
 
 ================================================================================
+KNOWN ISSUES & FIXES:
+================================================================================
+
+BUG FIX: Peons not entering gold mines
+    PROBLEM: Three issues prevented peons from entering mines:
+    
+    1) In gameplay.lua line ~941, peon:update() was called with
+       goldMines[1] hardcoded, so peons would only properly check
+       against the first mine regardless of their actual target.
+    
+    2) In peon.lua canMoveTo(), collision detection blocked peons
+       from approaching ANY building including their target mine.
+    
+    3) In gameplay.lua pushUnitOutOfBuildings(), all units were
+       pushed away from all buildings every frame, including peons
+       trying to enter their target mine.
+    
+    FIX: 
+    - peon.lua updateMoving(): Use self.targetMine instead of the
+      goldMine parameter for the isTouchingBuilding check (line ~297)
+    
+    - peon.lua canMoveTo(): Skip collision check when building is
+      self.targetMine so peon can walk into the mine (line ~144)
+    
+    - gameplay.lua pushUnitOutOfBuildings(): Skip pushing when unit
+      has targetMine and building is that target mine (line ~625)
+    
+    FILES AFFECTED: peon.lua, gameplay.lua
+
+================================================================================
 COMMON MODIFICATIONS & RELEVANT FILES:
 ================================================================================
 
