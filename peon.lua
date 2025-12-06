@@ -29,6 +29,7 @@ Peon.STATE_HARVESTING = "Harvesting"
 Peon.STATE_RETURNING = "Returning"
 Peon.STATE_CHOPPING = "Chopping"
 Peon.STATE_BUILDING = "Building"
+Peon.STATE_ATTACKING = "Attacking"
 
 Peon.RADIUS = 14  -- Fits inside 1 tile (32x32 pixels)
 
@@ -48,6 +49,16 @@ function Peon.new(params)
     -- Team ownership
     self.team = params.team or (Teams and Teams.PLAYER or 1)
     self.owner = params.owner or nil  -- Reference to Player object
+    
+    -- Combat stats
+    self.maxHp = 4
+    self.hp = self.maxHp
+    self.damage = 1
+    self.attackSpeed = 1.0  -- Attacks per second
+    self.attackCooldown = 0
+    self.sightRadius = 2  -- Tiles
+    self.attackTarget = nil
+    self.isAttacking = false
     
     self.targetX = nil
     self.targetY = nil
@@ -319,9 +330,14 @@ function Peon:getMoveDirection(targetX, targetY, buildings)
     return nil, nil
 end
 
-function Peon:update(dt, buildings, townHall, goldMine, resources)
+function Peon:update(dt, buildings, townHall, goldMine, resources, allUnits, allBuildings)
     -- Update animation timer
     self.animTimer = self.animTimer + dt
+    
+    -- Update attack cooldown
+    if self.attackCooldown > 0 then
+        self.attackCooldown = self.attackCooldown - dt
+    end
     
     -- Track movement for dust effects
     local moved = false
@@ -344,6 +360,11 @@ function Peon:update(dt, buildings, townHall, goldMine, resources)
     self.lastWorldX = self.worldX
     self.lastWorldY = self.worldY
     
+    -- Auto-acquire targets if idle and enemies nearby
+    if self.state == Peon.STATE_IDLE and allUnits then
+        self:checkForEnemies(allUnits, allBuildings)
+    end
+    
     if self.state == Peon.STATE_MOVING then
         self:updateMoving(dt, buildings, goldMine)
     elseif self.state == Peon.STATE_HARVESTING then
@@ -354,6 +375,8 @@ function Peon:update(dt, buildings, townHall, goldMine, resources)
         self:updateChopping(dt, resources)
     elseif self.state == Peon.STATE_BUILDING then
         -- Building update is handled by gameplay.lua
+    elseif self.state == Peon.STATE_ATTACKING then
+        self:updateAttacking(dt, buildings, allUnits, allBuildings)
     end
 end
 
@@ -480,7 +503,12 @@ function Peon:updateReturning(dt, buildings, townHall, resources)
     
     if self:isTouchingBuilding(townHall, 4) then
         if self.carryingGold > 0 then
-            resources.gold = resources.gold + self.carryingGold
+            -- Use callback if available, otherwise direct access
+            if self.addResources then
+                self.addResources(self.carryingGold, 0)
+            else
+                resources.gold = resources.gold + self.carryingGold
+            end
             self.carryingGold = 0
             if self.targetMine then
                 local cx, cy = self.targetMine:getWorldCenter()
@@ -493,7 +521,12 @@ function Peon:updateReturning(dt, buildings, townHall, resources)
                 self.state = Peon.STATE_IDLE
             end
         elseif self.carryingLumber > 0 then
-            resources.lumber = resources.lumber + self.carryingLumber
+            -- Use callback if available, otherwise direct access
+            if self.addResources then
+                self.addResources(0, self.carryingLumber)
+            else
+                resources.lumber = resources.lumber + self.carryingLumber
+            end
             self.carryingLumber = 0
             if self.targetTreeX and self.targetTreeY then
                 -- Have a target tree (original or adjacent), go chop it
@@ -681,8 +714,187 @@ function Peon:finishBuilding(building)
     self.buildEntryY = nil
 end
 
+-- Combat Methods --
+
+function Peon:setAttackTarget(target)
+    self.attackTarget = target
+    self.targetMine = nil
+    self.targetTreeX = nil
+    self.targetTreeY = nil
+    self.carryingGold = 0
+    self.carryingLumber = 0
+    self.state = Peon.STATE_ATTACKING
+    self.path = nil
+end
+
+function Peon:getAttackRange()
+    return self.radius + 20  -- Melee range
+end
+
+function Peon:getSightRangePixels()
+    return self.sightRadius * 32  -- Convert tiles to pixels
+end
+
+function Peon:distanceTo(target)
+    local tx, ty
+    if target.getWorldCenter then
+        tx, ty = target:getWorldCenter()
+    else
+        tx, ty = target.worldX, target.worldY
+    end
+    local dx = tx - self.worldX
+    local dy = ty - self.worldY
+    return math.sqrt(dx * dx + dy * dy)
+end
+
+function Peon:updateAttacking(dt, buildings, allUnits, allBuildings)
+    -- Check if target is dead or gone
+    if not self.attackTarget or (self.attackTarget.isDead and self.attackTarget:isDead()) then
+        self.attackTarget = nil
+        self.state = Peon.STATE_IDLE
+        -- Try to find new target
+        if allUnits then
+            self:checkForEnemies(allUnits, allBuildings)
+        end
+        return
+    end
+    
+    local target = self.attackTarget
+    local dist = self:distanceTo(target)
+    local attackRange = self:getAttackRange()
+    
+    if dist <= attackRange then
+        -- In range - attack if cooldown ready
+        if self.attackCooldown <= 0 then
+            -- Perform attack
+            if target.takeDamage then
+                target:takeDamage(self.damage)
+                self.attackCooldown = 1.0 / self.attackSpeed
+                
+                -- Visual/sound effects
+                if Effects then
+                    local tx, ty = target.worldX or target:getWorldCenter()
+                    local targetY = target.worldY or select(2, target:getWorldCenter())
+                    Effects.blood(tx or target.worldX, targetY or target.worldY)
+                end
+            end
+        end
+    else
+        -- Move toward target
+        local tx, ty
+        if target.getWorldCenter then
+            tx, ty = target:getWorldCenter()
+        else
+            tx, ty = target.worldX, target.worldY
+        end
+        
+        -- Compute path if needed
+        if not self.path then
+            self.targetX = tx
+            self.targetY = ty
+            self.path = self:computePath(tx, ty, buildings)
+            self.currentWaypoint = 1
+        end
+        
+        -- Move along path
+        if self.path then
+            local dirX, dirY = self:getMoveDirection(tx, ty, buildings)
+            if dirX then
+                local moveSpeed = self.speed * dt
+                self:tryMove(dirX, dirY, moveSpeed, buildings)
+            end
+        end
+    end
+end
+
+function Peon:checkForEnemies(allUnits, allBuildings)
+    local sightRange = self:getSightRangePixels()
+    local myTeam = self.team
+    
+    -- Check units first
+    if allUnits then
+        for _, unit in ipairs(allUnits) do
+            if unit.team and unit.team ~= myTeam and unit.hp and unit.hp > 0 then
+                local dist = self:distanceTo(unit)
+                if dist <= sightRange then
+                    self:setAttackTarget(unit)
+                    return
+                end
+            end
+        end
+    end
+    
+    -- Check buildings
+    if allBuildings then
+        for _, building in ipairs(allBuildings) do
+            if building.team and building.team ~= myTeam and building.hp and building.hp > 0 then
+                local dist = self:distanceTo(building)
+                if dist <= sightRange then
+                    self:setAttackTarget(building)
+                    return
+                end
+            end
+        end
+    end
+end
+
+function Peon:takeDamage(amount)
+    self.hp = self.hp - amount
+    
+    -- Flash effect
+    if DrawUtils then
+        self.flashTimer = 0.1
+    end
+    
+    -- Aggro back if not already attacking
+    if self.state ~= Peon.STATE_ATTACKING then
+        -- Will auto-acquire on next update
+    end
+end
+
+function Peon:isDead()
+    return self.hp <= 0
+end
+
+function Peon:drawHealthBar()
+    if not self.selected and self.hp >= self.maxHp then return end
+    
+    local x, y = self:getScreenPos()
+    local barWidth = 24
+    local barHeight = 4
+    local segmentWidth = barWidth / self.maxHp
+    local barX = x - barWidth / 2
+    local barY = y - 28
+    
+    -- Background
+    love.graphics.setColor(0.2, 0.2, 0.2, 0.8)
+    love.graphics.rectangle("fill", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
+    
+    -- Health segments
+    for i = 1, self.maxHp do
+        local segX = barX + (i - 1) * segmentWidth
+        if i <= self.hp then
+            -- Filled segment - green to red based on health
+            local healthPct = self.hp / self.maxHp
+            love.graphics.setColor(1 - healthPct, healthPct, 0.2, 1)
+        else
+            -- Empty segment
+            love.graphics.setColor(0.4, 0.1, 0.1, 0.6)
+        end
+        love.graphics.rectangle("fill", segX + 0.5, barY, segmentWidth - 1, barHeight)
+    end
+    
+    -- Border
+    love.graphics.setColor(0, 0, 0, 0.8)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
+end
+
 function Peon:draw()
     if not self.visible then return end
+    
+    -- Draw health bar if selected or damaged
+    self:drawHealthBar()
     
     local x, y = self:getScreenPos()
     

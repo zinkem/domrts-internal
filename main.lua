@@ -204,6 +204,10 @@ local SceneManager = {}
 
 function SceneManager.switch(sceneName)
     if Game.scenes[sceneName] then
+        -- Unload current scene if it has an unload function
+        if Game.currentScene and Game.currentScene.unload then
+            Game.currentScene.unload()
+        end
         Game.currentScene = Game.scenes[sceneName]
         if Game.currentScene.load then
             Game.currentScene.load()

@@ -4,6 +4,10 @@
     Size: 2x2 tiles, grid-aligned
 ]]
 
+-- Team colors module
+local Teams
+pcall(function() Teams = require("teams") end)
+
 local Farm = {}
 Farm.__index = Farm
 
@@ -25,6 +29,14 @@ function Farm.new(params)
     self.selected = false
     self.type = "farm"
     self.name = "Farm"
+    
+    -- Team ownership
+    self.team = params.team or (Teams and Teams.PLAYER or 1)
+    
+    -- Combat stats
+    self.maxHp = 200
+    self.hp = self.maxHp
+    self.sightRadius = 2
     
     self.isBuilding = params.isBuilding or false
     self.buildProgress = params.buildProgress or 0
@@ -177,6 +189,9 @@ function Farm:draw()
         love.graphics.rectangle("line", x - 2, y - 2, size + 4, size + 4, 4)
     end
     
+    -- Health bar
+    self:drawHealthBar()
+    
     love.graphics.setColor(1, 1, 1, 1)
 end
 
@@ -198,9 +213,48 @@ function Farm:drawUI() end
 function Farm:mousepressed(x, y, button) end
 function Farm:mousereleased(x, y, button) end
 
+-- Combat Methods --
+
+function Farm:takeDamage(amount)
+    self.hp = self.hp - amount
+end
+
+function Farm:isDead()
+    return self.hp <= 0
+end
+
+function Farm:drawHealthBar()
+    if not self.selected and self.hp >= self.maxHp then return end
+    
+    local x, y = self:getScreenPos()
+    local barWidth = self.pixelSize - 10
+    local barHeight = 4
+    local barX = x + 5
+    local barY = y - 8
+    
+    -- Background
+    love.graphics.setColor(0.2, 0.2, 0.2, 0.8)
+    love.graphics.rectangle("fill", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
+    
+    -- Health bar
+    local healthPct = self.hp / self.maxHp
+    love.graphics.setColor(1 - healthPct, healthPct, 0.2, 1)
+    love.graphics.rectangle("fill", barX, barY, barWidth * healthPct, barHeight)
+    
+    -- Border
+    love.graphics.setColor(0, 0, 0, 0.8)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
+end
+
 function Farm:drawOnMinimap(mapX, mapY, scale)
     if self.completed then
-        love.graphics.setColor(0.5, 0.6, 0.3, 1)
+        -- Use team color
+        if Teams then
+            Teams.setColor(self.team, "minimapBuilding")
+        else
+            love.graphics.setColor(0.5, 0.6, 0.3, 1)
+        end
     else
         love.graphics.setColor(0.4, 0.4, 0.3, 0.6)
     end

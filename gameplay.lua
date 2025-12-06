@@ -35,8 +35,10 @@ local UIDraw = require("ui_draw")
 -- Team system
 local Teams
 local Player
+local AI
 pcall(function() Teams = require("teams") end)
 pcall(function() Player = require("player") end)
+pcall(function() AI = require("ai") end)
 
 -- Visual effects (optional - graceful fallback)
 local Effects, DrawUtils
@@ -48,6 +50,17 @@ local Gameplay = {}
 -- Game state
 local elapsedTime = 0
 local victory = false
+local defeat = false
+
+-- Game stats for victory screen
+local gameStats = {
+    unitsKilled = 0,
+    unitsLost = 0,
+    buildingsDestroyed = 0,
+    buildingsLost = 0,
+    goldCollected = 0,
+    lumberCollected = 0,
+}
 
 local resources = {
     gold = 1000,
@@ -83,6 +96,10 @@ local flyingScouts = {}
 local ballistas = {}
 local kamikazes = {}
 
+-- AI controller
+local enemyAI = nil
+local enemyTownHall = nil
+
 local selectedEntities = {}  -- Support multiple selection
 
 -- Building placement
@@ -96,6 +113,18 @@ local placementValid = false
 local isBoxSelecting = false
 local boxStartX, boxStartY = 0, 0
 local boxEndX, boxEndY = 0, 0
+
+-- Map dragging and cursor state (consolidated to reduce upvalues)
+local input = {
+    isMapDragging = false,
+    mouseDownTime = 0,
+    mouseDownX = 0,
+    mouseDownY = 0,
+    dragHoldTime = 0.25,
+    dragMoveThreshold = 5,
+    cursorState = "normal",
+    cursorChargeProgress = 0
+}
 
 -- UI Layout - Stone/Metal Medieval Theme
 local UI = {
@@ -140,11 +169,51 @@ local function checkAllMinesDepleted()
     return true
 end
 
+local function countPlayerUnits(unitList)
+    local playerTeam = Teams and Teams.PLAYER or 1
+    local count = 0
+    for _, unit in ipairs(unitList) do
+        if unit.team == nil or unit.team == playerTeam then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+-- Find the closest non-depleted gold mine to a world position
+local function findClosestMine(worldX, worldY)
+    local closestMine = nil
+    local closestDist = math.huge
+    
+    for _, mine in ipairs(goldMines) do
+        if not mine.depleted then
+            local mx, my = mine:getWorldCenter()
+            local dx = mx - worldX
+            local dy = my - worldY
+            local dist = dx * dx + dy * dy
+            if dist < closestDist then
+                closestDist = dist
+                closestMine = mine
+            end
+        end
+    end
+    
+    return closestMine
+end
+
 local function calculatePopulation()
-    currentPop = #peons + #footmen + #archers + #knights + #flyingScouts + #ballistas + #kamikazes
+    -- Only count player-owned units
+    currentPop = countPlayerUnits(peons) + countPlayerUnits(footmen) + countPlayerUnits(archers) + 
+                 countPlayerUnits(knights) + countPlayerUnits(flyingScouts) + 
+                 countPlayerUnits(ballistas) + countPlayerUnits(kamikazes)
+    
+    -- Only count player-owned farms
+    local playerTeam = Teams and Teams.PLAYER or 1
     maxPop = BASE_CAPACITY
     for _, farm in ipairs(farms) do
-        if farm.completed then maxPop = maxPop + Farm.CAPACITY_BONUS end
+        if farm.completed and (farm.team == nil or farm.team == playerTeam) then 
+            maxPop = maxPop + Farm.CAPACITY_BONUS 
+        end
     end
 end
 
@@ -368,30 +437,101 @@ end
 
 local function drawVictoryScreen()
     local screenW, screenH = love.graphics.getDimensions()
-    love.graphics.setColor(0, 0, 0, 0.7)
+    love.graphics.setColor(0, 0, 0, 0.8)
     love.graphics.rectangle("fill", 0, 0, screenW, screenH)
     
-    local boxW, boxH = 400, 200
+    local boxW, boxH = 450, 320
     local boxX, boxY = (screenW - boxW) / 2, (screenH - boxH) / 2
     
+    -- Victory box
     love.graphics.setColor(0.1, 0.25, 0.1, 1)
     love.graphics.rectangle("fill", boxX, boxY, boxW, boxH, 10)
     love.graphics.setColor(0.3, 0.7, 0.3, 1)
     love.graphics.setLineWidth(4)
     love.graphics.rectangle("line", boxX, boxY, boxW, boxH, 10)
     
+    -- Title
     love.graphics.setFont(Game.fonts.title)
     love.graphics.setColor(1, 0.85, 0, 1)
-    love.graphics.print("VICTORY!", (screenW - Game.fonts.title:getWidth("VICTORY!")) / 2, boxY + 30)
+    love.graphics.print("VICTORY!", (screenW - Game.fonts.title:getWidth("VICTORY!")) / 2, boxY + 20)
     
+    -- Message
     love.graphics.setFont(Game.fonts.medium)
     love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.print("All gold mines depleted!", (screenW - Game.fonts.medium:getWidth("All gold mines depleted!")) / 2, boxY + 100)
-    love.graphics.print("Final Gold: " .. resources.gold, (screenW - Game.fonts.medium:getWidth("Final Gold: " .. resources.gold)) / 2, boxY + 130)
+    love.graphics.print("All enemy buildings destroyed!", (screenW - Game.fonts.medium:getWidth("All enemy buildings destroyed!")) / 2, boxY + 70)
     
+    -- Stats
+    love.graphics.setFont(Game.fonts.small)
+    love.graphics.setColor(0.9, 0.9, 0.8, 1)
+    local statsY = boxY + 110
+    local lineHeight = 22
+    
+    local minutes = math.floor(elapsedTime / 60)
+    local seconds = math.floor(elapsedTime % 60)
+    local timeStr = string.format("Time: %d:%02d", minutes, seconds)
+    love.graphics.print(timeStr, boxX + 40, statsY)
+    
+    love.graphics.print("Units Killed: " .. gameStats.unitsKilled, boxX + 40, statsY + lineHeight)
+    love.graphics.print("Units Lost: " .. gameStats.unitsLost, boxX + 40, statsY + lineHeight * 2)
+    love.graphics.print("Buildings Destroyed: " .. gameStats.buildingsDestroyed, boxX + 40, statsY + lineHeight * 3)
+    love.graphics.print("Buildings Lost: " .. gameStats.buildingsLost, boxX + 40, statsY + lineHeight * 4)
+    
+    love.graphics.setColor(1, 0.85, 0.3, 1)
+    love.graphics.print("Final Gold: " .. resources.gold, boxX + 250, statsY + lineHeight)
+    love.graphics.setColor(0.6, 0.45, 0.25, 1)
+    love.graphics.print("Final Lumber: " .. resources.lumber, boxX + 250, statsY + lineHeight * 2)
+    
+    -- Continue prompt
     love.graphics.setFont(Game.fonts.small)
     love.graphics.setColor(0.7, 0.7, 0.7, 1)
-    love.graphics.print("Press SPACE to continue", (screenW - Game.fonts.small:getWidth("Press SPACE to continue")) / 2, boxY + 165)
+    love.graphics.print("Press SPACE to return to title", (screenW - Game.fonts.small:getWidth("Press SPACE to return to title")) / 2, boxY + boxH - 35)
+end
+
+local function drawDefeatScreen()
+    local screenW, screenH = love.graphics.getDimensions()
+    love.graphics.setColor(0, 0, 0, 0.8)
+    love.graphics.rectangle("fill", 0, 0, screenW, screenH)
+    
+    local boxW, boxH = 450, 320
+    local boxX, boxY = (screenW - boxW) / 2, (screenH - boxH) / 2
+    
+    -- Defeat box
+    love.graphics.setColor(0.25, 0.1, 0.1, 1)
+    love.graphics.rectangle("fill", boxX, boxY, boxW, boxH, 10)
+    love.graphics.setColor(0.7, 0.2, 0.2, 1)
+    love.graphics.setLineWidth(4)
+    love.graphics.rectangle("line", boxX, boxY, boxW, boxH, 10)
+    
+    -- Title
+    love.graphics.setFont(Game.fonts.title)
+    love.graphics.setColor(0.8, 0.2, 0.2, 1)
+    love.graphics.print("DEFEAT", (screenW - Game.fonts.title:getWidth("DEFEAT")) / 2, boxY + 20)
+    
+    -- Message
+    love.graphics.setFont(Game.fonts.medium)
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.print("Your Town Hall was destroyed!", (screenW - Game.fonts.medium:getWidth("Your Town Hall was destroyed!")) / 2, boxY + 70)
+    
+    -- Stats
+    love.graphics.setFont(Game.fonts.small)
+    love.graphics.setColor(0.9, 0.9, 0.8, 1)
+    local statsY = boxY + 110
+    local lineHeight = 22
+    
+    local minutes = math.floor(elapsedTime / 60)
+    local seconds = math.floor(elapsedTime % 60)
+    local timeStr = string.format("Time: %d:%02d", minutes, seconds)
+    love.graphics.print(timeStr, boxX + 40, statsY)
+    
+    love.graphics.print("Units Killed: " .. gameStats.unitsKilled, boxX + 40, statsY + lineHeight)
+    love.graphics.print("Units Lost: " .. gameStats.unitsLost, boxX + 40, statsY + lineHeight * 2)
+    love.graphics.print("Buildings Destroyed: " .. gameStats.buildingsDestroyed, boxX + 40, statsY + lineHeight * 3)
+    love.graphics.print("Buildings Lost: " .. gameStats.buildingsLost, boxX + 40, statsY + lineHeight * 4)
+    
+    -- Continue prompt
+    love.graphics.setFont(Game.fonts.small)
+    love.graphics.setColor(0.7, 0.7, 0.7, 1)
+    love.graphics.print("Press SPACE to return to title", (screenW - Game.fonts.small:getWidth("Press SPACE to return to title")) / 2, boxY + boxH - 35)
 end
 
 local function getBuildingSize(buildingType)
@@ -460,6 +600,119 @@ local function drawBoxSelection()
     love.graphics.rectangle("line", x1, y1, w, h)
 end
 
+local function drawCursor()
+    local mx, my = love.mouse.getPosition()
+    
+    if input.cursorState == "grabbing" then
+        -- Grabbing hand cursor - closed fist
+        local size = 20
+        love.graphics.push()
+        love.graphics.translate(mx, my)
+        
+        -- Shadow
+        love.graphics.setColor(0, 0, 0, 0.3)
+        love.graphics.ellipse("fill", 3, size/2 + 3, size/2 - 2, size/3)
+        
+        -- Closed fist (palm)
+        love.graphics.setColor(0.9, 0.75, 0.6, 1)
+        love.graphics.ellipse("fill", 0, size/2 - 2, size/2 - 2, size/3 + 2)
+        
+        -- Knuckles (4 bumps on top)
+        for i = 0, 3 do
+            local kx = -6 + i * 4
+            love.graphics.ellipse("fill", kx, size/2 - 8, 3, 4)
+        end
+        
+        -- Thumb tucked on side
+        love.graphics.ellipse("fill", -size/2 + 2, size/2 - 2, 4, 5)
+        
+        -- Outline
+        love.graphics.setColor(0.3, 0.2, 0.15, 1)
+        love.graphics.setLineWidth(1.5)
+        love.graphics.ellipse("line", 0, size/2 - 2, size/2 - 2, size/3 + 2)
+        
+        -- Finger lines on knuckles
+        love.graphics.setLineWidth(1)
+        for i = 0, 2 do
+            local lx = -4 + i * 4
+            love.graphics.line(lx, size/2 - 10, lx, size/2 - 5)
+        end
+        
+        love.graphics.pop()
+        
+    elseif input.cursorState == "charging" then
+        -- Hand opening up with charge indicator
+        local size = 18
+        local pulse = 1 + input.cursorChargeProgress * 0.3  -- Scale up as charging
+        local shake = math.sin(love.timer.getTime() * 30) * input.cursorChargeProgress * 2
+        
+        love.graphics.push()
+        love.graphics.translate(mx + shake, my)
+        love.graphics.scale(pulse, pulse)
+        
+        -- Charge ring growing around cursor
+        love.graphics.setColor(0.9, 0.7, 0.2, input.cursorChargeProgress * 0.8)
+        love.graphics.setLineWidth(2)
+        local ringRadius = 12 + input.cursorChargeProgress * 8
+        love.graphics.arc("line", 0, size/2, ringRadius, -math.pi/2, -math.pi/2 + input.cursorChargeProgress * math.pi * 2)
+        
+        -- Open hand (palm)
+        love.graphics.setColor(0.9, 0.75, 0.6, 1)
+        love.graphics.ellipse("fill", 0, size/2 + 2, size/2 - 3, size/3)
+        
+        -- Fingers spreading based on charge
+        local spread = input.cursorChargeProgress * 0.3
+        for i = 0, 3 do
+            local angle = (-0.3 - spread) + (i * (0.2 + spread * 0.15))
+            local fx = math.sin(angle) * 10
+            local fy = -math.cos(angle) * 12 + size/2 - 5
+            love.graphics.ellipse("fill", fx, fy, 2.5, 6)
+        end
+        
+        -- Thumb
+        love.graphics.ellipse("fill", -size/2 + 1, size/2, 3, 5)
+        
+        -- Outline
+        love.graphics.setColor(0.3, 0.2, 0.15, 1)
+        love.graphics.setLineWidth(1.5)
+        love.graphics.ellipse("line", 0, size/2 + 2, size/2 - 3, size/3)
+        
+        love.graphics.pop()
+        
+    else
+        -- Normal pointer cursor
+        local size = 20
+        
+        love.graphics.push()
+        love.graphics.translate(mx, my)
+        
+        -- Shadow
+        love.graphics.setColor(0, 0, 0, 0.3)
+        love.graphics.polygon("fill", 3, 3, 3, size + 3, 8, size - 4 + 3, 12, size + 5 + 3, 15, size + 3, 10, size - 3 + 3, 18, size - 3 + 3)
+        
+        -- Main arrow body (golden/bronze medieval style)
+        love.graphics.setColor(0.85, 0.7, 0.35, 1)
+        love.graphics.polygon("fill", 0, 0, 0, size, 5, size - 4, 9, size + 5, 12, size, 7, size - 3, 15, size - 3)
+        
+        -- Inner highlight
+        love.graphics.setColor(0.95, 0.85, 0.5, 1)
+        love.graphics.polygon("fill", 2, 4, 2, size - 4, 5, size - 6)
+        
+        -- Outline
+        love.graphics.setColor(0.3, 0.2, 0.1, 1)
+        love.graphics.setLineWidth(1.5)
+        love.graphics.polygon("line", 0, 0, 0, size, 5, size - 4, 9, size + 5, 12, size, 7, size - 3, 15, size - 3)
+        
+        -- Decorative dot at top
+        love.graphics.setColor(0.7, 0.5, 0.3, 1)
+        love.graphics.circle("fill", 1, 2, 2)
+        
+        love.graphics.pop()
+    end
+    
+    love.graphics.setColor(1, 1, 1, 1)
+end
+
 local function startBuildingPlacement(peon, buildingType)
     isPlacingBuilding = true
     placingBuildingType = buildingType
@@ -470,6 +723,34 @@ local function cancelBuildingPlacement()
     isPlacingBuilding = false
     placingBuildingType = nil
     placingPeon = nil
+end
+
+-- Callback for AI to create buildings
+local function aiCreateBuilding(peon, buildingType, gridX, gridY, team)
+    if not peon or not gridX or not gridY then return end
+    
+    -- Get building center in world coords
+    local buildingSize = 2
+    if buildingType == "barracks" then buildingSize = 3 end
+    
+    local worldX = (gridX + buildingSize / 2) * 32
+    local worldY = (gridY + buildingSize / 2) * 32
+    
+    -- Tell peon to go build
+    peon:goToBuild(worldX, worldY, buildingType, function()
+        -- This callback is called when peon arrives
+        local actualTeam = team or peon.team
+        
+        if buildingType == "farm" then
+            local building = Farm.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = actualTeam})
+            building.builderPeon = peon
+            table.insert(farms, building)
+        elseif buildingType == "barracks" then
+            local building = Barracks.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = actualTeam})
+            building.builderPeon = peon
+            table.insert(barracks, building)
+        end
+    end)
 end
 
 local function createBuilding(gridX, gridY, buildingType, peon)
@@ -671,6 +952,13 @@ local function clearSelection()
     selectedEntities = {}
 end
 
+-- Check if entity belongs to human player (for selection filtering)
+local function isPlayerOwned(entity)
+    if not entity then return false end
+    local playerTeam = Teams and Teams.PLAYER or 1
+    return entity.team == nil or entity.team == playerTeam
+end
+
 local function updateRequirementsState()
     Requirements.setGameState({
         townHall = townHall,
@@ -685,23 +973,137 @@ local function updateRequirementsState()
     })
 end
 
+-- Remove dead units from a list
+local function removeDeadUnits(unitList, isPlayer)
+    for i = #unitList, 1, -1 do
+        local unit = unitList[i]
+        if unit.isDead and unit:isDead() then
+            -- Track stats
+            local playerTeam = Teams and Teams.PLAYER or 1
+            if unit.team == playerTeam then
+                gameStats.unitsLost = gameStats.unitsLost + 1
+            else
+                gameStats.unitsKilled = gameStats.unitsKilled + 1
+            end
+            -- Spawn death effect
+            if Effects then
+                Effects.blood(unit.worldX, unit.worldY)
+            end
+            table.remove(unitList, i)
+        end
+    end
+end
+
+-- Remove dead buildings from a list
+local function removeDeadBuildings(buildingList)
+    for i = #buildingList, 1, -1 do
+        local building = buildingList[i]
+        if building.isDead and building:isDead() then
+            -- Track stats
+            local playerTeam = Teams and Teams.PLAYER or 1
+            if building.team == playerTeam then
+                gameStats.buildingsLost = gameStats.buildingsLost + 1
+            else
+                gameStats.buildingsDestroyed = gameStats.buildingsDestroyed + 1
+            end
+            -- Clear map area
+            if building.gridX and building.gridSize and map then
+                -- Could restore grass tiles here
+            end
+            table.remove(buildingList, i)
+        end
+    end
+end
+
+-- Check victory/defeat conditions
+local function checkVictoryConditions()
+    local enemyTeam = Teams and Teams.ENEMY or 2
+    local playerTeam = Teams and Teams.PLAYER or 1
+    
+    -- Check if all enemy buildings are destroyed
+    local enemyBuildingsLeft = 0
+    for _, b in ipairs(townHalls) do
+        if b.team == enemyTeam and (not b.isDead or not b:isDead()) then
+            enemyBuildingsLeft = enemyBuildingsLeft + 1
+        end
+    end
+    for _, b in ipairs(barracks) do
+        if b.team == enemyTeam and (not b.isDead or not b:isDead()) then
+            enemyBuildingsLeft = enemyBuildingsLeft + 1
+        end
+    end
+    for _, b in ipairs(farms) do
+        if b.team == enemyTeam and (not b.isDead or not b:isDead()) then
+            enemyBuildingsLeft = enemyBuildingsLeft + 1
+        end
+    end
+    -- Add other building types as needed
+    
+    if enemyBuildingsLeft == 0 then
+        victory = true
+        return
+    end
+    
+    -- Check if player's main townhall is destroyed
+    if townHall and townHall.isDead and townHall:isDead() then
+        defeat = true
+        return
+    end
+end
+
 -- Setup callbacks for peons to check resources and send notifications
 local function setupPeonCallbacks(peon)
     peon.onNotify = addNotification
-    peon.resourceCheck = function()
-        local gold = resources.gold
-        local lumber = resources.lumber
-        local canAfford = gold >= peon.buildCostGold and lumber >= peon.buildCostLumber
-        return canAfford, gold, lumber
-    end
-    peon.deductResources = function(costGold, costLumber)
-        resources.gold = resources.gold - costGold
-        resources.lumber = resources.lumber - costLumber
+    
+    local playerTeam = Teams and Teams.PLAYER or 1
+    local isPlayerUnit = (peon.team == nil or peon.team == playerTeam)
+    
+    if isPlayerUnit then
+        -- Player peon callbacks
+        peon.resourceCheck = function()
+            local gold = resources.gold
+            local lumber = resources.lumber
+            local canAfford = gold >= peon.buildCostGold and lumber >= peon.buildCostLumber
+            return canAfford, gold, lumber
+        end
+        peon.deductResources = function(costGold, costLumber)
+            resources.gold = resources.gold - costGold
+            resources.lumber = resources.lumber - costLumber
+        end
+        peon.addResources = function(gold, lumber)
+            if gold > 0 then resources.gold = resources.gold + gold end
+            if lumber > 0 then resources.lumber = resources.lumber + lumber end
+        end
+    else
+        -- AI peon callbacks
+        peon.resourceCheck = function()
+            if not enemyAI then return false, 0, 0 end
+            local gold = enemyAI.gold
+            local lumber = enemyAI.lumber
+            local canAfford = gold >= peon.buildCostGold and lumber >= peon.buildCostLumber
+            return canAfford, gold, lumber
+        end
+        peon.deductResources = function(costGold, costLumber)
+            if enemyAI then
+                enemyAI:spend(costGold, costLumber)
+            end
+        end
+        peon.addResources = function(gold, lumber)
+            if enemyAI then
+                if gold > 0 then enemyAI:addGold(gold) end
+                if lumber > 0 then enemyAI:addLumber(lumber) end
+            end
+        end
     end
 end
 
 function Gameplay.load()
     local screenW, screenH = love.graphics.getDimensions()
+    
+    -- Hide system cursor and use custom
+    love.mouse.setVisible(false)
+    input.cursorState = "normal"
+    input.cursorChargeProgress = 0
     
     -- Initialize visual effects system
     if Effects then Effects.init() end
@@ -710,6 +1112,7 @@ function Gameplay.load()
     
     elapsedTime = 0
     victory = false
+    defeat = false
     resources.gold = 1000
     resources.lumber = 400
     notifications = {}
@@ -719,6 +1122,14 @@ function Gameplay.load()
     barracks = {}
     goldMines = {}
     
+    -- Reset game stats
+    gameStats.unitsKilled = 0
+    gameStats.unitsLost = 0
+    gameStats.buildingsDestroyed = 0
+    gameStats.buildingsLost = 0
+    gameStats.goldCollected = 0
+    gameStats.lumberCollected = 0
+    
     -- Clear new building tables
     lumberMills = {}
     blacksmiths = {}
@@ -727,6 +1138,10 @@ function Gameplay.load()
     stables = {}
     siegeWorkshops = {}
     townHalls = {}
+    
+    -- Reset AI
+    enemyAI = nil
+    enemyTownHall = nil
     
     -- Clear new unit tables
     archers = {}
@@ -738,26 +1153,26 @@ function Gameplay.load()
     selectedEntities = {}
     isPlacingBuilding = false
     isBoxSelecting = false
+    input.isMapDragging = false
     
     map = Map.new()
     map:setViewport(0, UI.topBarHeight, screenW, screenH - UI.topBarHeight)
     
     -- Human player team
     local playerTeam = Teams and Teams.PLAYER or 1
+    local enemyTeam = Teams and Teams.ENEMY or 2
     
     local buildingSize = 3
+    
+    -- === PLAYER BASE (bottom-left area) ===
     local thGridX, thGridY = map:findClearArea(buildingSize, buildingSize, 10, 30, 15)
     townHall = TownHall.new({gridX = thGridX, gridY = thGridY, map = map, team = playerTeam})
     
+    -- Gold mine near player
     local m1X, m1Y = map:findClearArea(buildingSize, buildingSize, thGridX + 8, thGridY + 5, 10)
     table.insert(goldMines, GoldMine.new({gridX = m1X, gridY = m1Y, gold = 50000, map = map}))
     
-    local m2X, m2Y = map:findClearArea(buildingSize, buildingSize, 45, 12, 15)
-    table.insert(goldMines, GoldMine.new({gridX = m2X, gridY = m2Y, gold = 75000, map = map}))
-    
-    local m3X, m3Y = map:findClearArea(buildingSize, buildingSize, 50, 50, 15)
-    table.insert(goldMines, GoldMine.new({gridX = m3X, gridY = m3Y, gold = 100000, map = map}))
-    
+    -- Player starting peons - send to closest mine
     local spawnX, spawnY = townHall:getSpawnPos()
     for i = 1, 3 do
         local newPeon = Peon.new({
@@ -769,6 +1184,55 @@ function Gameplay.load()
         setupPeonCallbacks(newPeon)
         pushUnitOutOfBuildings(newPeon)
         table.insert(peons, newPeon)
+        -- Auto-send to closest mine
+        local closestMine = findClosestMine(newPeon.worldX, newPeon.worldY)
+        if closestMine then
+            newPeon:goToMine(closestMine)
+        end
+    end
+    
+    -- === ENEMY BASE (top-right area) ===
+    local enemyThGridX, enemyThGridY = map:findClearArea(buildingSize, buildingSize, 52, 12, 15)
+    enemyTownHall = TownHall.new({gridX = enemyThGridX, gridY = enemyThGridY, map = map, team = enemyTeam})
+    table.insert(townHalls, enemyTownHall)  -- Store in additional townhalls list
+    
+    -- Gold mine near enemy
+    local m2X, m2Y = map:findClearArea(buildingSize, buildingSize, enemyThGridX - 8, enemyThGridY + 5, 10)
+    table.insert(goldMines, GoldMine.new({gridX = m2X, gridY = m2Y, gold = 50000, map = map}))
+    
+    -- Center gold mine (contested)
+    local m3X, m3Y = map:findClearArea(buildingSize, buildingSize, 32, 32, 15)
+    table.insert(goldMines, GoldMine.new({gridX = m3X, gridY = m3Y, gold = 100000, map = map}))
+    
+    -- Enemy starting peons - send to closest mine
+    local enemySpawnX, enemySpawnY = enemyTownHall:getSpawnPos()
+    for i = 1, 3 do
+        local newPeon = Peon.new({
+            worldX = enemySpawnX + (i - 1) * 35,
+            worldY = enemySpawnY + (i - 2) * 30,
+            map = map,
+            team = enemyTeam
+        })
+        -- Enemy peons need resource callbacks for AI economy
+        setupPeonCallbacks(newPeon)
+        pushUnitOutOfBuildings(newPeon)
+        table.insert(peons, newPeon)
+        -- Auto-send to closest mine
+        local closestMine = findClosestMine(newPeon.worldX, newPeon.worldY)
+        if closestMine then
+            newPeon:goToMine(closestMine)
+        end
+    end
+    
+    -- Initialize AI controller
+    if AI then
+        enemyAI = AI.new({
+            team = enemyTeam,
+            townHall = enemyTownHall,
+            map = map,
+            startGold = 1000,
+            startLumber = 400
+        })
     end
     
     calculatePopulation()
@@ -779,7 +1243,36 @@ function Gameplay.load()
 end
 
 function Gameplay.update(dt)
-    if victory then return end
+    if victory or defeat then return end
+    
+    -- Update cursor state
+    if input.isMapDragging then
+        input.cursorState = "grabbing"
+        input.cursorChargeProgress = 0
+    elseif isBoxSelecting and love.mouse.isDown(1) then
+        local mouseX, mouseY = love.mouse.getPosition()
+        local mouseHeldTime = love.timer.getTime() - input.mouseDownTime
+        local mouseMoved = math.abs(mouseX - input.mouseDownX) > input.dragMoveThreshold or 
+                          math.abs(mouseY - input.mouseDownY) > input.dragMoveThreshold
+        
+        if not mouseMoved and mouseHeldTime > 0 then
+            -- Charging up to grab
+            input.cursorChargeProgress = math.min(1, mouseHeldTime / input.dragHoldTime)
+            input.cursorState = "charging"
+            
+            if mouseHeldTime >= input.dragHoldTime then
+                input.isMapDragging = true
+                isBoxSelecting = false
+                input.cursorState = "grabbing"
+            end
+        else
+            input.cursorState = "normal"
+            input.cursorChargeProgress = 0
+        end
+    else
+        input.cursorState = "normal"
+        input.cursorChargeProgress = 0
+    end
     
     -- Apply game speed multiplier
     local gameDt = dt * Game.settings.gameSpeed
@@ -803,6 +1296,11 @@ function Gameplay.update(dt)
         setupPeonCallbacks(newPeon)
         pushUnitOutOfBuildings(newPeon)
         table.insert(peons, newPeon)
+        -- Auto-send to closest mine
+        local closestMine = findClosestMine(spawnX, spawnY)
+        if closestMine then
+            newPeon:goToMine(closestMine)
+        end
         calculatePopulation()
     end
     
@@ -937,7 +1435,7 @@ function Gameplay.update(dt)
         end
     end
     
-    -- Additional Town Halls
+    -- Additional Town Halls (includes enemy townhall)
     for _, building in ipairs(townHalls) do
         local peonReady, upgradeComplete, buildComplete = building:update(gameDt)
         if buildComplete and building.builderPeon then
@@ -946,54 +1444,118 @@ function Gameplay.update(dt)
             pushUnitOutOfBuildings(peon)
             building.builderPeon = nil
         end
-        if peonReady and currentPop < maxPop then
+        
+        -- Handle peon spawning - check against appropriate team's population
+        local canSpawn = false
+        local playerTeam = Teams and Teams.PLAYER or 1
+        local enemyTeam = Teams and Teams.ENEMY or 2
+        
+        if building.team == playerTeam then
+            canSpawn = peonReady and currentPop < maxPop
+        elseif building.team == enemyTeam and enemyAI then
+            -- AI handles its own population check
+            local aiPop = #enemyAI.peons + #enemyAI.footmen
+            local aiMaxPop = 4 + #enemyAI.farms * 4
+            canSpawn = peonReady and aiPop < aiMaxPop
+        end
+        
+        if canSpawn then
             local spawnX, spawnY = building:getSpawnPos()
             local newPeon = Peon.new({worldX = spawnX, worldY = spawnY, map = map, team = building.team})
             setupPeonCallbacks(newPeon)
             pushUnitOutOfBuildings(newPeon)
             table.insert(peons, newPeon)
+            
+            -- Auto-send to mine or lumber based on team
+            if building.team == enemyTeam and enemyAI then
+                enemyAI:onPeonSpawned(newPeon, goldMines)
+            else
+                -- Player peons go to closest mine
+                local closestMine = findClosestMine(spawnX, spawnY)
+                if closestMine then
+                    newPeon:goToMine(closestMine)
+                end
+            end
+            
             calculatePopulation()
         end
+    end
+    
+    -- Update AI
+    if enemyAI then
+        enemyAI:update(gameDt, goldMines, townHall, aiCreateBuilding, peons, footmen, farms, barracks)
     end
     
     -- Refresh requirements state after all building updates
     -- (ensures UI sees completed buildings on the same frame they finish)
     updateRequirementsState()
     
-    -- Peons
+    -- Get all units and buildings for combat
+    local allUnits = getAllUnits()
+    local allBuildings = getAllBuildings()
+    
+    -- Peons - each peon uses their team's townhall for returning resources
+    local playerTeam = Teams and Teams.PLAYER or 1
     for _, peon in ipairs(peons) do
-        peon:update(gameDt, buildings, townHall, goldMines[1], resources)
+        local peonTownHall = townHall  -- Default to player's townhall
+        if peon.team ~= playerTeam and enemyTownHall then
+            peonTownHall = enemyTownHall
+        end
+        peon:update(gameDt, buildings, peonTownHall, goldMines[1], resources, allUnits, allBuildings)
     end
     
     -- Footmen
     for _, footman in ipairs(footmen) do
-        footman:update(gameDt, buildings)
+        footman:update(gameDt, buildings, allUnits, allBuildings)
     end
     
     -- Archers
     for _, archer in ipairs(archers) do
-        archer:update(gameDt, buildings)
+        archer:update(gameDt, buildings, allUnits, allBuildings)
     end
     
     -- Knights
     for _, knight in ipairs(knights) do
-        knight:update(gameDt, buildings)
+        knight:update(gameDt, buildings, allUnits, allBuildings)
     end
     
     -- Flying Scouts
     for _, unit in ipairs(flyingScouts) do
-        unit:update(gameDt, buildings)
+        unit:update(gameDt, buildings, allUnits, allBuildings)
     end
     
     -- Ballistas
     for _, unit in ipairs(ballistas) do
-        unit:update(gameDt, buildings)
+        unit:update(gameDt, buildings, allUnits, allBuildings)
     end
     
     -- Kamikazes
     for _, unit in ipairs(kamikazes) do
-        unit:update(gameDt, buildings)
+        unit:update(gameDt, buildings, allUnits, allBuildings)
     end
+    
+    -- Remove dead units
+    removeDeadUnits(peons)
+    removeDeadUnits(footmen)
+    removeDeadUnits(archers)
+    removeDeadUnits(knights)
+    removeDeadUnits(flyingScouts)
+    removeDeadUnits(ballistas)
+    removeDeadUnits(kamikazes)
+    
+    -- Remove dead buildings
+    removeDeadBuildings(townHalls)
+    removeDeadBuildings(barracks)
+    removeDeadBuildings(farms)
+    removeDeadBuildings(lumberMills)
+    removeDeadBuildings(blacksmiths)
+    removeDeadBuildings(scoutTowers)
+    removeDeadBuildings(archeryRanges)
+    removeDeadBuildings(stables)
+    removeDeadBuildings(siegeWorkshops)
+    
+    -- Check victory/defeat conditions
+    checkVictoryConditions()
     
     -- Separate overlapping units
     separateUnits()
@@ -1099,13 +1661,20 @@ function Gameplay.draw()
     end
     
     if victory then drawVictoryScreen() end
+    if defeat then drawDefeatScreen() end
+    
+    -- Draw custom cursor (always on top)
+    drawCursor()
     
     love.graphics.setColor(1, 1, 1, 1)
 end
 
 function Gameplay.keypressed(key)
-    if victory then
-        if key == "space" or key == "return" then Game.SceneManager.switch("victory") end
+    if victory or defeat then
+        if key == "space" or key == "return" then 
+            -- Return to title screen
+            Game.SceneManager.switch("title")
+        end
         return
     end
     
@@ -1131,7 +1700,7 @@ function Gameplay.keypressed(key)
 end
 
 function Gameplay.mousepressed(x, y, button)
-    if victory then return end
+    if victory or defeat then return end
     
     -- Building placement
     if isPlacingBuilding then
@@ -1159,6 +1728,9 @@ function Gameplay.mousepressed(x, y, button)
     
     if button == 1 then
         isBoxSelecting = true
+        input.isMapDragging = false
+        input.mouseDownTime = love.timer.getTime()
+        input.mouseDownX, input.mouseDownY = x, y
         boxStartX, boxStartY = x, y
         boxEndX, boxEndY = x, y
     elseif button == 2 then
@@ -1173,7 +1745,25 @@ function Gameplay.mousemoved(x, y, dx, dy)
         return
     end
     
+    -- Handle map dragging
+    if input.isMapDragging then
+        map:scroll(-dx, -dy)
+        return
+    end
+    
     if isBoxSelecting then
+        -- Check if we should enter drag mode
+        local mouseHeldTime = love.timer.getTime() - input.mouseDownTime
+        local mouseMoved = math.abs(x - input.mouseDownX) > input.dragMoveThreshold or 
+                          math.abs(y - input.mouseDownY) > input.dragMoveThreshold
+        
+        if mouseHeldTime >= input.dragHoldTime and not mouseMoved then
+            -- Enter drag mode
+            input.isMapDragging = true
+            isBoxSelecting = false
+            return
+        end
+        
         boxEndX, boxEndY = x, y
     end
 end
@@ -1187,6 +1777,12 @@ function Gameplay.mousereleased(x, y, button)
         map:minimapRelease()
     end
     
+    -- Stop map dragging
+    if button == 1 and input.isMapDragging then
+        input.isMapDragging = false
+        return  -- Don't do selection when releasing from drag
+    end
+    
     if button == 1 and isBoxSelecting then
         isBoxSelecting = false
         
@@ -1198,45 +1794,45 @@ function Gameplay.mousereleased(x, y, button)
         else
             clearSelection()
             
-            -- Select all unit types in box
+            -- Select all PLAYER-OWNED unit types in box
             for _, peon in ipairs(peons) do
-                if peon:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
+                if isPlayerOwned(peon) and peon:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
                     peon.selected = true
                     table.insert(selectedEntities, peon)
                 end
             end
             for _, footman in ipairs(footmen) do
-                if footman:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
+                if isPlayerOwned(footman) and footman:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
                     footman.selected = true
                     table.insert(selectedEntities, footman)
                 end
             end
             for _, archer in ipairs(archers) do
-                if archer:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
+                if isPlayerOwned(archer) and archer:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
                     archer.selected = true
                     table.insert(selectedEntities, archer)
                 end
             end
             for _, knight in ipairs(knights) do
-                if knight:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
+                if isPlayerOwned(knight) and knight:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
                     knight.selected = true
                     table.insert(selectedEntities, knight)
                 end
             end
             for _, unit in ipairs(flyingScouts) do
-                if unit:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
+                if isPlayerOwned(unit) and unit:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
                     unit.selected = true
                     table.insert(selectedEntities, unit)
                 end
             end
             for _, unit in ipairs(ballistas) do
-                if unit:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
+                if isPlayerOwned(unit) and unit:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
                     unit.selected = true
                     table.insert(selectedEntities, unit)
                 end
             end
             for _, unit in ipairs(kamikazes) do
-                if unit:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
+                if isPlayerOwned(unit) and unit:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
                     unit.selected = true
                     table.insert(selectedEntities, unit)
                 end
@@ -1248,9 +1844,9 @@ end
 function handleLeftClick(x, y)
     clearSelection()
     
-    -- Check all unit types
+    -- Check all PLAYER-OWNED unit types
     for _, peon in ipairs(peons) do
-        if peon.visible and peon:containsPoint(x, y) then
+        if peon.visible and isPlayerOwned(peon) and peon:containsPoint(x, y) then
             peon.selected = true
             table.insert(selectedEntities, peon)
             return
@@ -1258,7 +1854,7 @@ function handleLeftClick(x, y)
     end
     
     for _, footman in ipairs(footmen) do
-        if footman:containsPoint(x, y) then
+        if isPlayerOwned(footman) and footman:containsPoint(x, y) then
             footman.selected = true
             table.insert(selectedEntities, footman)
             return
@@ -1266,7 +1862,7 @@ function handleLeftClick(x, y)
     end
     
     for _, archer in ipairs(archers) do
-        if archer:containsPoint(x, y) then
+        if isPlayerOwned(archer) and archer:containsPoint(x, y) then
             archer.selected = true
             table.insert(selectedEntities, archer)
             return
@@ -1274,7 +1870,7 @@ function handleLeftClick(x, y)
     end
     
     for _, knight in ipairs(knights) do
-        if knight:containsPoint(x, y) then
+        if isPlayerOwned(knight) and knight:containsPoint(x, y) then
             knight.selected = true
             table.insert(selectedEntities, knight)
             return
@@ -1282,7 +1878,7 @@ function handleLeftClick(x, y)
     end
     
     for _, unit in ipairs(flyingScouts) do
-        if unit:containsPoint(x, y) then
+        if isPlayerOwned(unit) and unit:containsPoint(x, y) then
             unit.selected = true
             table.insert(selectedEntities, unit)
             return
@@ -1290,7 +1886,7 @@ function handleLeftClick(x, y)
     end
     
     for _, unit in ipairs(ballistas) do
-        if unit:containsPoint(x, y) then
+        if isPlayerOwned(unit) and unit:containsPoint(x, y) then
             unit.selected = true
             table.insert(selectedEntities, unit)
             return
@@ -1298,22 +1894,39 @@ function handleLeftClick(x, y)
     end
     
     for _, unit in ipairs(kamikazes) do
-        if unit:containsPoint(x, y) then
+        if isPlayerOwned(unit) and unit:containsPoint(x, y) then
             unit.selected = true
             table.insert(selectedEntities, unit)
             return
         end
     end
     
-    -- Check all buildings
-    if townHall:containsPoint(x, y) then
+    -- ENEMY UNITS - selectable for viewing HP (no controls)
+    for _, peon in ipairs(peons) do
+        if peon.visible and not isPlayerOwned(peon) and peon:containsPoint(x, y) then
+            peon.selected = true
+            table.insert(selectedEntities, peon)
+            return
+        end
+    end
+    
+    for _, footman in ipairs(footmen) do
+        if not isPlayerOwned(footman) and footman:containsPoint(x, y) then
+            footman.selected = true
+            table.insert(selectedEntities, footman)
+            return
+        end
+    end
+    
+    -- Check PLAYER-OWNED buildings (main townhall is always player's)
+    if isPlayerOwned(townHall) and townHall:containsPoint(x, y) then
         townHall.selected = true
         table.insert(selectedEntities, townHall)
         return
     end
     
     for _, barrack in ipairs(barracks) do
-        if barrack:containsPoint(x, y) then
+        if isPlayerOwned(barrack) and barrack:containsPoint(x, y) then
             barrack.selected = true
             table.insert(selectedEntities, barrack)
             return
@@ -1321,7 +1934,7 @@ function handleLeftClick(x, y)
     end
     
     for _, farm in ipairs(farms) do
-        if farm:containsPoint(x, y) then
+        if isPlayerOwned(farm) and farm:containsPoint(x, y) then
             farm.selected = true
             table.insert(selectedEntities, farm)
             return
@@ -1329,7 +1942,7 @@ function handleLeftClick(x, y)
     end
     
     for _, building in ipairs(lumberMills) do
-        if building:containsPoint(x, y) then
+        if isPlayerOwned(building) and building:containsPoint(x, y) then
             building.selected = true
             table.insert(selectedEntities, building)
             return
@@ -1337,7 +1950,7 @@ function handleLeftClick(x, y)
     end
     
     for _, building in ipairs(blacksmiths) do
-        if building:containsPoint(x, y) then
+        if isPlayerOwned(building) and building:containsPoint(x, y) then
             building.selected = true
             table.insert(selectedEntities, building)
             return
@@ -1345,7 +1958,7 @@ function handleLeftClick(x, y)
     end
     
     for _, building in ipairs(scoutTowers) do
-        if building:containsPoint(x, y) then
+        if isPlayerOwned(building) and building:containsPoint(x, y) then
             building.selected = true
             table.insert(selectedEntities, building)
             return
@@ -1353,7 +1966,7 @@ function handleLeftClick(x, y)
     end
     
     for _, building in ipairs(archeryRanges) do
-        if building:containsPoint(x, y) then
+        if isPlayerOwned(building) and building:containsPoint(x, y) then
             building.selected = true
             table.insert(selectedEntities, building)
             return
@@ -1361,7 +1974,7 @@ function handleLeftClick(x, y)
     end
     
     for _, building in ipairs(stables) do
-        if building:containsPoint(x, y) then
+        if isPlayerOwned(building) and building:containsPoint(x, y) then
             building.selected = true
             table.insert(selectedEntities, building)
             return
@@ -1369,6 +1982,16 @@ function handleLeftClick(x, y)
     end
     
     for _, building in ipairs(siegeWorkshops) do
+        if isPlayerOwned(building) and building:containsPoint(x, y) then
+            building.selected = true
+            table.insert(selectedEntities, building)
+            return
+        end
+    end
+    
+    -- ENEMY BUILDINGS - selectable for viewing HP (no controls)
+    -- Check additional townhalls (includes enemy townhall)
+    for _, building in ipairs(townHalls) do
         if building:containsPoint(x, y) then
             building.selected = true
             table.insert(selectedEntities, building)
@@ -1376,6 +1999,25 @@ function handleLeftClick(x, y)
         end
     end
     
+    -- Enemy barracks
+    for _, barrack in ipairs(barracks) do
+        if not isPlayerOwned(barrack) and barrack:containsPoint(x, y) then
+            barrack.selected = true
+            table.insert(selectedEntities, barrack)
+            return
+        end
+    end
+    
+    -- Enemy farms
+    for _, farm in ipairs(farms) do
+        if not isPlayerOwned(farm) and farm:containsPoint(x, y) then
+            farm.selected = true
+            table.insert(selectedEntities, farm)
+            return
+        end
+    end
+    
+    -- Gold mines are neutral - anyone can select/view them
     for _, mine in ipairs(goldMines) do
         if mine:containsPoint(x, y) then
             mine.selected = true
@@ -1390,6 +2032,55 @@ function handleRightClick(x, y)
     
     local worldX, worldY = map:screenToWorld(x, y)
     local buildings = getAllBuildings()
+    local playerTeam = Teams and Teams.PLAYER or 1
+    
+    -- Check if clicked on an enemy unit
+    local clickedEnemy = nil
+    local allUnits = getAllUnits()
+    for _, unit in ipairs(allUnits) do
+        if unit.team and unit.team ~= playerTeam and unit:containsPoint(x, y) then
+            clickedEnemy = unit
+            break
+        end
+    end
+    
+    -- Check if clicked on an enemy building
+    local clickedEnemyBuilding = nil
+    if not clickedEnemy then
+        for _, building in ipairs(townHalls) do
+            if building.team and building.team ~= playerTeam and building:containsPoint(x, y) then
+                clickedEnemyBuilding = building
+                break
+            end
+        end
+        if not clickedEnemyBuilding then
+            for _, building in ipairs(barracks) do
+                if building.team and building.team ~= playerTeam and building:containsPoint(x, y) then
+                    clickedEnemyBuilding = building
+                    break
+                end
+            end
+        end
+        if not clickedEnemyBuilding then
+            for _, building in ipairs(farms) do
+                if building.team and building.team ~= playerTeam and building:containsPoint(x, y) then
+                    clickedEnemyBuilding = building
+                    break
+                end
+            end
+        end
+    end
+    
+    -- If clicked enemy, send attack command
+    if clickedEnemy or clickedEnemyBuilding then
+        local target = clickedEnemy or clickedEnemyBuilding
+        for _, entity in ipairs(selectedEntities) do
+            if entity.setAttackTarget then
+                entity:setAttackTarget(target)
+            end
+        end
+        return
+    end
     
     -- Check what was clicked ONCE (not per-unit)
     local clickedMine = nil
@@ -1490,6 +2181,11 @@ function handleRightClick(x, y)
             end
         end
     end
+end
+
+function Gameplay.unload()
+    -- Restore system cursor when leaving gameplay
+    love.mouse.setVisible(true)
 end
 
 return Gameplay

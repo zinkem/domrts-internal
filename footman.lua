@@ -7,6 +7,10 @@
 
 local Unit = require("unit")
 
+-- Team colors module
+local Teams
+pcall(function() Teams = require("teams") end)
+
 -- Visual enhancement modules (optional - graceful fallback if missing)
 local Effects, DrawUtils
 pcall(function() Effects = require("effects") end)
@@ -28,6 +32,13 @@ function Footman.new(params)
     self.type = "footman"
     self.name = "Footman"
     
+    -- Combat stats: damage 2, hp 3, attack speed 1
+    self.maxHp = 3
+    self.hp = self.maxHp
+    self.damage = 2
+    self.attackSpeed = 1.0
+    self.sightRadius = 2
+    
     -- Animation properties
     self.animTimer = 0
     self.idleSeed = math.random() * 100
@@ -39,8 +50,7 @@ function Footman.new(params)
 end
 
 -- Override update to add animation timer and effects
-local originalUpdate = Footman.update or function() end
-function Footman:update(dt, ...)
+function Footman:update(dt, buildings, allUnits, allBuildings)
     self.animTimer = (self.animTimer or 0) + dt
     self.dustTimer = math.max(0, (self.dustTimer or 0) - dt)
     
@@ -55,13 +65,15 @@ function Footman:update(dt, ...)
     self.lastWorldX = self.worldX
     self.lastWorldY = self.worldY
     
-    if originalUpdate then
-        return originalUpdate(self, dt, ...)
-    end
+    -- Call parent Unit update for combat logic
+    Unit.update(self, dt, buildings, allUnits, allBuildings)
 end
 
 function Footman:draw()
     local x, y = self:getScreenPos()
+    
+    -- Draw health bar
+    self:drawHealthBar()
     
     -- Animation offsets
     local idleBob = 0
@@ -69,7 +81,7 @@ function Footman:draw()
     local breathe = 0
     
     -- Determine if moving
-    local isMoving = self.state == "Moving" or 
+    local isMoving = self.state == "Moving" or self.state == "Attacking" or
                      (self.targetX and self.targetY)
     
     if isMoving then
@@ -112,6 +124,11 @@ function Footman:draw()
     
     -- Draw function for body (used for outline and flash)
     local function drawBody()
+        -- Get team colors
+        local teamColors = Teams and Teams.getColors(self.team) or nil
+        local shieldColor = teamColors and teamColors.primary or {0.55, 0.28, 0.12, 1}
+        local bossColor = teamColors and teamColors.emblem or {0.75, 0.65, 0.2, 1}
+        
         -- Arm swing when walking
         local armSwing = 0
         if isMoving then
@@ -132,16 +149,16 @@ function Footman:draw()
         love.graphics.line(x - 5, y + 3, x - 2, y + 3)
         love.graphics.line(x + 2, y + 5, x + 5, y + 5)
         
-        -- Shield on left arm (moves with arm)
-        love.graphics.setColor(0.55, 0.28, 0.12, 1)
+        -- Shield on left arm (moves with arm) - TEAM COLORED
+        love.graphics.setColor(shieldColor)
         love.graphics.ellipse("fill", x - 12, y - 2 + armSwing * 0.5, 6, 10)
         love.graphics.setColor(0.45, 0.45, 0.5, 1)
         love.graphics.setLineWidth(2)
         love.graphics.ellipse("line", x - 12, y - 2 + armSwing * 0.5, 6, 10)
-        -- Shield boss
-        love.graphics.setColor(0.75, 0.65, 0.2, 1)
+        -- Shield boss - TEAM COLORED
+        love.graphics.setColor(bossColor)
         love.graphics.circle("fill", x - 12, y - 2 + armSwing * 0.5, 3)
-        love.graphics.setColor(0.9, 0.8, 0.3, 0.6)
+        love.graphics.setColor(0.9, 0.85, 0.6, 0.6)
         love.graphics.circle("fill", x - 13, y - 3 + armSwing * 0.5, 1.5)
         
         -- Body (chainmail) - with breathing
@@ -232,7 +249,12 @@ function Footman:draw()
 end
 
 function Footman:drawOnMinimap(mapX, mapY, scale)
-    love.graphics.setColor(0.3, 0.7, 0.4, 1)
+    -- Use team color
+    if Teams then
+        Teams.setColor(self.team, "minimapUnit")
+    else
+        love.graphics.setColor(0.3, 0.7, 0.4, 1)
+    end
     local mmX = mapX + self.worldX * scale
     local mmY = mapY + self.worldY * scale
     love.graphics.circle("fill", mmX, mmY, math.max(2, 3))

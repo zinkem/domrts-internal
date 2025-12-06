@@ -48,6 +48,11 @@ function TownHall.new(params)
     self.team = params.team or (Teams and Teams.PLAYER or 1)
     self.owner = params.owner or nil  -- Reference to Player object
     
+    -- Combat stats
+    self.maxHp = 600
+    self.hp = self.maxHp
+    self.sightRadius = 2  -- Tiles
+    
     -- Tier system: 1 = Town Hall, 2 = Hold, 3 = Keep
     self.tier = 1
     
@@ -245,6 +250,9 @@ function TownHall:draw()
         love.graphics.setColor(0.8, 0.7, 0.2, 1)
         love.graphics.rectangle("fill", x + 5, y + size + 5, barW * progress, 8, 2)
     end
+    
+    -- Health bar (if damaged)
+    self:drawHealthBar()
     
     love.graphics.setColor(1, 1, 1, 1)
 end
@@ -506,6 +514,41 @@ function TownHall:containsPoint(screenX, screenY)
     local x, y = self:getScreenPos()
     return screenX >= x and screenX <= x + self.pixelSize and
            screenY >= y and screenY <= y + self.pixelSize
+end
+
+-- Combat Methods --
+
+function TownHall:takeDamage(amount)
+    self.hp = self.hp - amount
+    self.flashTimer = 0.1  -- Visual feedback
+end
+
+function TownHall:isDead()
+    return self.hp <= 0
+end
+
+function TownHall:drawHealthBar()
+    if not self.selected and self.hp >= self.maxHp then return end
+    
+    local x, y = self:getScreenPos()
+    local barWidth = self.pixelSize - 10
+    local barHeight = 6
+    local barX = x + 5
+    local barY = y - 12
+    
+    -- Background
+    love.graphics.setColor(0.2, 0.2, 0.2, 0.8)
+    love.graphics.rectangle("fill", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
+    
+    -- Health bar
+    local healthPct = self.hp / self.maxHp
+    love.graphics.setColor(1 - healthPct, healthPct, 0.2, 1)
+    love.graphics.rectangle("fill", barX, barY, barWidth * healthPct, barHeight)
+    
+    -- Border
+    love.graphics.setColor(0, 0, 0, 0.8)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
 end
 
 function TownHall:startProduction()
