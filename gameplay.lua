@@ -11,7 +11,7 @@ local Peon = require("peon")
 local Farm = require("farm")
 local Barracks = require("barracks")
 local Footman = require("footman")
-local FlowField = require("flowfield")
+-- FlowField no longer needed - using pathfinding.lua
 local Requirements = require("requirements")
 
 -- New buildings
@@ -90,6 +90,14 @@ local UI = {
     accentColor = {0.4, 0.6, 0.8, 1},
     headerColor = {0.6, 0.7, 0.85, 1}
 }
+
+-- Notification system
+local notifications = {}
+local NOTIFICATION_DURATION = 3.0
+
+local function addNotification(message)
+    table.insert(notifications, {text = message, timer = NOTIFICATION_DURATION})
+end
 
 local function checkAllMinesDepleted()
     for _, mine in ipairs(goldMines) do
@@ -535,7 +543,7 @@ local function createBuilding(gridX, gridY, buildingType, peon)
         table.insert(siegeWorkshops, building)
     end
     -- Invalidate all flow fields since map topology changed
-    FlowField.invalidateAll()
+    -- Pathfinding computed on-demand, no need to invalidate
 end
 
 local function getBuildingCost(buildingType)
@@ -691,15 +699,31 @@ local function updateRequirementsState()
     })
 end
 
+-- Setup callbacks for peons to check resources and send notifications
+local function setupPeonCallbacks(peon)
+    peon.onNotify = addNotification
+    peon.resourceCheck = function()
+        local gold = resources.gold
+        local lumber = resources.lumber
+        local canAfford = gold >= peon.buildCostGold and lumber >= peon.buildCostLumber
+        return canAfford, gold, lumber
+    end
+    peon.deductResources = function(costGold, costLumber)
+        resources.gold = resources.gold - costGold
+        resources.lumber = resources.lumber - costLumber
+    end
+end
+
 function Gameplay.load()
     local screenW, screenH = love.graphics.getDimensions()
     
-    FlowField.invalidateAll()
+    -- Pathfinding computed on-demand, no need to invalidate
     
     elapsedTime = 0
     victory = false
     resources.gold = 1000
     resources.lumber = 400
+    notifications = {}
     peons = {}
     footmen = {}
     farms = {}
@@ -748,6 +772,7 @@ function Gameplay.load()
             worldY = spawnY + (i - 2) * 30,
             map = map
         })
+        setupPeonCallbacks(newPeon)
         pushUnitOutOfBuildings(newPeon)
         table.insert(peons, newPeon)
     end
@@ -774,6 +799,7 @@ function Gameplay.update(dt)
     if peonReady and currentPop < maxPop then
         local spawnX, spawnY = townHall:getSpawnPos()
         local newPeon = Peon.new({worldX = spawnX, worldY = spawnY, map = map})
+        setupPeonCallbacks(newPeon)
         pushUnitOutOfBuildings(newPeon)
         table.insert(peons, newPeon)
         calculatePopulation()
@@ -967,6 +993,14 @@ function Gameplay.update(dt)
         end
     end
     
+    -- Update notifications
+    for i = #notifications, 1, -1 do
+        notifications[i].timer = notifications[i].timer - dt
+        if notifications[i].timer <= 0 then
+            table.remove(notifications, i)
+        end
+    end
+    
     if checkAllMinesDepleted() then
         victory = true
         Game.finalTime = elapsedTime
@@ -1016,6 +1050,20 @@ function Gameplay.draw()
     local selEntity = selectedEntities[1]
     if selEntity and selEntity.drawUI then selEntity:drawUI() end
     
+    -- Draw notifications
+    love.graphics.setFont(Game.fonts.medium)
+    for i, notif in ipairs(notifications) do
+        local alpha = math.min(1, notif.timer)
+        local y = screenH / 2 - 50 + (i - 1) * 30
+        -- Background
+        love.graphics.setColor(0.8, 0.2, 0.2, alpha * 0.8)
+        local textW = Game.fonts.medium:getWidth(notif.text)
+        love.graphics.rectangle("fill", (screenW - textW) / 2 - 10, y - 5, textW + 20, 30, 5)
+        -- Text
+        love.graphics.setColor(1, 1, 1, alpha)
+        love.graphics.print(notif.text, (screenW - textW) / 2, y)
+    end
+    
     if victory then drawVictoryScreen() end
     
     love.graphics.setColor(1, 1, 1, 1)
@@ -1043,9 +1091,8 @@ function Gameplay.mousepressed(x, y, button)
     if isPlacingBuilding then
         if button == 1 and placementValid and map:isInViewport(x, y) then
             local costGold, costLumber = getBuildingCost(placingBuildingType)
-            resources.gold = resources.gold - costGold
-            resources.lumber = resources.lumber - costLumber
-            placingPeon:goToBuild(placementGridX, placementGridY, placingBuildingType, createBuilding)
+            -- Don't deduct cost here - peon will check and deduct when arriving at site
+            placingPeon:goToBuild(placementGridX, placementGridY, placingBuildingType, createBuilding, costGold, costLumber)
             cancelBuildingPlacement()
             return
         elseif button == 2 then
@@ -1368,50 +1415,31 @@ function handleRightClick(x, y)
         end
     end
     
-    -- Generate flow field for the destination
-    local flowField = nil
-    if clickedMine then
-        flowField = FlowField.getField(clickedMine.gridX + 1, clickedMine.gridY + 1, map, buildings)
-    elseif treeX then
-        -- Flow field to a passable tile next to the tree
-        local directions = {{-1,0}, {1,0}, {0,-1}, {0,1}, {-1,-1}, {1,-1}, {-1,1}, {1,1}}
-        for _, dir in ipairs(directions) do
-            local standX = treeX + dir[1]
-            local standY = treeY + dir[2]
-            if map:isTilePassable(standX, standY) then
-                flowField = FlowField.getField(standX, standY, map, buildings)
-                break
-            end
-        end
-    elseif not clickedOnBuilding and not clickedTownHall and map:isWorldPosPassable(worldX, worldY) then
-        flowField = FlowField.getField(gridX, gridY, map, buildings)
-    end
-    
     -- Command all selected units
     for _, entity in ipairs(selectedEntities) do
         if entity.type == "peon" then
             local peon = entity
             
             if clickedMine then
-                peon:goToMine(clickedMine, flowField)
+                peon:goToMine(clickedMine)
             elseif clickedTownHall then
                 if peon.carryingGold > 0 or peon.carryingLumber > 0 then
                     peon.state = Peon.STATE_RETURNING
-                    peon.flowField = nil
+                    peon.path = nil
                 else
-                    peon:moveTo(worldX, worldY, flowField)
+                    peon:moveTo(worldX, worldY)
                 end
             elseif treeX then
-                peon:goToTree(treeX, treeY, flowField)
+                peon:goToTree(treeX, treeY)
             elseif not clickedOnBuilding and map:isWorldPosPassable(worldX, worldY) then
-                peon:moveTo(worldX, worldY, flowField)
+                peon:moveTo(worldX, worldY)
             end
             
         elseif entity.moveTo then
             -- All other mobile units (footman, archer, knight, flyingscout, ballista, kamikaze)
             if not clickedOnBuilding and not clickedMine and not clickedTownHall and not clickedTree then
                 if map:isWorldPosPassable(worldX, worldY) or entity.type == "flyingscout" then
-                    entity:moveTo(worldX, worldY, flowField)
+                    entity:moveTo(worldX, worldY)
                 end
             end
         end

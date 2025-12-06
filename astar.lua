@@ -136,7 +136,7 @@ function AStar.findPath(startGridX, startGridY, goalGridX, goalGridY, map, build
     -- Check if goal is inside a building - find adjacent tile instead
     local actualGoalX, actualGoalY = goalGridX, goalGridY
     if blocked[goalGridY .. "," .. goalGridX] then
-        -- Find nearest walkable tile adjacent to the building
+        -- Find nearest walkable tile adjacent to the building, closest to the CLICKED position
         local building = nil
         if buildings then
             for _, b in ipairs(buildings) do
@@ -159,7 +159,8 @@ function AStar.findPath(startGridX, startGridY, goalGridX, goalGridY, map, build
                     if isEdge then
                         local key = by .. "," .. bx
                         if not blocked[key] and bx >= 1 and bx <= width and by >= 1 and by <= height and map:isTilePassable(bx, by) then
-                            local dist = heuristic(startGridX, startGridY, bx, by)
+                            -- Distance from CLICKED position, not start position
+                            local dist = heuristic(goalGridX, goalGridY, bx, by)
                             if dist < bestDist then
                                 bestDist = dist
                                 actualGoalX, actualGoalY = bx, by

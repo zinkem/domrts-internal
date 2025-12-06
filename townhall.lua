@@ -39,7 +39,7 @@ function TownHall.new(params)
     self.tier = 1
     
     self.isProducing = false
-    self.productionTime = 5.0
+    self.productionTime = 10.0
     self.productionTimer = 0
     self.productionCost = 400
     self.actionButton = nil

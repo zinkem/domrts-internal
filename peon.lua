@@ -5,7 +5,7 @@
 ]]
 
 local Button = require("button")
-local FlowField = require("flowfield")
+local Pathfinding = require("pathfinding")
 local Requirements = require("requirements")
 
 local Peon = {}
@@ -36,9 +36,8 @@ function Peon.new(params)
     
     self.targetX = nil
     self.targetY = nil
-    self.flowField = nil  -- Flow field for pathfinding
-    self.lastMoveDirX = nil  -- Track last successful move for corner navigation
-    self.lastMoveDirY = nil
+    self.path = nil  -- List of waypoints {x, y}
+    self.currentWaypoint = 1
     
     -- Gold harvesting
     self.carryingGold = 0
@@ -60,17 +59,26 @@ function Peon.new(params)
     self.returnToStumpY = nil
     self.goIdleAtTarget = nil  -- Flag to go idle when reaching movement target
     
+    -- Animation
+    self.animTimer = 0
+    
     -- Building
     self.buildTargetX = nil
     self.buildTargetY = nil
     self.buildingType = nil
     self.buildCallback = nil
+    self.buildCostGold = 0
+    self.buildCostLumber = 0
     self.buildEntryX = nil  -- Position when entering building site
     self.buildEntryY = nil
+    
+    -- Notification callback (set by gameplay)
+    self.onNotify = nil
     
     -- UI - Build buttons
     self.buildButtons = {}
     self.buildMenuPage = 1  -- For scrolling through buildings
+    self.lastPageKey = nil  -- Track page to avoid recreating buttons
     
     return self
 end
@@ -154,152 +162,108 @@ function Peon:canMoveTo(newX, newY, buildings)
     return true
 end
 
--- Try to move in the given direction, with sliding and cardinal fallbacks
--- Returns true if moved, false if stuck
-function Peon:tryMove(moveDirX, moveDirY, moveSpeed, buildings)
-    local moveX = moveDirX * moveSpeed
-    local moveY = moveDirY * moveSpeed
+-- Compute path to target using line-of-sight pathfinding
+function Peon:computePath(targetX, targetY, buildings)
+    return Pathfinding.findPath(self.worldX, self.worldY, targetX, targetY, buildings, self.map, self.radius)
+end
+
+-- Advance to next waypoint if we've reached current one AND can see the next one
+function Peon:updateWaypoint(buildings)
+    if Pathfinding.reachedWaypoint(self.worldX, self.worldY, self.path, self.currentWaypoint, 12) then
+        local nextWp = self.currentWaypoint + 1
+        if nextWp <= #self.path then
+            local nextTarget = self.path[nextWp]
+            -- Only advance if we have clear line of sight to next waypoint
+            if Pathfinding.canSee(self.worldX, self.worldY, nextTarget.x, nextTarget.y, buildings, self.map, self.radius) then
+                self.currentWaypoint = nextWp
+            end
+        else
+            self.currentWaypoint = nextWp
+        end
+    end
+end
+
+-- Try to move at full speed in the given direction
+-- If blocked, find alternative directions that maintain full speed
+function Peon:tryMove(dirX, dirY, moveSpeed, buildings)
+    local moveX = dirX * moveSpeed
+    local moveY = dirY * moveSpeed
     local newX = self.worldX + moveX
     local newY = self.worldY + moveY
     
+    -- First try direct movement
     if self:canMoveTo(newX, newY, buildings) then
         self.worldX = newX
         self.worldY = newY
-        self.lastMoveDirX = moveDirX
-        self.lastMoveDirY = moveDirY
         return true
     end
     
-    -- Try sliding
-    if self:canMoveTo(newX, self.worldY, buildings) then
-        self.worldX = newX
-        self.lastMoveDirX = moveDirX > 0 and 1 or -1
-        self.lastMoveDirY = 0
-        return true
-    end
-    if self:canMoveTo(self.worldX, newY, buildings) then
-        self.worldY = newY
-        self.lastMoveDirX = 0
-        self.lastMoveDirY = moveDirY > 0 and 1 or -1
-        return true
-    end
-    
-    -- Corner case: try momentum
-    if self.lastMoveDirX and self.lastMoveDirY then
-        local lastX = self.worldX + self.lastMoveDirX * moveSpeed
-        local lastY = self.worldY + self.lastMoveDirY * moveSpeed
-        if self:canMoveTo(lastX, lastY, buildings) then
-            self.worldX = lastX
-            self.worldY = lastY
-            return true
-        end
-        if self.lastMoveDirX ~= 0 and self:canMoveTo(lastX, self.worldY, buildings) then
-            self.worldX = lastX
-            self.lastMoveDirY = 0
-            return true
-        end
-        if self.lastMoveDirY ~= 0 and self:canMoveTo(self.worldX, lastY, buildings) then
-            self.worldY = lastY
-            self.lastMoveDirX = 0
-            return true
-        end
-    end
-    
-    -- Last resort: try cardinals sorted by alignment with intended direction
-    local cardinals = {
-        {dx = 1, dy = 0}, {dx = -1, dy = 0},
-        {dx = 0, dy = 1}, {dx = 0, dy = -1}
+    -- Blocked - try sliding along walls at FULL SPEED
+    -- Test 8 alternative directions, pick best one that's closest to intended direction
+    local alternatives = {
+        {dx = 1, dy = 0},
+        {dx = -1, dy = 0},
+        {dx = 0, dy = 1},
+        {dx = 0, dy = -1},
+        {dx = 0.707, dy = 0.707},
+        {dx = -0.707, dy = 0.707},
+        {dx = 0.707, dy = -0.707},
+        {dx = -0.707, dy = -0.707},
     }
-    table.sort(cardinals, function(a, b)
-        local dotA = a.dx * moveDirX + a.dy * moveDirY
-        local dotB = b.dx * moveDirX + b.dy * moveDirY
+    
+    -- Sort by how aligned they are with intended direction (dot product)
+    table.sort(alternatives, function(a, b)
+        local dotA = a.dx * dirX + a.dy * dirY
+        local dotB = b.dx * dirX + b.dy * dirY
         return dotA > dotB
     end)
-    for _, dir in ipairs(cardinals) do
-        local testX = self.worldX + dir.dx * moveSpeed
-        local testY = self.worldY + dir.dy * moveSpeed
-        if self:canMoveTo(testX, testY, buildings) then
-            self.worldX = testX
-            self.worldY = testY
-            self.lastMoveDirX = dir.dx
-            self.lastMoveDirY = dir.dy
-            return true
-        end
-    end
     
-    -- Corner escape: try larger steps to clear tight corners
-    local escapeStep = self.radius * 0.5  -- Half the radius
-    for _, dir in ipairs(cardinals) do
-        local testX = self.worldX + dir.dx * escapeStep
-        local testY = self.worldY + dir.dy * escapeStep
-        if self:canMoveTo(testX, testY, buildings) then
-            self.worldX = testX
-            self.worldY = testY
-            self.lastMoveDirX = dir.dx
-            self.lastMoveDirY = dir.dy
-            return true
-        end
-    end
-    
-    return false
-end
-
-function Peon:getMoveDirection(targetWorldX, targetWorldY, buildings)
-    -- First try flow field
-    if self.flowField then
-        local dirX, dirY = self.flowField:getDirection(self.worldX, self.worldY, self.map)
-        if dirX and dirY then
-            return dirX, dirY
-        end
-    end
-    
-    -- Try nearby tiles to find a downhill cost direction
-    local currentCost = math.huge
-    if self.flowField then
-        currentCost = self.flowField:getCost(self.worldX, self.worldY, self.map) or math.huge
-    end
-    
-    -- Sample nearby positions to find one with lower cost
-    local sampleOffsets = {
-        {dx = 32, dy = 0}, {dx = -32, dy = 0},
-        {dx = 0, dy = 32}, {dx = 0, dy = -32},
-        {dx = 32, dy = 32}, {dx = -32, dy = 32},
-        {dx = 32, dy = -32}, {dx = -32, dy = -32},
-    }
-    
-    local bestDirX, bestDirY = nil, nil
-    local bestCost = currentCost
-    
-    for _, offset in ipairs(sampleOffsets) do
-        local sampleX = self.worldX + offset.dx
-        local sampleY = self.worldY + offset.dy
-        
-        -- Check if sample position is passable
-        if self.map:isWorldPosPassable(sampleX, sampleY) then
-            local sampleCost = self.flowField and self.flowField:getCost(sampleX, sampleY, self.map)
-            if sampleCost and sampleCost < bestCost then
-                bestCost = sampleCost
-                local toSampleX = sampleX - self.worldX
-                local toSampleY = sampleY - self.worldY
-                local dist = math.sqrt(toSampleX * toSampleX + toSampleY * toSampleY)
-                if dist > 0.1 then
-                    bestDirX = toSampleX / dist
-                    bestDirY = toSampleY / dist
-                end
+    -- Try each alternative at full speed
+    for _, alt in ipairs(alternatives) do
+        local dot = alt.dx * dirX + alt.dy * dirY
+        -- Only use alternatives that are at least somewhat aligned (dot > 0)
+        if dot > 0.1 then
+            local altX = self.worldX + alt.dx * moveSpeed
+            local altY = self.worldY + alt.dy * moveSpeed
+            if self:canMoveTo(altX, altY, buildings) then
+                self.worldX = altX
+                self.worldY = altY
+                return true
             end
         end
     end
     
-    if bestDirX and bestDirY then
-        return bestDirX, bestDirY
+    -- Still stuck - try smaller movements in the intended direction
+    for fraction = 0.75, 0.25, -0.25 do
+        local smallX = self.worldX + moveX * fraction
+        local smallY = self.worldY + moveY * fraction
+        if self:canMoveTo(smallX, smallY, buildings) then
+            self.worldX = smallX
+            self.worldY = smallY
+            return true
+        end
     end
     
-    -- Fallback to direct movement
-    local dx = targetWorldX - self.worldX
-    local dy = targetWorldY - self.worldY
+    return false  -- Completely stuck
+end
+
+-- Get direction to move towards current waypoint
+function Peon:getMoveDirection(targetX, targetY, buildings)
+    -- Update waypoint progression
+    self:updateWaypoint(buildings)
+    
+    -- Get direction from pathfinding
+    local dirX, dirY = Pathfinding.getDirection(self.worldX, self.worldY, self.path, self.currentWaypoint)
+    if dirX then
+        return dirX, dirY
+    end
+    
+    -- No path or reached end - move directly towards target
+    local dx = targetX - self.worldX
+    local dy = targetY - self.worldY
     local dist = math.sqrt(dx * dx + dy * dy)
     
-    if dist > 0.1 then
+    if dist > 1 then
         return dx / dist, dy / dist
     end
     
@@ -307,6 +271,9 @@ function Peon:getMoveDirection(targetWorldX, targetWorldY, buildings)
 end
 
 function Peon:update(dt, buildings, townHall, goldMine, resources)
+    -- Update animation timer
+    self.animTimer = self.animTimer + dt
+    
     if self.state == Peon.STATE_MOVING then
         self:updateMoving(dt, buildings, goldMine)
     elseif self.state == Peon.STATE_HARVESTING then
@@ -363,6 +330,27 @@ function Peon:updateMoving(dt, buildings, goldMine)
         local dy = (buildWorldY + 16) - self.worldY
         local dist = math.sqrt(dx * dx + dy * dy)
         if dist < 40 then
+            -- Check if we can afford the building now
+            if self.resourceCheck then
+                local canAfford, gold, lumber = self.resourceCheck()
+                if not canAfford then
+                    -- Not enough resources - go idle and notify
+                    if self.onNotify then
+                        self.onNotify("Not enough resources! Need " .. self.buildCostGold .. "g " .. self.buildCostLumber .. "L")
+                    end
+                    self.state = Peon.STATE_IDLE
+                    self.buildTargetX = nil
+                    self.buildTargetY = nil
+                    self.buildingType = nil
+                    self.buildCallback = nil
+                    self.buildCostGold = 0
+                    self.buildCostLumber = 0
+                    return
+                end
+                -- Deduct resources now
+                self.deductResources(self.buildCostGold, self.buildCostLumber)
+            end
+            
             self.buildEntryX = self.worldX
             self.buildEntryY = self.worldY
             self.visible = false
@@ -383,9 +371,15 @@ function Peon:updateMoving(dt, buildings, goldMine)
         self.state = Peon.STATE_IDLE
         self.targetX = nil
         self.targetY = nil
-        self.flowField = nil
+        self.path = nil
         self.goIdleAtTarget = nil
         return
+    end
+    
+    -- Make sure we have a path
+    if not self.path then
+        self.path = self:computePath(self.targetX, self.targetY, buildings)
+        self.currentWaypoint = 1
     end
     
     local moveDirX, moveDirY = self:getMoveDirection(self.targetX, self.targetY, buildings)
@@ -422,6 +416,8 @@ function Peon:updateReturning(dt, buildings, townHall, resources)
                 local cx, cy = self.targetMine:getWorldCenter()
                 self.targetX = cx
                 self.targetY = cy
+                self.path = nil  -- Clear path for new target
+                self.currentWaypoint = 1
                 self.state = Peon.STATE_MOVING
             else
                 self.state = Peon.STATE_IDLE
@@ -433,6 +429,8 @@ function Peon:updateReturning(dt, buildings, townHall, resources)
                 -- Have a target tree (original or adjacent), go chop it
                 if self.map:isTileTree(self.targetTreeX, self.targetTreeY) then
                     self.targetX, self.targetY = self.map:getTileWorldCenter(self.targetTreeX, self.targetTreeY)
+                    self.path = nil  -- Clear path for new target
+                    self.currentWaypoint = 1
                     self.state = Peon.STATE_MOVING
                 else
                     -- Tree disappeared somehow, go idle
@@ -443,6 +441,8 @@ function Peon:updateReturning(dt, buildings, townHall, resources)
             elseif self.returnToStumpX and self.returnToStumpY then
                 -- No adjacent tree found, return to stump then go idle
                 self.targetX, self.targetY = self.map:getTileWorldCenter(self.returnToStumpX, self.returnToStumpY)
+                self.path = nil  -- Clear path for new target
+                self.currentWaypoint = 1
                 self.goIdleAtTarget = true  -- Flag to go idle when reaching target
                 self.returnToStumpX = nil
                 self.returnToStumpY = nil
@@ -609,18 +609,27 @@ function Peon:draw()
     
     local x, y = self:getScreenPos()
     
-    -- Selection circle
+    -- Jumping offset when chopping
+    local jumpOffset = 0
+    if self.state == Peon.STATE_CHOPPING then
+        -- Jump up and down rapidly
+        jumpOffset = math.abs(math.sin(self.animTimer * 12)) * 6
+    end
+    y = y - jumpOffset
+    
+    -- Selection circle (don't apply jump offset)
+    local baseY = y + jumpOffset
     if self.selected then
         love.graphics.setColor(0, 1, 0, 0.4)
-        love.graphics.circle("fill", x, y, self.radius + 4)
+        love.graphics.circle("fill", x, baseY, self.radius + 4)
         love.graphics.setColor(0, 1, 0, 0.8)
         love.graphics.setLineWidth(2)
-        love.graphics.circle("line", x, y, self.radius + 4)
+        love.graphics.circle("line", x, baseY, self.radius + 4)
     end
     
-    -- Shadow
+    -- Shadow (stays on ground)
     love.graphics.setColor(0, 0, 0, 0.3)
-    love.graphics.ellipse("fill", x, y + 10, 10, 4)
+    love.graphics.ellipse("fill", x, baseY + 10, 10, 4)
     
     -- Feet
     love.graphics.setColor(0.4, 0.3, 0.2, 1)
@@ -717,7 +726,7 @@ function Peon:isInBox(x1, y1, x2, y2)
     return sx >= minX and sx <= maxX and sy >= minY and sy <= maxY
 end
 
-function Peon:moveTo(worldX, worldY, flowField)
+function Peon:moveTo(worldX, worldY)
     self.targetX = worldX
     self.targetY = worldY
     self.targetMine = nil
@@ -729,13 +738,14 @@ function Peon:moveTo(worldX, worldY, flowField)
     self.buildTargetX = nil
     self.buildTargetY = nil
     self.buildCallback = nil
-    self.flowField = flowField
-    self.lastMoveDirX = nil
-    self.lastMoveDirY = nil
+    self.buildCostGold = 0
+    self.buildCostLumber = 0
+    self.path = nil  -- Will be computed on first update
+    self.currentWaypoint = 1
     self.state = Peon.STATE_MOVING
 end
 
-function Peon:goToMine(mine, flowField)
+function Peon:goToMine(mine)
     self.targetMine = mine
     self.targetTreeX = nil
     self.targetTreeY = nil
@@ -745,9 +755,8 @@ function Peon:goToMine(mine, flowField)
     self.buildTargetX = nil
     self.buildTargetY = nil
     self.buildCallback = nil
-    self.flowField = flowField
-    self.lastMoveDirX = nil
-    self.lastMoveDirY = nil
+    self.path = nil
+    self.currentWaypoint = 1
     -- Target the center - updateMoving will stop at the edge
     local cx, cy = mine:getWorldCenter()
     self.targetX = cx
@@ -755,7 +764,7 @@ function Peon:goToMine(mine, flowField)
     self.state = Peon.STATE_MOVING
 end
 
-function Peon:goToTree(gridX, gridY, flowField)
+function Peon:goToTree(gridX, gridY)
     self.targetTreeX = gridX
     self.targetTreeY = gridY
     self.targetMine = nil
@@ -765,29 +774,29 @@ function Peon:goToTree(gridX, gridY, flowField)
     self.buildTargetX = nil
     self.buildTargetY = nil
     self.buildCallback = nil
-    self.flowField = flowField
-    self.lastMoveDirX = nil
-    self.lastMoveDirY = nil
+    self.path = nil
+    self.currentWaypoint = 1
     if self.map then
         self.targetX, self.targetY = self.map:getTileWorldCenter(gridX, gridY)
     end
     self.state = Peon.STATE_MOVING
 end
 
-function Peon:goToBuild(gridX, gridY, buildingType, callback, flowField)
+function Peon:goToBuild(gridX, gridY, buildingType, callback, costGold, costLumber)
     self.buildTargetX = gridX
     self.buildTargetY = gridY
     self.buildingType = buildingType
     self.buildCallback = callback
+    self.buildCostGold = costGold or 0
+    self.buildCostLumber = costLumber or 0
     self.targetMine = nil
     self.targetTreeX = nil
     self.targetTreeY = nil
     self.returnToStumpX = nil
     self.returnToStumpY = nil
     self.goIdleAtTarget = nil
-    self.flowField = flowField
-    self.lastMoveDirX = nil
-    self.lastMoveDirY = nil
+    self.path = nil
+    self.currentWaypoint = 1
     if self.map then
         self.targetX, self.targetY = self.map:gridToWorld(gridX, gridY)
         self.targetX = self.targetX + 16
@@ -915,41 +924,54 @@ function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
         local startIdx = (self.buildMenuPage - 1) * maxButtonsPerPage + 1
         local endIdx = math.min(startIdx + maxButtonsPerPage - 1, totalBuildings)
         
-        -- Create/update buttons
-        self.buildButtons = {}
-        local buttonIdx = 0
-        
-        for i = startIdx, endIdx do
-            local def = buildingDefs[i]
-            local costText = string.format("%s (%dg %dL)", def.name, def.costGold, def.costLumber)
+        -- Check if page changed - only recreate buttons if page changed
+        local currentPageKey = self.buildMenuPage .. "_" .. startIdx .. "_" .. endIdx
+        if self.lastPageKey ~= currentPageKey then
+            self.lastPageKey = currentPageKey
+            self.buildButtons = {}
             
-            local btn = Button.new({
-                x = panelX + 10, 
-                y = buttonY + buttonIdx * buttonSpacing, 
-                width = 150, 
-                height = buttonHeight,
-                text = costText, 
-                font = font,
-                colors = {
-                    normal = def.colors.normal, 
-                    hover = def.colors.hover,
-                    pressed = def.colors.pressed, 
-                    text = {1, 1, 1, 1}, 
-                    border = def.colors.pressed
-                },
-                onClick = function()
-                    if startBuildCallback then startBuildCallback(self, def.type) end
-                end
-            })
+            local buttonIdx = 0
+            for i = startIdx, endIdx do
+                local def = buildingDefs[i]
+                local costText = string.format("%s (%dg %dL)", def.name, def.costGold, def.costLumber)
+                
+                local btn = Button.new({
+                    x = panelX + 10, 
+                    y = buttonY + buttonIdx * buttonSpacing, 
+                    width = 150, 
+                    height = buttonHeight,
+                    text = costText, 
+                    font = font,
+                    colors = {
+                        normal = def.colors.normal, 
+                        hover = def.colors.hover,
+                        pressed = def.colors.pressed, 
+                        text = {1, 1, 1, 1}, 
+                        border = def.colors.pressed
+                    },
+                    onClick = function()
+                        if startBuildCallback then startBuildCallback(self, def.type) end
+                    end
+                })
+                
+                table.insert(self.buildButtons, {button = btn, def = def})
+                buttonIdx = buttonIdx + 1
+            end
+        end
+        
+        -- Update button enabled state and positions (every frame)
+        local buttonIdx = 0
+        for _, btnData in ipairs(self.buildButtons) do
+            local def = btnData.def
+            local btn = btnData.button
             
             local canAfford = resources.gold >= def.costGold and resources.lumber >= def.costLumber
             local canGiveOrders = self.state == Peon.STATE_IDLE or self.state == Peon.STATE_MOVING
             local meetsReqs = def.canBuild()
             
             btn:setEnabled(canAfford and canGiveOrders and meetsReqs)
+            btn:setPosition(panelX + 10, buttonY + buttonIdx * buttonSpacing)
             btn:update(0)
-            
-            table.insert(self.buildButtons, {button = btn, def = def})
             buttonIdx = buttonIdx + 1
         end
         
@@ -965,6 +987,7 @@ function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
                     onClick = function()
                         self.buildMenuPage = self.buildMenuPage - 1
                         if self.buildMenuPage < 1 then self.buildMenuPage = totalPages end
+                        self.lastPageKey = nil  -- Force button recreation
                     end
                 })
             end
@@ -977,6 +1000,7 @@ function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
                     onClick = function()
                         self.buildMenuPage = self.buildMenuPage + 1
                         if self.buildMenuPage > totalPages then self.buildMenuPage = 1 end
+                        self.lastPageKey = nil  -- Force button recreation
                     end
                 })
             end
@@ -993,6 +1017,7 @@ function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
         self.buildButtons = {}
         self.prevPageButton = nil
         self.nextPageButton = nil
+        self.lastPageKey = nil
     end
 end
 
