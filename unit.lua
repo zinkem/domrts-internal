@@ -106,11 +106,6 @@ function Unit:canMoveTo(newX, newY, buildings)
     -- Check building collisions
     if buildings then
         for _, b in ipairs(buildings) do
-            -- Skip attack target - we want to approach it
-            if b == self.attackTarget then
-                goto continue
-            end
-            
             if b.getWorldBounds then
                 local bx1, by1, bx2, by2 = b:getWorldBounds()
                 -- Simple circle vs rectangle collision
@@ -123,8 +118,6 @@ function Unit:canMoveTo(newX, newY, buildings)
                     return false
                 end
             end
-            
-            ::continue::
         end
     end
     
@@ -410,6 +403,46 @@ function Unit:update(dt, buildings, allUnits, allBuildings)
     -- Update flash timer
     if self.flashTimer and self.flashTimer > 0 then
         self.flashTimer = self.flashTimer - dt
+    end
+    
+    -- Stuck detection - track position history
+    self.stuckTimer = (self.stuckTimer or 0) + dt
+    if self.stuckTimer >= 0.5 then
+        self.stuckTimer = 0
+        
+        -- Store position history (keep last 3 samples = 1.5 seconds)
+        self.posHistory = self.posHistory or {}
+        table.insert(self.posHistory, {x = self.worldX, y = self.worldY})
+        if #self.posHistory > 3 then
+            table.remove(self.posHistory, 1)
+        end
+        
+        -- Check if stuck (not moving but should be)
+        if #self.posHistory >= 3 and (self.state == "Moving" or self.state == "Attacking" or self.state == "AttackMoving") then
+            local oldPos = self.posHistory[1]
+            local dx = self.worldX - oldPos.x
+            local dy = self.worldY - oldPos.y
+            local movedDist = math.sqrt(dx * dx + dy * dy)
+            
+            -- If moved less than 5 pixels in 1.5 seconds while trying to move, we're stuck
+            if movedDist < 5 then
+                -- Nudge in a random direction
+                local nudgeAngle = math.random() * math.pi * 2
+                local nudgeDist = 15 + math.random() * 10
+                local nudgeX = self.worldX + math.cos(nudgeAngle) * nudgeDist
+                local nudgeY = self.worldY + math.sin(nudgeAngle) * nudgeDist
+                
+                -- Only nudge if the new position is valid
+                if self:canMoveTo(nudgeX, nudgeY, buildings) then
+                    self.worldX = nudgeX
+                    self.worldY = nudgeY
+                end
+                
+                -- Clear path to force recalculation
+                self.path = nil
+                self.posHistory = {}
+            end
+        end
     end
     
     if self.state == "Attacking" then

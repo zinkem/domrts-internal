@@ -309,33 +309,29 @@ function Map:update(dt, disableEdgeScroll)
         local ww, wh = love.graphics.getDimensions()
         local inWindow = mx >= 0 and mx <= ww and my >= 0 and my <= wh
         
-        -- Check if mouse is in viewport area (not in UI)
-        local inViewport = mx >= self.viewportX and mx <= self.viewportX + self.viewportW and
-                          my >= self.viewportY and my <= self.viewportY + self.viewportH
+        -- Edge scroll triggers at SCREEN edges, not just viewport edges
+        -- This makes scrolling consistent in all directions
+        local edgeDx, edgeDy = 0, 0
         
-        if inViewport or not inWindow then
-            local edgeDx, edgeDy = 0, 0
-            
-            -- Left edge or off left
-            if mx < self.viewportX + self.edgeScrollMargin or (not inWindow and mx < 0) then
-                edgeDx = -self.edgeScrollSpeed * dt
-            end
-            -- Right edge or off right  
-            if mx > self.viewportX + self.viewportW - self.edgeScrollMargin or (not inWindow and mx > ww) then
-                edgeDx = self.edgeScrollSpeed * dt
-            end
-            -- Top edge or off top
-            if my < self.viewportY + self.edgeScrollMargin or (not inWindow and my < 0) then
-                edgeDy = -self.edgeScrollSpeed * dt
-            end
-            -- Bottom edge or off bottom
-            if my > self.viewportY + self.viewportH - self.edgeScrollMargin or (not inWindow and my > wh) then
-                edgeDy = self.edgeScrollSpeed * dt
-            end
-            
-            dx = dx + edgeDx
-            dy = dy + edgeDy
+        -- Left edge or off left
+        if mx < self.edgeScrollMargin or (not inWindow and mx < 0) then
+            edgeDx = -self.edgeScrollSpeed * dt
         end
+        -- Right edge or off right  
+        if mx > ww - self.edgeScrollMargin or (not inWindow and mx > ww) then
+            edgeDx = self.edgeScrollSpeed * dt
+        end
+        -- Top edge or off top (use screen top, not viewport top)
+        if my < self.edgeScrollMargin or (not inWindow and my < 0) then
+            edgeDy = -self.edgeScrollSpeed * dt
+        end
+        -- Bottom edge or off bottom
+        if my > wh - self.edgeScrollMargin or (not inWindow and my > wh) then
+            edgeDy = self.edgeScrollSpeed * dt
+        end
+        
+        dx = dx + edgeDx
+        dy = dy + edgeDy
     end
     
     if dx ~= 0 or dy ~= 0 then
