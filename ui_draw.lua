@@ -1001,82 +1001,175 @@ function UIDraw.drawCommandButton(x, y, w, h, text, hotkey, enabled, hovered, pr
     local iconX = x + (w - iconSize) / 2
     local iconY = y + 5
     
-    -- Icon background (darker inset)
-    love.graphics.setColor(0.08, 0.06, 0.05, 0.9)
-    love.graphics.rectangle("fill", iconX - 1, iconY - 1, iconSize + 2, iconSize + 2, 3)
+    -- Subtle circular vignette/frame for icon (instead of harsh black box)
+    local cx, cy = iconX + iconSize/2, iconY + iconSize/2
+    local frameRadius = iconSize/2 + 2
+    
+    -- Soft radial gradient effect (darker at edges)
+    for r = frameRadius, frameRadius - 4, -1 do
+        local t = (frameRadius - r) / 4
+        local alpha = 0.25 * (1 - t)
+        love.graphics.setColor(0.1, 0.08, 0.06, alpha)
+        love.graphics.circle("fill", cx, cy, r)
+    end
+    
+    -- Subtle inner glow ring
+    love.graphics.setColor(0.4, 0.35, 0.25, 0.3)
+    love.graphics.setLineWidth(1)
+    love.graphics.circle("line", cx, cy, iconSize/2 + 1)
     
     -- Draw appropriate icon based on type
     local iconAlpha = enabled and 1 or 0.5
+    
+    -- Draw shadow/outline for all icons first
+    local function drawIconShadow()
+        love.graphics.setColor(0, 0, 0, 0.4 * iconAlpha)
+    end
+    
     if iconType == "peon" then
-        -- Peon face icon
-        love.graphics.setColor(0.85, 0.7, 0.55, iconAlpha)  -- Skin
-        love.graphics.circle("fill", iconX + iconSize/2, iconY + iconSize/2, 10)
-        love.graphics.setColor(0.4, 0.25, 0.15, iconAlpha)  -- Hair
-        love.graphics.arc("fill", iconX + iconSize/2, iconY + iconSize/2 - 3, 10, math.pi, 0)
-        love.graphics.setColor(0.2, 0.15, 0.1, iconAlpha)  -- Eyes
-        love.graphics.circle("fill", iconX + iconSize/2 - 3, iconY + iconSize/2 + 1, 2)
-        love.graphics.circle("fill", iconX + iconSize/2 + 3, iconY + iconSize/2 + 1, 2)
+        -- Peon face icon with gold accent
+        -- Shadow
+        love.graphics.setColor(0.3, 0.2, 0.1, 0.5 * iconAlpha)
+        love.graphics.circle("fill", cx + 1, cy + 1, 11)
+        -- Face
+        love.graphics.setColor(0.9, 0.75, 0.6, iconAlpha)  -- Skin
+        love.graphics.circle("fill", cx, cy, 10)
+        -- Hair
+        love.graphics.setColor(0.5, 0.3, 0.15, iconAlpha)
+        love.graphics.arc("fill", cx, cy - 2, 10, math.pi, 0)
+        -- Eyes
+        love.graphics.setColor(0.15, 0.1, 0.05, iconAlpha)
+        love.graphics.circle("fill", cx - 3, cy + 1, 2)
+        love.graphics.circle("fill", cx + 3, cy + 1, 2)
+        -- Outline
+        love.graphics.setColor(0.6, 0.45, 0.3, 0.6 * iconAlpha)
+        love.graphics.setLineWidth(1)
+        love.graphics.circle("line", cx, cy, 10)
+        
     elseif iconType == "footman" then
-        -- Footman helmet icon
-        love.graphics.setColor(0.6, 0.6, 0.65, iconAlpha)  -- Steel helmet
-        love.graphics.rectangle("fill", iconX + 5, iconY + 3, iconSize - 10, iconSize - 8, 3)
-        love.graphics.setColor(0.4, 0.4, 0.45, iconAlpha)  -- Visor
-        love.graphics.rectangle("fill", iconX + 7, iconY + 12, iconSize - 14, 6)
-        love.graphics.setColor(0.8, 0.7, 0.3, iconAlpha)  -- Plume/crest
-        love.graphics.polygon("fill", iconX + iconSize/2, iconY + 2, iconX + iconSize/2 - 4, iconY + 8, iconX + iconSize/2 + 4, iconY + 8)
+        -- Footman helmet with shine
+        local hx, hy = cx, cy
+        -- Shadow
+        love.graphics.setColor(0.2, 0.2, 0.25, 0.5 * iconAlpha)
+        love.graphics.rectangle("fill", hx - 7, hy - 8, 16, 18, 3)
+        -- Helmet body
+        love.graphics.setColor(0.7, 0.7, 0.75, iconAlpha)
+        love.graphics.rectangle("fill", hx - 6, hy - 7, 14, 16, 3)
+        -- Helmet shine
+        love.graphics.setColor(0.85, 0.85, 0.9, 0.6 * iconAlpha)
+        love.graphics.rectangle("fill", hx - 4, hy - 5, 4, 8, 2)
+        -- Visor slit
+        love.graphics.setColor(0.2, 0.2, 0.25, iconAlpha)
+        love.graphics.rectangle("fill", hx - 4, hy + 2, 10, 4)
+        -- Gold plume
+        love.graphics.setColor(0.95, 0.8, 0.3, iconAlpha)
+        love.graphics.polygon("fill", hx, hy - 11, hx - 5, hy - 4, hx + 5, hy - 4)
+        
     elseif iconType == "farm" then
-        -- Farm icon (barn shape)
-        love.graphics.setColor(0.6, 0.35, 0.2, iconAlpha)  -- Brown wood
-        love.graphics.rectangle("fill", iconX + 4, iconY + 10, iconSize - 8, iconSize - 12)
-        love.graphics.setColor(0.7, 0.3, 0.2, iconAlpha)  -- Red roof
-        love.graphics.polygon("fill", iconX + 2, iconY + 10, iconX + iconSize/2, iconY + 2, iconX + iconSize - 2, iconY + 10)
-        love.graphics.setColor(0.4, 0.25, 0.1, iconAlpha)  -- Door
-        love.graphics.rectangle("fill", iconX + iconSize/2 - 3, iconY + 16, 6, 10)
+        -- Farm with warm colors
+        local fx, fy = cx, cy + 2
+        -- Shadow
+        love.graphics.setColor(0.2, 0.1, 0.05, 0.5 * iconAlpha)
+        love.graphics.rectangle("fill", fx - 9, fy - 2, 20, 14)
+        -- Barn body
+        love.graphics.setColor(0.75, 0.45, 0.25, iconAlpha)
+        love.graphics.rectangle("fill", fx - 8, fy - 1, 18, 12)
+        -- Red roof
+        love.graphics.setColor(0.85, 0.35, 0.25, iconAlpha)
+        love.graphics.polygon("fill", fx - 10, fy - 1, fx, fy - 10, fx + 10, fy - 1)
+        -- Door
+        love.graphics.setColor(0.45, 0.25, 0.1, iconAlpha)
+        love.graphics.rectangle("fill", fx - 3, fy + 3, 6, 8)
+        -- Hay accent
+        love.graphics.setColor(0.9, 0.8, 0.4, 0.8 * iconAlpha)
+        love.graphics.rectangle("fill", fx + 4, fy + 1, 3, 5)
+        
     elseif iconType == "barracks" then
-        -- Barracks icon (fortress shape)
-        love.graphics.setColor(0.5, 0.45, 0.4, iconAlpha)  -- Stone gray
-        love.graphics.rectangle("fill", iconX + 3, iconY + 8, iconSize - 6, iconSize - 10)
-        -- Battlements
-        love.graphics.rectangle("fill", iconX + 3, iconY + 4, 5, 6)
-        love.graphics.rectangle("fill", iconX + iconSize/2 - 2.5, iconY + 4, 5, 6)
-        love.graphics.rectangle("fill", iconX + iconSize - 8, iconY + 4, 5, 6)
-        love.graphics.setColor(0.25, 0.2, 0.15, iconAlpha)  -- Gate
-        love.graphics.rectangle("fill", iconX + iconSize/2 - 4, iconY + 14, 8, 12)
-    elseif iconType == "tower" then
-        -- Tower icon
-        love.graphics.setColor(0.5, 0.45, 0.4, iconAlpha)  -- Stone
-        love.graphics.rectangle("fill", iconX + 8, iconY + 6, iconSize - 16, iconSize - 8)
-        -- Pointed roof
-        love.graphics.setColor(0.4, 0.3, 0.25, iconAlpha)
-        love.graphics.polygon("fill", iconX + iconSize/2, iconY + 2, iconX + 6, iconY + 8, iconX + iconSize - 6, iconY + 8)
-        -- Window
-        love.graphics.setColor(0.2, 0.3, 0.4, iconAlpha)
-        love.graphics.rectangle("fill", iconX + iconSize/2 - 2, iconY + 14, 4, 6)
-    elseif iconType == "attack" then
-        -- Attack icon (sword)
-        love.graphics.setColor(0.7, 0.7, 0.75, iconAlpha)  -- Blade
-        love.graphics.polygon("fill", iconX + 6, iconY + iconSize - 4, iconX + iconSize - 6, iconY + 4, iconX + iconSize - 4, iconY + 6, iconX + 8, iconY + iconSize - 2)
-        love.graphics.setColor(0.5, 0.35, 0.2, iconAlpha)  -- Handle
-        love.graphics.rectangle("fill", iconX + 4, iconY + iconSize - 8, 6, 8)
-        love.graphics.setColor(0.8, 0.7, 0.3, iconAlpha)  -- Guard
-        love.graphics.rectangle("fill", iconX + 2, iconY + iconSize - 10, 10, 3)
-    elseif iconType == "stop" then
-        -- Stop icon (hand)
-        love.graphics.setColor(0.9, 0.3, 0.2, iconAlpha)
-        love.graphics.circle("fill", iconX + iconSize/2, iconY + iconSize/2, 11)
-        love.graphics.setColor(0.95, 0.85, 0.7, iconAlpha)  -- Palm
-        love.graphics.rectangle("fill", iconX + 8, iconY + 10, 12, 14, 2)
-        -- Fingers
-        for i = 0, 3 do
-            love.graphics.rectangle("fill", iconX + 8 + i * 3, iconY + 5, 3, 8, 1)
-        end
-    else
-        -- Generic icon (question mark or simple shape)
+        -- Stone fortress with banner
+        local bx, by = cx, cy + 1
+        -- Shadow
+        love.graphics.setColor(0.15, 0.12, 0.1, 0.5 * iconAlpha)
+        love.graphics.rectangle("fill", bx - 10, by - 6, 22, 18)
+        -- Main building
         love.graphics.setColor(0.6, 0.55, 0.5, iconAlpha)
-        love.graphics.circle("fill", iconX + iconSize/2, iconY + iconSize/2, 10)
+        love.graphics.rectangle("fill", bx - 9, by - 5, 20, 16)
+        -- Battlements
+        love.graphics.setColor(0.65, 0.6, 0.55, iconAlpha)
+        love.graphics.rectangle("fill", bx - 9, by - 9, 5, 5)
+        love.graphics.rectangle("fill", bx - 2, by - 9, 5, 5)
+        love.graphics.rectangle("fill", bx + 5, by - 9, 5, 5)
+        -- Gate
         love.graphics.setColor(0.3, 0.25, 0.2, iconAlpha)
-        love.graphics.setFont(Game.fonts.medium)
-        love.graphics.print("?", iconX + iconSize/2 - 4, iconY + iconSize/2 - 8)
+        love.graphics.rectangle("fill", bx - 4, by + 2, 9, 10, 2)
+        -- Red banner
+        love.graphics.setColor(0.8, 0.25, 0.2, iconAlpha)
+        love.graphics.rectangle("fill", bx + 5, by - 6, 3, 8)
+        
+    elseif iconType == "tower" then
+        -- Watch tower
+        local tx, ty = cx, cy
+        -- Shadow
+        love.graphics.setColor(0.15, 0.12, 0.1, 0.5 * iconAlpha)
+        love.graphics.rectangle("fill", tx - 5, ty - 4, 12, 18)
+        -- Tower body
+        love.graphics.setColor(0.6, 0.55, 0.5, iconAlpha)
+        love.graphics.rectangle("fill", tx - 4, ty - 3, 10, 16)
+        -- Pointed roof
+        love.graphics.setColor(0.5, 0.4, 0.35, iconAlpha)
+        love.graphics.polygon("fill", tx + 1, ty - 11, tx - 6, ty - 3, tx + 8, ty - 3)
+        -- Window (glowing)
+        love.graphics.setColor(0.9, 0.8, 0.4, iconAlpha)
+        love.graphics.rectangle("fill", tx - 1, ty + 3, 4, 5)
+        love.graphics.setColor(1, 0.9, 0.5, 0.5 * iconAlpha)
+        love.graphics.rectangle("fill", tx - 2, ty + 2, 6, 7)
+        
+    elseif iconType == "attack" then
+        -- Crossed sword with glow
+        -- Glow
+        love.graphics.setColor(0.8, 0.7, 0.5, 0.3 * iconAlpha)
+        love.graphics.setLineWidth(4)
+        love.graphics.line(cx - 8, cy + 8, cx + 8, cy - 8)
+        -- Blade
+        love.graphics.setColor(0.85, 0.85, 0.9, iconAlpha)
+        love.graphics.setLineWidth(3)
+        love.graphics.line(cx - 7, cy + 7, cx + 7, cy - 7)
+        -- Shine
+        love.graphics.setColor(1, 1, 1, 0.6 * iconAlpha)
+        love.graphics.setLineWidth(1)
+        love.graphics.line(cx - 5, cy + 5, cx + 5, cy - 5)
+        -- Handle
+        love.graphics.setColor(0.6, 0.4, 0.25, iconAlpha)
+        love.graphics.setLineWidth(3)
+        love.graphics.line(cx - 9, cy + 9, cx - 6, cy + 6)
+        -- Guard
+        love.graphics.setColor(0.9, 0.75, 0.35, iconAlpha)
+        love.graphics.setLineWidth(2)
+        love.graphics.line(cx - 9, cy + 5, cx - 5, cy + 9)
+        
+    elseif iconType == "stop" then
+        -- Red stop hand
+        -- Glow
+        love.graphics.setColor(0.9, 0.2, 0.15, 0.3 * iconAlpha)
+        love.graphics.circle("fill", cx, cy, 13)
+        -- Red circle
+        love.graphics.setColor(0.95, 0.3, 0.25, iconAlpha)
+        love.graphics.circle("fill", cx, cy, 11)
+        -- Palm
+        love.graphics.setColor(0.95, 0.85, 0.7, iconAlpha)
+        love.graphics.rectangle("fill", cx - 5, cy - 2, 10, 10, 2)
+        -- Fingers
+        for i = -2, 1 do
+            love.graphics.rectangle("fill", cx - 4 + i * 3, cy - 8, 3, 8, 1)
+        end
+        -- Thumb
+        love.graphics.rectangle("fill", cx + 5, cy - 1, 4, 6, 1)
+        
+    else
+        -- Generic icon (hammer for unknown)
+        love.graphics.setColor(0.6, 0.55, 0.5, iconAlpha)
+        love.graphics.rectangle("fill", cx - 2, cy - 8, 4, 12)
+        love.graphics.setColor(0.5, 0.45, 0.4, iconAlpha)
+        love.graphics.rectangle("fill", cx - 6, cy - 10, 12, 5, 1)
     end
     
     -- Hotkey in top-left corner (no box, just the letter)

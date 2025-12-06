@@ -1,9 +1,10 @@
 --[[
     Map
-    64x64 tile grid with scrolling, terrain generation
+    Variable size tile grid with scrolling, terrain generation
     Tile size: 32x32 pixels
     
     ENHANCED: Trees now have variation and wind sway
+    Supports winter tileset with desaturated colors
 ]]
 
 -- Visual enhancement modules (optional - graceful fallback if missing)
@@ -25,18 +26,23 @@ Map.FOG_VISIBLE = 2     -- Full visibility, unit nearby
 
 -- Constants
 Map.TILE_SIZE = 32
-Map.WIDTH = 64
-Map.HEIGHT = 64
+Map.DEFAULT_SIZE = 64
 
 -- Animation time (for tree sway)
 Map.animTime = 0
 
-function Map.new()
+function Map.new(options)
+    options = options or {}
     local self = setmetatable({}, Map)
     
     self.tileSize = Map.TILE_SIZE
-    self.width = Map.WIDTH
-    self.height = Map.HEIGHT
+    self.width = options.width or options.mapSize or Map.DEFAULT_SIZE
+    self.height = options.height or options.mapSize or Map.DEFAULT_SIZE
+    self.tileset = options.tileset or "summer"  -- "summer" or "winter"
+    
+    -- Computed grid dimensions (for fog and pathfinding)
+    self.gridWidth = self.width
+    self.gridHeight = self.height
     
     -- Camera position (top-left in world pixels)
     self.cameraX = 0
@@ -509,11 +515,25 @@ function Map:draw()
                 }
                 
                 if DrawUtils then
-                    DrawUtils.drawTreeCanopy(screenX, screenY, x, y, self.tileSize, isEdge, edgeSides)
+                    DrawUtils.drawTreeCanopy(screenX, screenY, x, y, self.tileSize, isEdge, edgeSides, self.tileset)
                 else
                     -- Fallback canopy with chunky shapes
                     local sway = math.sin(Map.animTime * 1.2 + x * 0.1 + y * 0.13) * 2
                     local colorVar = (sRand(seed, 1) - 0.5) * 0.05
+                    
+                    -- Get colors based on tileset
+                    local backR, backG, backB, midR, midG, midB, lightR, lightG, lightB
+                    if self.tileset == "winter" then
+                        -- Winter: desaturated blue-gray with some brown
+                        backR, backG, backB = 0.18 + colorVar, 0.20 + colorVar, 0.22
+                        midR, midG, midB = 0.25 + colorVar, 0.28 + colorVar, 0.30
+                        lightR, lightG, lightB = 0.35 + colorVar, 0.38 + colorVar, 0.42
+                    else
+                        -- Summer: green
+                        backR, backG, backB = 0.05 + colorVar, 0.25 + colorVar, 0.07
+                        midR, midG, midB = 0.08 + colorVar, 0.34 + colorVar, 0.1
+                        lightR, lightG, lightB = 0.12 + colorVar, 0.44 + colorVar, 0.14
+                    end
                     
                     -- Draw chunky foliage blobs
                     for i = 1, 3 do
@@ -522,26 +542,37 @@ function Map:draw()
                         local chunkSway = sway * (0.5 + sRand(seed, 80 + i) * 0.5)
                         
                         -- Back layer
-                        love.graphics.setColor(0.05 + colorVar, 0.25 + colorVar, 0.07, 1)
+                        love.graphics.setColor(backR, backG, backB, 1)
                         love.graphics.circle("fill", cx + chunkSway * 0.3 - 4, cy + 3, 10)
                         love.graphics.circle("fill", cx + chunkSway * 0.3 + 5, cy + 2, 9)
                         
                         -- Mid layer  
-                        love.graphics.setColor(0.08 + colorVar, 0.34 + colorVar, 0.1, 1)
+                        love.graphics.setColor(midR, midG, midB, 1)
                         love.graphics.circle("fill", cx + chunkSway * 0.5, cy, 12)
                         love.graphics.circle("fill", cx + chunkSway * 0.5 + 6, cy + 4, 8)
                         
                         -- Light layer
-                        love.graphics.setColor(0.12 + colorVar, 0.44 + colorVar, 0.14, 1)
+                        love.graphics.setColor(lightR, lightG, lightB, 1)
                         love.graphics.circle("fill", cx + chunkSway * 0.7 - 2, cy - 3, 8)
                     end
                     
                     -- Highlights
-                    love.graphics.setColor(0.14 + colorVar, 0.48 + colorVar, 0.16, 0.85)
+                    local hlR, hlG, hlB = lightR + 0.02, lightG + 0.04, lightB + 0.02
+                    love.graphics.setColor(hlR, hlG, hlB, 0.85)
                     for i = 1, 2 do
                         local hx = screenX + sRand(seed, 550 + i) * self.tileSize
                         local hy = screenY + sRand(seed, 560 + i) * self.tileSize * 0.6
                         love.graphics.circle("fill", hx + sway * 0.7, hy, 5)
+                    end
+                    
+                    -- Snow on trees for winter
+                    if self.tileset == "winter" then
+                        love.graphics.setColor(0.9, 0.92, 0.95, 0.7)
+                        for i = 1, 3 do
+                            local sx = screenX + sRand(seed, 700 + i) * self.tileSize
+                            local sy = screenY + sRand(seed, 710 + i) * self.tileSize * 0.5
+                            love.graphics.circle("fill", sx, sy, 3 + sRand(seed, 720 + i) * 3)
+                        end
                     end
                     
                     -- Edge foliage
@@ -587,25 +618,96 @@ function Map:draw()
     end
     
     --===========================================
-    -- PASS 3: Draw fog of war overlay
+    -- PASS 3: Draw fog of war overlay with smooth edges
     --===========================================
-    if self.fogEnabled then
+    if self.fogEnabled and self.fog and self.gridWidth and self.gridHeight then
+        -- Helper function to check neighbor visibility
+        local function getNeighborVisibility(gx, gy)
+            if not gx or not gy then return Map.FOG_UNEXPLORED end
+            if gx < 1 or gy < 1 or gx > self.gridWidth or gy > self.gridHeight then
+                return Map.FOG_UNEXPLORED
+            end
+            if not self.fog[gy] then return Map.FOG_UNEXPLORED end
+            return self.fog[gy][gx] or Map.FOG_UNEXPLORED
+        end
+        
+        -- Count visible neighbors for softening
+        local function countBrighterNeighbors(gx, gy, currentState)
+            if not currentState then currentState = Map.FOG_UNEXPLORED end
+            local count = 0
+            for dy = -1, 1 do
+                for dx = -1, 1 do
+                    if dx ~= 0 or dy ~= 0 then
+                        local nVis = getNeighborVisibility(gx + dx, gy + dy)
+                        if nVis and nVis > currentState then
+                            count = count + 1
+                        end
+                    end
+                end
+            end
+            return count
+        end
+        
         for y = startY, endY do
             for x = startX, endX do
-                local fogState = self.fog[y] and self.fog[y][x] or Map.FOG_UNEXPLORED
+                local fogState = Map.FOG_UNEXPLORED
+                if self.fog[y] and self.fog[y][x] then
+                    fogState = self.fog[y][x]
+                end
                 local worldX, worldY = self:gridToWorld(x, y)
                 local screenX, screenY = self:worldToScreen(worldX, worldY)
                 
                 if fogState == Map.FOG_UNEXPLORED then
-                    -- Completely black
-                    love.graphics.setColor(0, 0, 0, 1)
+                    local brighterCount = countBrighterNeighbors(x, y, fogState)
+                    
+                    if brighterCount > 0 then
+                        -- Edge tile - softer black based on how many brighter neighbors
+                        local alpha = 1 - (brighterCount * 0.08)  -- 0.92 to 0.36 based on neighbors
+                        alpha = math.max(0.5, alpha)  -- Don't go below 0.5
+                        love.graphics.setColor(0, 0, 0, alpha)
+                    else
+                        -- Completely surrounded by unexplored - solid black
+                        love.graphics.setColor(0, 0, 0, 1)
+                    end
                     love.graphics.rectangle("fill", screenX, screenY, self.tileSize, self.tileSize)
+                    
                 elseif fogState == Map.FOG_EXPLORED then
-                    -- Dimmed overlay (semi-transparent dark)
-                    love.graphics.setColor(0, 0, 0, 0.6)
+                    local brighterCount = countBrighterNeighbors(x, y, fogState)
+                    
+                    if brighterCount > 0 then
+                        -- Edge of explored area near visible - lighter overlay
+                        local alpha = 0.6 - (brighterCount * 0.04)  -- 0.56 to 0.28
+                        alpha = math.max(0.35, alpha)
+                        love.graphics.setColor(0, 0, 0, alpha)
+                    else
+                        -- Standard explored overlay
+                        love.graphics.setColor(0, 0, 0, 0.6)
+                    end
                     love.graphics.rectangle("fill", screenX, screenY, self.tileSize, self.tileSize)
+                    
+                elseif fogState == Map.FOG_VISIBLE then
+                    -- Check for darker neighbors to add edge darkening (vignette effect)
+                    local darkerCount = 0
+                    for dy = -1, 1 do
+                        for dx = -1, 1 do
+                            if dx ~= 0 or dy ~= 0 then
+                                local nVis = getNeighborVisibility(x + dx, y + dy)
+                                if nVis and nVis < Map.FOG_VISIBLE then
+                                    darkerCount = darkerCount + 1
+                                end
+                            end
+                        end
+                    end
+                    
+                    if darkerCount > 0 then
+                        -- Edge of visible area - subtle vignette based on how many dark neighbors
+                        local alpha = darkerCount * 0.03  -- 0.03 to 0.24
+                        alpha = math.min(0.2, alpha)
+                        love.graphics.setColor(0, 0, 0, alpha)
+                        love.graphics.rectangle("fill", screenX, screenY, self.tileSize, self.tileSize)
+                    end
+                    -- FOG_VISIBLE with no dark neighbors = no overlay (full visibility)
                 end
-                -- FOG_VISIBLE = no overlay, full visibility
             end
         end
     end
@@ -614,15 +716,26 @@ function Map:draw()
     love.graphics.setColor(1, 1, 1, 1)
 end
 
+-- Get grass colors based on tileset
+function Map:getGrassColors()
+    if self.tileset == "winter" then
+        -- Desaturated, cold winter colors
+        return 0.35, 0.38, 0.40,  -- base (grayish blue-green)
+               0.38, 0.40, 0.42   -- alt (slightly lighter)
+    else
+        -- Summer colors (default)
+        return 0.22, 0.45, 0.22,  -- base (green)
+               0.24, 0.47, 0.24   -- alt (slightly lighter)
+    end
+end
+
 -- Draw houndstooth pattern tile with very low contrast
 function Map:drawHoundstoothTile(screenX, screenY, gridX, gridY)
     local size = self.tileSize
     local half = size / 2
     
-    -- Base grass color
-    local baseR, baseG, baseB = 0.22, 0.45, 0.22
-    -- Very subtle variation for houndstooth
-    local altR, altG, altB = 0.24, 0.47, 0.24
+    -- Get colors based on tileset
+    local baseR, baseG, baseB, altR, altG, altB = self:getGrassColors()
     
     -- Determine which pattern cell (2x2 repeat)
     local px = (gridX - 1) % 2
@@ -650,6 +763,17 @@ function Map:drawHoundstoothTile(screenX, screenY, gridX, gridY)
         love.graphics.rectangle("fill", screenX + half / 2, screenY, half / 2, half / 2)
         love.graphics.rectangle("fill", screenX, screenY + half / 2, half / 2, half / 2)
     end
+    
+    -- Add snow patches for winter
+    if self.tileset == "winter" then
+        local seed = gridX * 31 + gridY * 17
+        if seed % 5 == 0 then
+            love.graphics.setColor(0.85, 0.88, 0.92, 0.3)
+            local snowX = screenX + (seed % 20) + 4
+            local snowY = screenY + ((seed * 7) % 18) + 4
+            love.graphics.circle("fill", snowX, snowY, 3 + (seed % 3))
+        end
+    end
 end
 
 function Map:drawMinimap(x, y, size)
@@ -676,10 +800,20 @@ function Map:drawMinimap(x, y, size)
                 -- Dim explored tiles, full brightness for visible
                 local brightness = fogState == Map.FOG_VISIBLE and 1 or 0.5
                 
-                if self.tiles[ty][tx] == Map.TILE_TREE then
-                    love.graphics.setColor(0.1 * brightness, 0.3 * brightness, 0.1 * brightness, 1)
+                if self.tileset == "winter" then
+                    -- Winter colors (desaturated/cold)
+                    if self.tiles[ty][tx] == Map.TILE_TREE then
+                        love.graphics.setColor(0.15 * brightness, 0.18 * brightness, 0.2 * brightness, 1)
+                    else
+                        love.graphics.setColor(0.25 * brightness, 0.28 * brightness, 0.3 * brightness, 1)
+                    end
                 else
-                    love.graphics.setColor(0.1 * brightness, 0.2 * brightness, 0.1 * brightness, 1)
+                    -- Summer colors (green)
+                    if self.tiles[ty][tx] == Map.TILE_TREE then
+                        love.graphics.setColor(0.1 * brightness, 0.3 * brightness, 0.1 * brightness, 1)
+                    else
+                        love.graphics.setColor(0.1 * brightness, 0.2 * brightness, 0.1 * brightness, 1)
+                    end
                 end
                 love.graphics.rectangle("fill", px, py, scale + 0.5, scale + 0.5)
             end

@@ -130,9 +130,16 @@ end
 local function drawButton(btn, mx, my)
     local x, y, w, h = btn.x, btn.y, btn.w, btn.h
     local hovered = mx >= x and mx <= x + w and my >= y and my <= y + h
+    local isPrimary = btn.primary
     
     -- Button background
-    if hovered then
+    if isPrimary then
+        if hovered then
+            love.graphics.setColor(0.35, 0.28, 0.18, 1)
+        else
+            love.graphics.setColor(0.28, 0.22, 0.14, 1)
+        end
+    elseif hovered then
         love.graphics.setColor(UI.stoneLight[1] + 0.05, UI.stoneLight[2] + 0.05, UI.stoneLight[3] + 0.05, 1)
     else
         love.graphics.setColor(UI.stoneMid)
@@ -140,12 +147,14 @@ local function drawButton(btn, mx, my)
     love.graphics.rectangle("fill", x, y, w, h, 6)
     
     -- Beveled border
-    if hovered then
+    if isPrimary then
+        love.graphics.setColor(UI.metalGold[1], UI.metalGold[2], UI.metalGold[3], hovered and 1 or 0.8)
+    elseif hovered then
         love.graphics.setColor(UI.metalGold[1], UI.metalGold[2], UI.metalGold[3], 0.8)
     else
         love.graphics.setColor(UI.metalBronze)
     end
-    love.graphics.setLineWidth(2)
+    love.graphics.setLineWidth(isPrimary and 3 or 2)
     love.graphics.rectangle("line", x, y, w, h, 6)
     
     -- Highlight
@@ -163,7 +172,7 @@ local function drawButton(btn, mx, my)
     love.graphics.print(btn.text, x + (w - textW) / 2 + 1, y + (h - textH) / 2 + 1)
     
     -- Text
-    if hovered then
+    if isPrimary or hovered then
         love.graphics.setColor(UI.textGold)
     else
         love.graphics.setColor(UI.textLight)
@@ -208,29 +217,38 @@ function Title.load()
     local btnX = (screenW - btnW) / 2
     
     -- Calculate panel position to align buttons
-    local panelH = 380
+    local panelH = 400
     local panelY = (screenH - panelH) / 2 - 20
-    local btnStartY = panelY + 150  -- Below title and subtitle (moved up)
-    local btnSpacing = 55
+    local btnStartY = panelY + 150  -- Below title and subtitle
+    local btnSpacing = 52
     
     buttons = {
         {
-            text = "Start Game",
+            text = "Quick Play",
             x = btnX, y = btnStartY, w = btnW, h = btnH,
             action = function()
+                -- Start with default options
                 Game.SceneManager.switch("gameplay")
+            end,
+            primary = true  -- Highlight this button
+        },
+        {
+            text = "New Game",
+            x = btnX, y = btnStartY + btnSpacing, w = btnW, h = btnH,
+            action = function()
+                Game.SceneManager.switch("gameconfig")
             end
         },
         {
             text = "How to Play",
-            x = btnX, y = btnStartY + btnSpacing, w = btnW, h = btnH,
+            x = btnX, y = btnStartY + btnSpacing * 2, w = btnW, h = btnH,
             action = function()
                 Game.SceneManager.switch("tutorial")
             end
         },
         {
             text = "Settings",
-            x = btnX, y = btnStartY + btnSpacing * 2, w = btnW, h = btnH,
+            x = btnX, y = btnStartY + btnSpacing * 3, w = btnW, h = btnH,
             action = function()
                 -- Toggle settings (simple for now)
                 Game.settings.musicEnabled = not Game.settings.musicEnabled

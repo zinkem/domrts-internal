@@ -86,13 +86,14 @@ local steps = {
     {
         message = "The Peon is building the Farm.\n\nFarms provide +4 population. Wait for it...",
         check = function(state)
-            local count = 0
+            local completedCount = 0
             for _, farm in ipairs(state.farms or {}) do
-                if farm.team == state.playerTeam and not farm.isBuilding then
-                    count = count + 1
+                if farm.team == state.playerTeam and farm.completed then
+                    completedCount = completedCount + 1
                 end
             end
-            return count > 1
+            -- Player starts with 1 farm, so need 2+ to pass (meaning they built 1)
+            return completedCount >= 2
         end,
         waitTime = 2,
         lockSelection = true,  -- Wait for building
@@ -137,7 +138,7 @@ local steps = {
             return sel and sel.type == "barracks" and sel.team == state.playerTeam
         end,
         arrowTarget = "barracks",
-        allowOnly = "barracks",  -- Only allow selecting barracks
+        -- No restrictions - let player explore
     },
     {
         message = "Now train some Footmen!\n\nClick the Footman button below, or press T.",
@@ -150,7 +151,7 @@ local steps = {
             return false
         end,
         arrowTarget = "bottom_panel",
-        lockSelection = true,  -- Keep barracks selected while training
+        -- No restrictions - player can select/deselect freely
     },
     {
         message = "Training a Footman!\n\nKeep pressing T to queue more. Train at least 3 total.",
@@ -164,7 +165,7 @@ local steps = {
             return count >= 3
         end,
         arrowTarget = "bottom_panel",
-        lockSelection = true,  -- Keep barracks selected to queue
+        -- No restrictions - player knows what to do now
     },
     {
         message = "You have an army!\n\nDrag a box around your Footmen, or Shift+click to add more.",
@@ -178,7 +179,7 @@ local steps = {
             return footmenSelected >= 2
         end,
         arrowTarget = "footmen",
-        -- No restrictions - box selection is complex
+        -- No restrictions
     },
     {
         message = "Now for the attack!\n\nPress A, then click toward the enemy base (top-right).",
@@ -191,7 +192,7 @@ local steps = {
             return false
         end,
         arrowTarget = "enemy_base",
-        lockSelection = true,  -- Keep footmen selected for attack
+        -- No restrictions - let player learn freely
     },
     {
         message = "Your army is attacking!\n\nDestroy all enemy buildings to win!",
@@ -259,6 +260,15 @@ function Tutorial.update(dt)
                 currentStep = currentStep + 1
                 stepCompleted = false
                 messageAlpha = 0
+                
+                -- Only clear selection when advancing to a step that requires
+                -- selecting a specific type (allowOnly), so user starts fresh
+                local newStep = steps[currentStep]
+                if newStep and newStep.allowOnly then
+                    if Gameplay.forceSelect then
+                        Gameplay.forceSelect(nil)
+                    end
+                end
             end
         end
     end
@@ -267,6 +277,14 @@ function Tutorial.update(dt)
     if messageAlpha < 1 then
         messageAlpha = math.min(1, messageAlpha + dt * 2)
     end
+end
+
+-- Check if edge scrolling should be disabled (during selection steps)
+function Tutorial.shouldDisableEdgeScroll()
+    if currentStep > #steps then return false end
+    local step = steps[currentStep]
+    -- Disable edge scroll during steps that require selecting something
+    return step.allowOnly ~= nil or step.lockSelection
 end
 
 -- Helper function to draw an arrow pointing from (ax,ay) toward (tx,ty)
@@ -551,9 +569,16 @@ function Tutorial.mousereleased(x, y, button)
                     Gameplay.forceSelect(prevSelection)
                 end
             end
-        elseif allowOnly and newSelection then
+        elseif allowOnly then
             -- Only allow specific entity type
-            if newSelection.type ~= allowOnly then
+            if not newSelection then
+                -- User deselected - revert to previous if it was correct type
+                if prevSelection and prevSelection.type == allowOnly then
+                    if Gameplay.forceSelect then
+                        Gameplay.forceSelect(prevSelection)
+                    end
+                end
+            elseif newSelection.type ~= allowOnly then
                 -- Wrong type selected, revert
                 if Gameplay.forceSelect then
                     Gameplay.forceSelect(prevSelection)

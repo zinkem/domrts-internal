@@ -55,6 +55,7 @@ local Gameplay = {}
 local elapsedTime = 0
 local victory = false
 local defeat = false
+local endScreenButton = nil  -- Button bounds for victory/defeat screen
 
 -- Game stats for victory screen
 local gameStats = {
@@ -650,18 +651,61 @@ local function drawCommandBar(screenW, screenH)
             love.graphics.print(math.floor(selEntity.hp) .. "/" .. selEntity.maxHp, infoX + hpBarW + 8, hpY - 2)
         end
         
-        -- Status text
+        -- Status text or progress bar
         love.graphics.setFont(Game.fonts.small)
         local statusY = infoY + 38
-        if selEntity.type == "townhall" or selEntity.type == "barracks" then
+        local progressBarW = 120  -- Match HP bar width
+        local progressBarH = 6
+        
+        if selEntity.type == "townhall" or selEntity.type == "barracks" or 
+           selEntity.type == "archeryrange" or selEntity.type == "stable" or selEntity.type == "siegeworkshop" then
             if selEntity.isBuilding then
+                -- Building progress bar (blue)
+                local progress = (selEntity.getBuildProgress and selEntity:getBuildProgress() or 0) / 100
+                
+                love.graphics.setColor(0.15, 0.15, 0.2, 1)
+                love.graphics.rectangle("fill", infoX, statusY, progressBarW, progressBarH, 2)
+                
+                love.graphics.setColor(0.4, 0.7, 1, 1)
+                love.graphics.rectangle("fill", infoX, statusY, progressBarW * progress, progressBarH, 2)
+                
+                love.graphics.setColor(0.5, 0.6, 0.7, 1)
+                love.graphics.setLineWidth(1)
+                love.graphics.rectangle("line", infoX, statusY, progressBarW, progressBarH, 2)
+                
                 love.graphics.setColor(0.6, 0.8, 1, 1)
-                love.graphics.print("Building: " .. (selEntity.getBuildProgress and selEntity:getBuildProgress() or 0) .. "%", infoX, statusY)
+                love.graphics.print("Building...", infoX + progressBarW + 8, statusY - 2)
+                
             elseif selEntity.isProducing then
-                love.graphics.setColor(0.5, 0.9, 0.5, 1)
+                -- Training progress bar (gold/yellow)
+                local progress = (selEntity.getProductionProgress and selEntity:getProductionProgress() or 0) / 100
                 local queueSize = selEntity.getQueueSize and selEntity:getQueueSize() or 0
-                local queueText = queueSize > 1 and (" [+" .. (queueSize - 1) .. " queued]") or ""
-                love.graphics.print("Training: " .. (selEntity.getProductionProgress and selEntity:getProductionProgress() or 0) .. "%" .. queueText, infoX, statusY)
+                
+                -- Background
+                love.graphics.setColor(0.2, 0.18, 0.1, 1)
+                love.graphics.rectangle("fill", infoX, statusY, progressBarW, progressBarH, 2)
+                
+                -- Progress fill with gradient effect (gold to yellow)
+                local fillW = progressBarW * progress
+                if fillW > 0 then
+                    -- Main fill
+                    love.graphics.setColor(0.95, 0.8, 0.3, 1)
+                    love.graphics.rectangle("fill", infoX, statusY, fillW, progressBarH, 2)
+                    -- Shine highlight on top half
+                    love.graphics.setColor(1, 0.95, 0.6, 0.5)
+                    love.graphics.rectangle("fill", infoX, statusY, fillW, progressBarH / 2, 2)
+                end
+                
+                -- Border
+                love.graphics.setColor(0.6, 0.5, 0.3, 1)
+                love.graphics.setLineWidth(1)
+                love.graphics.rectangle("line", infoX, statusY, progressBarW, progressBarH, 2)
+                
+                -- Queue text
+                local queueText = queueSize > 1 and (" +" .. (queueSize - 1) .. " queued") or "Training..."
+                love.graphics.setColor(0.9, 0.85, 0.6, 1)
+                love.graphics.print(queueText, infoX + progressBarW + 8, statusY - 2)
+                
             elseif selEntity.isUpgrading then
                 love.graphics.setColor(UI.metalGold)
                 love.graphics.print("Upgrading...", infoX, statusY)
@@ -926,12 +970,40 @@ local function drawVictoryScreen()
         love.graphics.print(timelineText, col1, timelineY + 18)
     end
     
-    -- Continue prompt (pulsing)
-    local promptAlpha = 0.5 + math.sin(elapsedTime * 2) * 0.3
-    love.graphics.setFont(Game.fonts.small)
-    love.graphics.setColor(0.92, 0.88, 0.80, promptAlpha)
-    local prompt = "Press SPACE to return to title"
-    love.graphics.print(prompt, (screenW - Game.fonts.small:getWidth(prompt)) / 2, boxY + boxH - 40)
+    -- Return to Menu button
+    local btnW, btnH = 180, 40
+    local btnX = (screenW - btnW) / 2
+    local btnY = boxY + boxH - 55
+    
+    -- Store button bounds for click detection
+    endScreenButton = {x = btnX, y = btnY, w = btnW, h = btnH}
+    
+    local mx, my = love.mouse.getPosition()
+    local hovered = mx >= btnX and mx <= btnX + btnW and my >= btnY and my <= btnY + btnH
+    
+    -- Button background
+    if hovered then
+        love.graphics.setColor(0.35, 0.28, 0.18, 1)
+    else
+        love.graphics.setColor(0.22, 0.18, 0.14, 1)
+    end
+    love.graphics.rectangle("fill", btnX, btnY, btnW, btnH, 6)
+    
+    -- Button border
+    if hovered then
+        love.graphics.setColor(0.9, 0.75, 0.4, 1)
+    else
+        love.graphics.setColor(0.6, 0.5, 0.3, 1)
+    end
+    love.graphics.setLineWidth(2)
+    love.graphics.rectangle("line", btnX, btnY, btnW, btnH, 6)
+    
+    -- Button text
+    love.graphics.setFont(Game.fonts.medium)
+    local btnText = "Return to Menu"
+    local textW = Game.fonts.medium:getWidth(btnText)
+    love.graphics.setColor(hovered and {1, 0.95, 0.8, 1} or {0.92, 0.88, 0.78, 1})
+    love.graphics.print(btnText, btnX + (btnW - textW) / 2, btnY + 10)
 end
 
 local function drawDefeatScreen()
@@ -1063,12 +1135,40 @@ local function drawDefeatScreen()
     love.graphics.setColor(1, 0.6, 0.6, 1)
     love.graphics.print(string.format("%d", math.floor(aiScore)), col3 + 15, scoreY)
     
-    -- Continue prompt (pulsing)
-    local promptAlpha = 0.5 + math.sin(elapsedTime * 2) * 0.3
-    love.graphics.setFont(Game.fonts.small)
-    love.graphics.setColor(0.92, 0.88, 0.80, promptAlpha)
-    local prompt = "Press SPACE to return to title"
-    love.graphics.print(prompt, (screenW - Game.fonts.small:getWidth(prompt)) / 2, boxY + boxH - 40)
+    -- Return to Menu button
+    local btnW, btnH = 180, 40
+    local btnX = (screenW - btnW) / 2
+    local btnY = boxY + boxH - 55
+    
+    -- Store button bounds for click detection
+    endScreenButton = {x = btnX, y = btnY, w = btnW, h = btnH}
+    
+    local mx, my = love.mouse.getPosition()
+    local hovered = mx >= btnX and mx <= btnX + btnW and my >= btnY and my <= btnY + btnH
+    
+    -- Button background
+    if hovered then
+        love.graphics.setColor(0.35, 0.28, 0.18, 1)
+    else
+        love.graphics.setColor(0.22, 0.18, 0.14, 1)
+    end
+    love.graphics.rectangle("fill", btnX, btnY, btnW, btnH, 6)
+    
+    -- Button border
+    if hovered then
+        love.graphics.setColor(0.9, 0.75, 0.4, 1)
+    else
+        love.graphics.setColor(0.6, 0.5, 0.3, 1)
+    end
+    love.graphics.setLineWidth(2)
+    love.graphics.rectangle("line", btnX, btnY, btnW, btnH, 6)
+    
+    -- Button text
+    love.graphics.setFont(Game.fonts.medium)
+    local btnText = "Return to Menu"
+    local textW = Game.fonts.medium:getWidth(btnText)
+    love.graphics.setColor(hovered and {1, 0.95, 0.8, 1} or {0.92, 0.88, 0.78, 1})
+    love.graphics.print(btnText, btnX + (btnW - textW) / 2, btnY + 10)
 end
 
 local function getBuildingSize(buildingType)
@@ -1520,6 +1620,42 @@ local function isPlayerOwned(entity)
     return entity.team == nil or entity.team == playerTeam
 end
 
+-- Helper to check if current selection contains units
+local function selectionHasUnits()
+    for _, e in ipairs(selectedEntities) do
+        if e.type == "peon" or e.type == "footman" or e.type == "archer" or 
+           e.type == "knight" or e.type == "flyingscout" or e.type == "ballista" or e.type == "kamikaze" then
+            return true
+        end
+    end
+    return false
+end
+
+-- Helper to check if current selection contains buildings
+local function selectionHasBuildings()
+    for _, e in ipairs(selectedEntities) do
+        if e.type == "townhall" or e.type == "barracks" or e.type == "farm" or
+           e.type == "lumbermill" or e.type == "blacksmith" or e.type == "scouttower" or
+           e.type == "archeryrange" or e.type == "stable" or e.type == "siegeworkshop" then
+            return true
+        end
+    end
+    return false
+end
+
+-- Helper to check if entity is a unit (not a building)
+local function isUnit(entity)
+    return entity.type == "peon" or entity.type == "footman" or entity.type == "archer" or 
+           entity.type == "knight" or entity.type == "flyingscout" or entity.type == "ballista" or entity.type == "kamikaze"
+end
+
+-- Helper to check if entity is a building
+local function isBuilding(entity)
+    return entity.type == "townhall" or entity.type == "barracks" or entity.type == "farm" or
+           entity.type == "lumbermill" or entity.type == "blacksmith" or entity.type == "scouttower" or
+           entity.type == "archeryrange" or entity.type == "stable" or entity.type == "siegeworkshop"
+end
+
 local function updateRequirementsState()
     Requirements.setGameState({
         townHall = townHall,
@@ -1677,11 +1813,13 @@ end
 -- Tutorial mode settings
 local tutorialMode = false
 local tutorialOptions = {}
+local gameOptions = {}  -- Store game config options
 
 function Gameplay.load(options)
     options = options or {}
     tutorialMode = options.tutorialMode or false
     tutorialOptions = options
+    gameOptions = options  -- Store for later use
     
     local screenW, screenH = love.graphics.getDimensions()
     
@@ -1702,6 +1840,7 @@ function Gameplay.load(options)
     elapsedTime = 0
     victory = false
     defeat = false
+    endScreenButton = nil
     resources.gold = 1000
     resources.lumber = 400
     notifications = {}
@@ -1755,7 +1894,12 @@ function Gameplay.load(options)
     isBoxSelecting = false
     input.isMapDragging = false
     
-    map = Map.new()
+    -- Create map with options from game config
+    local mapOptions = {
+        mapSize = options.mapSize or 64,
+        tileset = options.tileset or "summer"
+    }
+    map = Map.new(mapOptions)
     map:setViewport(0, UI.topBarHeight, screenW, screenH - UI.topBarHeight - 70)  -- 70 = command bar height
     
     -- Human player team
@@ -1763,9 +1907,13 @@ function Gameplay.load(options)
     local enemyTeam = Teams and Teams.ENEMY or 2
     
     local buildingSize = 3
+    local mapSize = options.mapSize or 64
     
     -- === PLAYER BASE (bottom-left area) ===
-    local thGridX, thGridY = map:findClearArea(buildingSize, buildingSize, 10, 30, 15)
+    -- Scale starting position based on map size
+    local playerStartX = math.floor(mapSize * 0.15)
+    local playerStartY = math.floor(mapSize * 0.7)
+    local thGridX, thGridY = map:findClearArea(buildingSize, buildingSize, playerStartX, playerStartY, 15)
     townHall = TownHall.new({gridX = thGridX, gridY = thGridY, map = map, team = playerTeam})
     
     -- Gold mine near player
@@ -1826,7 +1974,10 @@ function Gameplay.load(options)
     end
     
     -- === ENEMY BASE (top-right area) ===
-    local enemyThGridX, enemyThGridY = map:findClearArea(buildingSize, buildingSize, 52, 12, 15)
+    -- Scale enemy position based on map size
+    local enemyStartX = math.floor(mapSize * 0.8)
+    local enemyStartY = math.floor(mapSize * 0.2)
+    local enemyThGridX, enemyThGridY = map:findClearArea(buildingSize, buildingSize, enemyStartX, enemyStartY, 15)
     enemyTownHall = TownHall.new({gridX = enemyThGridX, gridY = enemyThGridY, map = map, team = enemyTeam})
     table.insert(townHalls, enemyTownHall)  -- Store in additional townhalls list
     
@@ -1834,9 +1985,21 @@ function Gameplay.load(options)
     local m2X, m2Y = map:findClearArea(buildingSize, buildingSize, enemyThGridX - 8, enemyThGridY + 5, 10)
     table.insert(goldMines, GoldMine.new({gridX = m2X, gridY = m2Y, gold = 50000, map = map}))
     
-    -- Center gold mine (contested)
-    local m3X, m3Y = map:findClearArea(buildingSize, buildingSize, 32, 32, 15)
+    -- Center gold mine (contested) - scale to map center
+    local centerX = math.floor(mapSize / 2)
+    local centerY = math.floor(mapSize / 2)
+    local m3X, m3Y = map:findClearArea(buildingSize, buildingSize, centerX, centerY, 15)
     table.insert(goldMines, GoldMine.new({gridX = m3X, gridY = m3Y, gold = 100000, map = map}))
+    
+    -- Additional gold mines for larger maps
+    if mapSize >= 128 then
+        -- Lower-right quadrant
+        local m4X, m4Y = map:findClearArea(buildingSize, buildingSize, math.floor(mapSize * 0.7), math.floor(mapSize * 0.6), 12)
+        if m4X then table.insert(goldMines, GoldMine.new({gridX = m4X, gridY = m4Y, gold = 75000, map = map})) end
+        -- Upper-left quadrant
+        local m5X, m5Y = map:findClearArea(buildingSize, buildingSize, math.floor(mapSize * 0.3), math.floor(mapSize * 0.4), 12)
+        if m5X then table.insert(goldMines, GoldMine.new({gridX = m5X, gridY = m5Y, gold = 75000, map = map})) end
+    end
     
     -- Enemy starting peons - 7 total, 6 on gold, 1 on lumber (every 7th)
     local enemySpawnX, enemySpawnY = enemyTownHall:getSpawnPos()
@@ -1893,7 +2056,14 @@ function Gameplay.load(options)
     
     -- Initialize AI controller
     if AI then
+        -- Get AI personality from options (game config or tutorial)
         local aiPersonality = tutorialOptions.aiPersonality or "blinky"
+        
+        -- Check if we have enemies defined in game config
+        if options.enemies and #options.enemies > 0 then
+            aiPersonality = options.enemies[1].personality or "blinky"
+        end
+        
         enemyAI = AI.new({
             team = enemyTeam,
             townHall = enemyTownHall,
@@ -1963,6 +2133,15 @@ function Gameplay.update(dt)
     
     -- Disable edge scroll when placing buildings, dragging map, or in UI
     local disableEdgeScroll = isPlacingBuilding or input.isMapDragging or isBoxSelecting
+    
+    -- Also disable during tutorial selection steps
+    if tutorialMode then
+        local ok, Tutorial = pcall(require, "tutorial")
+        if ok and Tutorial and Tutorial.shouldDisableEdgeScroll and Tutorial.shouldDisableEdgeScroll() then
+            disableEdgeScroll = true
+        end
+    end
+    
     map:update(dt, disableEdgeScroll)  -- Camera stays at real-time for responsiveness
     
     -- Update fog of war
@@ -2688,6 +2867,15 @@ function Gameplay.mousemoved(x, y, dx, dy)
 end
 
 function Gameplay.mousereleased(x, y, button)
+    -- Check victory/defeat button click
+    if (victory or defeat) and not tutorialMode and button == 1 and endScreenButton then
+        if x >= endScreenButton.x and x <= endScreenButton.x + endScreenButton.w and
+           y >= endScreenButton.y and y <= endScreenButton.y + endScreenButton.h then
+            Game.SceneManager.switch("title")
+            return
+        end
+    end
+    
     -- Check command button clicks first
     if button == 1 then
         for _, btn in ipairs(commandButtons) do
@@ -2724,8 +2912,11 @@ function Gameplay.mousereleased(x, y, button)
         if boxW < 5 and boxH < 5 then
             handleLeftClick(x, y, shiftHeld)
         else
-            -- If shift is not held, clear existing selection first
-            if not shiftHeld then
+            -- Box selection only selects units, never buildings
+            -- If shift is held but buildings are selected, clear them (can't mix)
+            if shiftHeld and selectionHasBuildings() then
+                clearSelection()
+            elseif not shiftHeld then
                 clearSelection()
             end
             
@@ -2738,7 +2929,7 @@ function Gameplay.mousereleased(x, y, button)
                 table.insert(selectedEntities, entity)
             end
             
-            -- Select all PLAYER-OWNED unit types in box
+            -- Select all PLAYER-OWNED unit types in box (units only, no buildings)
             for _, peon in ipairs(peons) do
                 if isPlayerOwned(peon) and peon:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
                     addToSelection(peon)
@@ -2779,11 +2970,6 @@ function Gameplay.mousereleased(x, y, button)
 end
 
 function handleLeftClick(x, y, shiftHeld)
-    -- If shift is not held, clear existing selection
-    if not shiftHeld then
-        clearSelection()
-    end
-    
     -- Helper to check if entity is already selected
     local function isAlreadySelected(entity)
         for _, e in ipairs(selectedEntities) do
@@ -2792,10 +2978,10 @@ function handleLeftClick(x, y, shiftHeld)
         return false
     end
     
-    -- Helper to toggle or add selection
-    local function selectEntity(entity)
+    -- Helper to select a unit (handles unit/building separation)
+    local function selectUnit(entity)
+        -- If shift held and clicking already selected unit, deselect it
         if shiftHeld and isAlreadySelected(entity) then
-            -- Shift+click on already selected = deselect
             entity.selected = false
             for i, e in ipairs(selectedEntities) do
                 if e == entity then
@@ -2803,61 +2989,99 @@ function handleLeftClick(x, y, shiftHeld)
                     break
                 end
             end
-        else
-            -- Select (or add to selection with shift)
-            entity.selected = true
-            if not isAlreadySelected(entity) then
-                table.insert(selectedEntities, entity)
-            end
+            return
+        end
+        
+        -- If buildings are selected, clear them (can't mix units and buildings)
+        if selectionHasBuildings() then
+            clearSelection()
+        elseif not shiftHeld then
+            -- No shift = clear existing selection
+            clearSelection()
+        end
+        
+        -- Add to selection
+        entity.selected = true
+        if not isAlreadySelected(entity) then
+            table.insert(selectedEntities, entity)
         end
     end
     
-    -- Check all PLAYER-OWNED unit types
+    -- Helper to select a building (handles unit/building separation)
+    local function selectBuilding(entity)
+        -- If shift held and clicking already selected building, deselect it
+        if shiftHeld and isAlreadySelected(entity) then
+            entity.selected = false
+            for i, e in ipairs(selectedEntities) do
+                if e == entity then
+                    table.remove(selectedEntities, i)
+                    break
+                end
+            end
+            return
+        end
+        
+        -- If units are selected, clear them (can't mix units and buildings)
+        if selectionHasUnits() then
+            clearSelection()
+        elseif not shiftHeld then
+            -- No shift = clear existing selection
+            clearSelection()
+        end
+        
+        -- Add to selection
+        entity.selected = true
+        if not isAlreadySelected(entity) then
+            table.insert(selectedEntities, entity)
+        end
+    end
+    
+    -- Check all PLAYER-OWNED unit types first (units take priority)
     for _, peon in ipairs(peons) do
         if peon.visible and isPlayerOwned(peon) and peon:containsPoint(x, y) then
-            selectEntity(peon)
+            selectUnit(peon)
             return
         end
     end
     
     for _, footman in ipairs(footmen) do
         if isPlayerOwned(footman) and footman:containsPoint(x, y) then
-            selectEntity(footman)
+            selectUnit(footman)
             return
         end
     end
     
     for _, archer in ipairs(archers) do
         if isPlayerOwned(archer) and archer:containsPoint(x, y) then
-            selectEntity(archer)
+            selectUnit(archer)
             return
         end
     end
     
     for _, knight in ipairs(knights) do
         if isPlayerOwned(knight) and knight:containsPoint(x, y) then
-            selectEntity(knight)
+            selectUnit(knight)
             return
         end
     end
     
     for _, unit in ipairs(flyingScouts) do
         if isPlayerOwned(unit) and unit:containsPoint(x, y) then
-            selectEntity(unit)
+            selectUnit(unit)
             return
         end
     end
     
     for _, unit in ipairs(ballistas) do
         if isPlayerOwned(unit) and unit:containsPoint(x, y) then
-            selectEntity(unit)
+            selectUnit(unit)
             return
         end
     end
     
     for _, unit in ipairs(kamikazes) do
         if isPlayerOwned(unit) and unit:containsPoint(x, y) then
-            selectEntity(unit)
+            selectUnit(unit)
             return
         end
     end
@@ -2867,6 +3091,7 @@ function handleLeftClick(x, y, shiftHeld)
     if not shiftHeld then
         for _, peon in ipairs(peons) do
             if peon.visible and not isPlayerOwned(peon) and peon:containsPoint(x, y) then
+                clearSelection()
                 peon.selected = true
                 table.insert(selectedEntities, peon)
                 return
@@ -2875,6 +3100,7 @@ function handleLeftClick(x, y, shiftHeld)
         
         for _, footman in ipairs(footmen) do
             if not isPlayerOwned(footman) and footman:containsPoint(x, y) then
+                clearSelection()
                 footman.selected = true
                 table.insert(selectedEntities, footman)
                 return
@@ -2882,73 +3108,64 @@ function handleLeftClick(x, y, shiftHeld)
         end
     end
     
-    -- Check PLAYER-OWNED buildings (main townhall is always player's)
+    -- Check PLAYER-OWNED buildings
     if isPlayerOwned(townHall) and townHall:containsPoint(x, y) then
-        townHall.selected = true
-        table.insert(selectedEntities, townHall)
+        selectBuilding(townHall)
         return
     end
     
     for _, barrack in ipairs(barracks) do
         if isPlayerOwned(barrack) and barrack:containsPoint(x, y) then
-            barrack.selected = true
-            table.insert(selectedEntities, barrack)
+            selectBuilding(barrack)
             return
         end
     end
     
     for _, farm in ipairs(farms) do
         if isPlayerOwned(farm) and farm:containsPoint(x, y) then
-            farm.selected = true
-            table.insert(selectedEntities, farm)
+            selectBuilding(farm)
             return
         end
     end
     
     for _, building in ipairs(lumberMills) do
         if isPlayerOwned(building) and building:containsPoint(x, y) then
-            building.selected = true
-            table.insert(selectedEntities, building)
+            selectBuilding(building)
             return
         end
     end
     
     for _, building in ipairs(blacksmiths) do
         if isPlayerOwned(building) and building:containsPoint(x, y) then
-            building.selected = true
-            table.insert(selectedEntities, building)
+            selectBuilding(building)
             return
         end
     end
     
     for _, building in ipairs(scoutTowers) do
         if isPlayerOwned(building) and building:containsPoint(x, y) then
-            building.selected = true
-            table.insert(selectedEntities, building)
+            selectBuilding(building)
             return
         end
     end
     
     for _, building in ipairs(archeryRanges) do
         if isPlayerOwned(building) and building:containsPoint(x, y) then
-            building.selected = true
-            table.insert(selectedEntities, building)
+            selectBuilding(building)
             return
         end
     end
     
     for _, building in ipairs(stables) do
         if isPlayerOwned(building) and building:containsPoint(x, y) then
-            building.selected = true
-            table.insert(selectedEntities, building)
+            selectBuilding(building)
             return
         end
     end
     
     for _, building in ipairs(siegeWorkshops) do
         if isPlayerOwned(building) and building:containsPoint(x, y) then
-            building.selected = true
-            table.insert(selectedEntities, building)
+            selectBuilding(building)
             return
         end
     end
@@ -2956,7 +3173,8 @@ function handleLeftClick(x, y, shiftHeld)
     -- ENEMY BUILDINGS - selectable for viewing HP (no controls)
     -- Check additional townhalls (includes enemy townhall)
     for _, building in ipairs(townHalls) do
-        if building:containsPoint(x, y) then
+        if not isPlayerOwned(building) and building:containsPoint(x, y) then
+            clearSelection()
             building.selected = true
             table.insert(selectedEntities, building)
             return
@@ -2966,6 +3184,7 @@ function handleLeftClick(x, y, shiftHeld)
     -- Enemy barracks
     for _, barrack in ipairs(barracks) do
         if not isPlayerOwned(barrack) and barrack:containsPoint(x, y) then
+            clearSelection()
             barrack.selected = true
             table.insert(selectedEntities, barrack)
             return

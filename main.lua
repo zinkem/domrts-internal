@@ -298,6 +298,7 @@ function love.load()
     Game.SceneManager.register("gameplay", require("gameplay"))
     Game.SceneManager.register("victory", require("victory"))
     Game.SceneManager.register("tutorial", require("tutorial"))
+    Game.SceneManager.register("gameconfig", require("gameconfig"))
     
     -- Start with title screen
     Game.SceneManager.switch("title")
