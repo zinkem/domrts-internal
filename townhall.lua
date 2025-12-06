@@ -13,6 +13,11 @@ TownHall.__index = TownHall
 
 TownHall.GRID_SIZE = 3
 
+-- Build costs for new Town Hall
+TownHall.COST_GOLD = 1200
+TownHall.COST_LUMBER = 500
+TownHall.BUILD_TIME = 60.0
+
 -- Upgrade costs
 TownHall.HOLD_COST_GOLD = 1200
 TownHall.HOLD_COST_LUMBER = 500
@@ -37,6 +42,13 @@ function TownHall.new(params)
     
     -- Tier system: 1 = Town Hall, 2 = Hold, 3 = Keep
     self.tier = 1
+    
+    -- Building construction state
+    self.isBuilding = params.isBuilding or false
+    self.buildProgress = 0
+    self.buildTime = TownHall.BUILD_TIME
+    self.completed = not self.isBuilding
+    self.builderPeon = nil
     
     self.isProducing = false
     self.productionTime = 10.0
@@ -83,6 +95,17 @@ function TownHall:getWorldBounds()
 end
 
 function TownHall:update(dt)
+    -- Handle construction
+    if self.isBuilding then
+        self.buildProgress = self.buildProgress + dt
+        if self.buildProgress >= self.buildTime then
+            self.isBuilding = false
+            self.completed = true
+            return false, false, true  -- peon ready, upgrade complete, build complete
+        end
+        return false, false, false
+    end
+    
     -- Handle upgrading
     if self.isUpgrading then
         self.upgradeProgress = self.upgradeProgress + dt
@@ -96,9 +119,9 @@ function TownHall:update(dt)
             elseif self.tier == 3 then
                 self.name = "Keep"
             end
-            return false, true  -- upgrade complete
+            return false, true, false  -- upgrade complete
         end
-        return false, false
+        return false, false, false
     end
     
     -- Handle production
@@ -107,10 +130,10 @@ function TownHall:update(dt)
         if self.productionTimer >= self.productionTime then
             self.isProducing = false
             self.productionTimer = 0
-            return true, false  -- peon ready
+            return true, false, false  -- peon ready
         end
     end
-    return false, false
+    return false, false, false
 end
 
 function TownHall:startUpgrade()
@@ -128,7 +151,7 @@ function TownHall:startUpgrade()
 end
 
 function TownHall:canUpgrade()
-    if self.isUpgrading or self.isProducing then return false end
+    if not self.completed or self.isBuilding or self.isUpgrading or self.isProducing then return false end
     if self.tier == 1 then
         return Requirements.canUpgradeToHold()
     elseif self.tier == 2 then
@@ -149,6 +172,35 @@ end
 function TownHall:draw()
     local x, y = self:getScreenPos()
     local size = self.pixelSize
+    
+    -- Draw construction scaffolding if being built
+    if self.isBuilding then
+        love.graphics.setColor(0.5, 0.4, 0.3, 0.6)
+        love.graphics.rectangle("fill", x, y, size, size, 4)
+        love.graphics.setColor(0.6, 0.5, 0.3, 0.8)
+        -- Scaffolding poles
+        love.graphics.rectangle("fill", x + 5, y + 5, 4, size - 10)
+        love.graphics.rectangle("fill", x + size - 9, y + 5, 4, size - 10)
+        love.graphics.rectangle("fill", x + 5, y + size/2 - 2, size - 10, 4)
+        
+        -- Build progress bar
+        local barW = size - 10
+        local progress = self.buildProgress / self.buildTime
+        love.graphics.setColor(0.2, 0.2, 0.2, 1)
+        love.graphics.rectangle("fill", x + 5, y + size/2 - 4, barW, 8, 2)
+        love.graphics.setColor(0.2, 0.6, 0.8, 1)
+        love.graphics.rectangle("fill", x + 5, y + size/2 - 4, barW * progress, 8, 2)
+        
+        -- Selection highlight
+        if self.selected then
+            love.graphics.setColor(0, 1, 0, 0.8)
+            love.graphics.setLineWidth(3)
+            love.graphics.rectangle("line", x - 3, y - 3, size + 6, size + 6, 4)
+        end
+        
+        love.graphics.setColor(1, 1, 1, 1)
+        return
+    end
     
     -- Draw based on tier
     if self.tier == 1 then
@@ -451,7 +503,7 @@ function TownHall:startProduction()
 end
 
 function TownHall:canProduce()
-    return not self.isProducing and not self.isUpgrading
+    return self.completed and not self.isProducing and not self.isUpgrading and not self.isBuilding
 end
 
 function TownHall:getProductionProgress()
@@ -468,6 +520,13 @@ function TownHall:getUpgradeProgress()
     return 0
 end
 
+function TownHall:getBuildProgress()
+    if self.isBuilding then
+        return math.floor((self.buildProgress / self.buildTime) * 100)
+    end
+    return 100
+end
+
 function TownHall:getSpawnPos()
     local wx, wy = self:getWorldPos()
     return wx + self.pixelSize + 20, wy + self.pixelSize / 2
@@ -479,7 +538,7 @@ function TownHall:updateUI(resources, screenW, screenH, font, currentPop, maxPop
     self.currentPop = currentPop
     self.maxPop = maxPop
     
-    if self.selected then
+    if self.selected and self.completed then
         local panelX = screenW - 180
         local buttonY = 70 + 145
         
@@ -491,7 +550,7 @@ function TownHall:updateUI(resources, screenW, screenH, font, currentPop, maxPop
                 y = buttonY,
                 width = 150,
                 height = 40,
-                text = "Train Peon (400g)",
+                text = "Train Peon (400/0)",
                 font = font,
                 onClick = function()
                     if resources.gold >= selfRef.productionCost and 
@@ -508,6 +567,20 @@ function TownHall:updateUI(resources, screenW, screenH, font, currentPop, maxPop
         local canAfford = resources.gold >= self.productionCost
         local hasCapacity = currentPop < maxPop
         self.actionButton:setEnabled(canAfford and hasCapacity and self:canProduce())
+        
+        -- Set disabled reason for hover tooltip
+        local reason = nil
+        if self.isUpgrading then
+            reason = "Busy upgrading"
+        elseif self.isProducing then
+            reason = "Already training"
+        elseif not canAfford then
+            reason = "Need more gold"
+        elseif not hasCapacity then
+            reason = "Need more farms"
+        end
+        self.actionButton:setDisabledReason(reason)
+        
         self.actionButton:update(0)
         
         -- Upgrade button (if applicable)
@@ -542,11 +615,29 @@ function TownHall:updateUI(resources, screenW, screenH, font, currentPop, maxPop
                 })
             end
             
-            local costText = string.format("%s (%dg %dL)", upgradeName, upgradeCostGold, upgradeCostLumber)
+            local costText = string.format("%s (%d/%d)", upgradeName, upgradeCostGold, upgradeCostLumber)
             self.upgradeButton:setText(costText)
             
             local canAffordUpgrade = resources.gold >= upgradeCostGold and resources.lumber >= upgradeCostLumber
             self.upgradeButton:setEnabled(canAffordUpgrade and self:canUpgrade())
+            
+            -- Set disabled reason for hover tooltip
+            local reason = nil
+            if self.isProducing then
+                reason = "Busy training peon"
+            elseif not canAffordUpgrade then
+                if resources.gold < upgradeCostGold and resources.lumber < upgradeCostLumber then
+                    reason = "Need more gold & lumber"
+                elseif resources.gold < upgradeCostGold then
+                    reason = "Need more gold"
+                else
+                    reason = "Need more lumber"
+                end
+            elseif self.tier == 1 and not Requirements.hasBarracks() then
+                reason = "Requires Barracks"
+            end
+            self.upgradeButton:setDisabledReason(reason)
+            
             self.upgradeButton:update(0)
         else
             self.upgradeButton = nil
@@ -565,18 +656,6 @@ function TownHall:drawUI()
         
         if self.upgradeButton and self.tier < 3 and not self.isUpgrading then
             self.upgradeButton:draw()
-            
-            -- Show requirement if can't upgrade
-            if not self:canUpgrade() then
-                local screenW = love.graphics.getWidth()
-                love.graphics.setColor(1, 0.6, 0.4, 1)
-                love.graphics.setFont(Game.fonts.small)
-                local reqText = self.tier == 1 and "Needs Barracks" or ""
-                if reqText ~= "" then
-                    love.graphics.print(reqText, screenW - 170, 70 + 232)
-                end
-                love.graphics.setColor(1, 1, 1, 1)
-            end
         elseif self.isUpgrading then
             local screenW = love.graphics.getWidth()
             love.graphics.setColor(0.8, 0.7, 0.2, 1)
@@ -588,14 +667,6 @@ function TownHall:drawUI()
             love.graphics.setColor(0.8, 0.7, 0.2, 1)
             love.graphics.setFont(Game.fonts.small)
             love.graphics.print("Max Tier Reached", screenW - 170, 70 + 190)
-            love.graphics.setColor(1, 1, 1, 1)
-        end
-        
-        if self.currentPop >= self.maxPop and not self.isUpgrading then
-            local screenW = love.graphics.getWidth()
-            love.graphics.setColor(1, 0.4, 0.4, 1)
-            love.graphics.setFont(Game.fonts.small)
-            love.graphics.print("Need more farms!", screenW - 170, 70 + 250)
             love.graphics.setColor(1, 1, 1, 1)
         end
     end

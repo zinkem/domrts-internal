@@ -854,6 +854,7 @@ local function getBuildingDefs()
     local ArcheryRange = require("archeryrange")
     local Stable = require("stable")
     local SiegeWorkshop = require("siegeworkshop")
+    local TownHall = require("townhall")
     
     return {
         -- Page 1: Basic buildings
@@ -926,6 +927,16 @@ local function getBuildingDefs()
             canBuild = function() return Requirements.canBuild("siegeworkshop") end,
             requirement = "Keep"
         },
+        -- Page 3: Expansion
+        {
+            type = "townhall",
+            name = "Town Hall",
+            costGold = TownHall.COST_GOLD,
+            costLumber = TownHall.COST_LUMBER,
+            colors = {normal = {0.5, 0.4, 0.25, 1}, hover = {0.6, 0.5, 0.35, 1}, pressed = {0.4, 0.3, 0.15, 1}},
+            canBuild = function() return Requirements.canBuild("townhall") end,
+            requirement = "Hold"
+        },
     }
 end
 
@@ -960,7 +971,7 @@ function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
             local buttonIdx = 0
             for i = startIdx, endIdx do
                 local def = buildingDefs[i]
-                local costText = string.format("%s (%dg %dL)", def.name, def.costGold, def.costLumber)
+                local costText = string.format("%s (%d/%d)", def.name, def.costGold, def.costLumber)
                 
                 local btn = Button.new({
                     x = panelX + 10, 

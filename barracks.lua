@@ -298,7 +298,7 @@ function Barracks:updateUI(resources, screenW, screenH, font, currentPop, maxPop
                 y = buttonY,
                 width = 150,
                 height = 40,
-                text = "Train Footman (135g)",
+                text = "Train Footman (135/0)",
                 font = font,
                 colors = {
                     normal = {0.5, 0.3, 0.3, 1},
@@ -320,6 +320,18 @@ function Barracks:updateUI(resources, screenW, screenH, font, currentPop, maxPop
         end
         
         self.actionButton:setEnabled(resources.gold >= Barracks.FOOTMAN_COST and currentPop < maxPop and self:canProduce())
+        
+        -- Set disabled reason for hover tooltip
+        local reason = nil
+        if self.isProducing then
+            reason = "Already training"
+        elseif resources.gold < Barracks.FOOTMAN_COST then
+            reason = "Need more gold"
+        elseif currentPop >= maxPop then
+            reason = "Need more farms"
+        end
+        self.actionButton:setDisabledReason(reason)
+        
         self.actionButton:update(0)
         
         -- Train Knight button (only if Stable exists)
@@ -331,7 +343,7 @@ function Barracks:updateUI(resources, screenW, screenH, font, currentPop, maxPop
                     y = buttonY + 45,
                     width = 150,
                     height = 40,
-                    text = "Train Knight (300g 100L)",
+                    text = "Train Knight (300/100)",
                     font = font,
                     colors = {
                         normal = {0.5, 0.45, 0.25, 1},
@@ -356,6 +368,24 @@ function Barracks:updateUI(resources, screenW, screenH, font, currentPop, maxPop
             
             local canAffordKnight = resources.gold >= Barracks.KNIGHT_COST_GOLD and resources.lumber >= Barracks.KNIGHT_COST_LUMBER
             self.knightButton:setEnabled(canAffordKnight and currentPop < maxPop and self:canProduce())
+            
+            -- Set disabled reason for hover tooltip
+            local knightReason = nil
+            if self.isProducing then
+                knightReason = "Already training"
+            elseif not canAffordKnight then
+                if resources.gold < Barracks.KNIGHT_COST_GOLD and resources.lumber < Barracks.KNIGHT_COST_LUMBER then
+                    knightReason = "Need gold & lumber"
+                elseif resources.gold < Barracks.KNIGHT_COST_GOLD then
+                    knightReason = "Need more gold"
+                else
+                    knightReason = "Need more lumber"
+                end
+            elseif currentPop >= maxPop then
+                knightReason = "Need more farms"
+            end
+            self.knightButton:setDisabledReason(knightReason)
+            
             self.knightButton:update(0)
         else
             self.knightButton = nil
@@ -380,15 +410,6 @@ function Barracks:drawUI()
             love.graphics.setColor(0.6, 0.6, 0.6, 1)
             love.graphics.setFont(Game.fonts.small)
             love.graphics.print("Build Stable for Knights", screenW - 170, 70 + 190)
-            love.graphics.setColor(1, 1, 1, 1)
-        end
-        
-        if self.currentPop >= self.maxPop then
-            local screenW = love.graphics.getWidth()
-            love.graphics.setColor(1, 0.4, 0.4, 1)
-            love.graphics.setFont(Game.fonts.small)
-            local yOffset = self.knightButton and 235 or 210
-            love.graphics.print("Need more farms!", screenW - 170, 70 + yOffset)
             love.graphics.setColor(1, 1, 1, 1)
         end
     end

@@ -89,11 +89,12 @@ function Requirements.canBuild(buildingType)
         farm = function() return true end,
         barracks = function() return true end,
         lumbermill = function() return true end,
-        scoutTower = function() return true end,
-        archeryRange = function() return Requirements.hasBarracks() end,
+        scouttower = function() return true end,
+        archeryrange = function() return Requirements.hasBarracks() end,
         blacksmith = function() return Requirements.hasBarracks() end,
         stable = function() return Requirements.isHold() end,
-        siegeWorkshop = function() return Requirements.isKeep() end
+        siegeworkshop = function() return Requirements.isKeep() end,
+        townhall = function() return Requirements.isHold() end
     }
     
     local check = checks[buildingType]
@@ -103,10 +104,11 @@ end
 -- Get reason why building can't be built
 function Requirements.getBuildRequirement(buildingType)
     local requirements = {
-        archeryRange = "Requires Barracks",
+        archeryrange = "Requires Barracks",
         blacksmith = "Requires Barracks",
         stable = "Requires Hold",
-        siegeWorkshop = "Requires Keep"
+        siegeworkshop = "Requires Keep",
+        townhall = "Requires Hold"
     }
     return requirements[buildingType]
 end

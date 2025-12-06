@@ -60,6 +60,7 @@ local scoutTowers = {}
 local archeryRanges = {}
 local stables = {}
 local siegeWorkshops = {}
+local townHalls = {}  -- Additional town halls (built by peons)
 
 -- New unit tables
 local archers = {}
@@ -125,6 +126,7 @@ local function getAllBuildings()
     for _, b in ipairs(archeryRanges) do table.insert(buildings, b) end
     for _, b in ipairs(stables) do table.insert(buildings, b) end
     for _, b in ipairs(siegeWorkshops) do table.insert(buildings, b) end
+    for _, b in ipairs(townHalls) do table.insert(buildings, b) end
     return buildings
 end
 
@@ -308,7 +310,7 @@ local function drawInfoPanel(startY, height)
     y = y + 22
     
     -- Building counts
-    local totalBuildings = #farms + #barracks + #lumberMills + #blacksmiths + #scoutTowers + #archeryRanges + #stables + #siegeWorkshops
+    local totalBuildings = #farms + #barracks + #lumberMills + #blacksmiths + #scoutTowers + #archeryRanges + #stables + #siegeWorkshops + #townHalls
     love.graphics.setColor(0.5, 0.5, 0.6, 1)
     love.graphics.print("Buildings:", panelX + 20, y)
     love.graphics.setColor(UI.textColor)
@@ -400,6 +402,7 @@ local function drawRightPanel(screenW, startY, height)
     for _, b in ipairs(archeryRanges) do b:drawOnMinimap(mmX, mmY, mmScale) end
     for _, b in ipairs(stables) do b:drawOnMinimap(mmX, mmY, mmScale) end
     for _, b in ipairs(siegeWorkshops) do b:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, b in ipairs(townHalls) do b:drawOnMinimap(mmX, mmY, mmScale) end
     for _, p in ipairs(peons) do p:drawOnMinimap(mmX, mmY, mmScale) end
     for _, f in ipairs(footmen) do f:drawOnMinimap(mmX, mmY, mmScale) end
     for _, a in ipairs(archers) do a:drawOnMinimap(mmX, mmY, mmScale) end
@@ -554,6 +557,10 @@ local function createBuilding(gridX, gridY, buildingType, peon)
         local building = SiegeWorkshop.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
         building.builderPeon = peon
         table.insert(siegeWorkshops, building)
+    elseif buildingType == "townhall" then
+        local building = TownHall.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        building.builderPeon = peon
+        table.insert(townHalls, building)
     end
     -- Invalidate all flow fields since map topology changed
     -- Pathfinding computed on-demand, no need to invalidate
@@ -568,6 +575,7 @@ local function getBuildingCost(buildingType)
     elseif buildingType == "archeryrange" then return ArcheryRange.COST_GOLD, ArcheryRange.COST_LUMBER
     elseif buildingType == "stable" then return Stable.COST_GOLD, Stable.COST_LUMBER
     elseif buildingType == "siegeworkshop" then return SiegeWorkshop.COST_GOLD, SiegeWorkshop.COST_LUMBER
+    elseif buildingType == "townhall" then return TownHall.COST_GOLD, TownHall.COST_LUMBER
     end
     return 0, 0
 end
@@ -711,11 +719,13 @@ local function updateRequirementsState()
     Requirements.setGameState({
         townHall = townHall,
         barracks = barracks,
+        farms = farms,
         archeryRanges = archeryRanges,
         stables = stables,
         siegeWorkshops = siegeWorkshops,
         lumberMills = lumberMills,
-        blacksmiths = blacksmiths
+        blacksmiths = blacksmiths,
+        scoutTowers = scoutTowers
     })
 end
 
@@ -757,6 +767,7 @@ function Gameplay.load()
     archeryRanges = {}
     stables = {}
     siegeWorkshops = {}
+    townHalls = {}
     
     -- Clear new unit tables
     archers = {}
@@ -818,7 +829,7 @@ function Gameplay.update(dt)
     local buildings = getAllBuildings()
     
     -- Town hall
-    local peonReady, upgradeComplete = townHall:update(gameDt)
+    local peonReady, upgradeComplete, _ = townHall:update(gameDt)
     if peonReady and currentPop < maxPop then
         local spawnX, spawnY = townHall:getSpawnPos()
         local newPeon = Peon.new({worldX = spawnX, worldY = spawnY, map = map})
@@ -959,6 +970,29 @@ function Gameplay.update(dt)
         end
     end
     
+    -- Additional Town Halls
+    for _, building in ipairs(townHalls) do
+        local peonReady, upgradeComplete, buildComplete = building:update(gameDt)
+        if buildComplete and building.builderPeon then
+            local peon = building.builderPeon
+            peon:finishBuilding(building)
+            pushUnitOutOfBuildings(peon)
+            building.builderPeon = nil
+        end
+        if peonReady and currentPop < maxPop then
+            local spawnX, spawnY = building:getSpawnPos()
+            local newPeon = Peon.new({worldX = spawnX, worldY = spawnY, map = map})
+            setupPeonCallbacks(newPeon)
+            pushUnitOutOfBuildings(newPeon)
+            table.insert(peons, newPeon)
+            calculatePopulation()
+        end
+    end
+    
+    -- Refresh requirements state after all building updates
+    -- (ensures UI sees completed buildings on the same frame they finish)
+    updateRequirementsState()
+    
     -- Peons
     for _, peon in ipairs(peons) do
         peon:update(gameDt, buildings, townHall, goldMines[1], resources)
@@ -1049,6 +1083,7 @@ function Gameplay.draw()
     for _, building in ipairs(archeryRanges) do building:draw() end
     for _, building in ipairs(stables) do building:draw() end
     for _, building in ipairs(siegeWorkshops) do building:draw() end
+    for _, building in ipairs(townHalls) do building:draw() end
     townHall:draw()
     for _, mine in ipairs(goldMines) do mine:draw() end
     
