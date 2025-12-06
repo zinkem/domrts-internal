@@ -99,7 +99,17 @@ end
 
 function Unit:distanceTo(target)
     local tx, ty
-    if target.getWorldCenter then
+    
+    -- For buildings, calculate distance to nearest edge, not center
+    if target.getWorldBounds then
+        local bx1, by1, bx2, by2 = target:getWorldBounds()
+        -- Find closest point on building bounds to unit
+        local closestX = math.max(bx1, math.min(self.worldX, bx2))
+        local closestY = math.max(by1, math.min(self.worldY, by2))
+        local dx = closestX - self.worldX
+        local dy = closestY - self.worldY
+        return math.sqrt(dx * dx + dy * dy)
+    elseif target.getWorldCenter then
         tx, ty = target:getWorldCenter()
     else
         tx, ty = target.worldX, target.worldY
@@ -144,7 +154,20 @@ function Unit:updateAttacking(dt, buildings, allUnits, allBuildings)
     else
         -- Move toward target
         local tx, ty
-        if target.getWorldCenter then
+        if target.getWorldBounds then
+            -- For buildings, move toward nearest edge
+            local bx1, by1, bx2, by2 = target:getWorldBounds()
+            tx = math.max(bx1, math.min(self.worldX, bx2))
+            ty = math.max(by1, math.min(self.worldY, by2))
+            -- Add small offset to be just outside the building
+            local dx = self.worldX - tx
+            local dy = self.worldY - ty
+            local len = math.sqrt(dx * dx + dy * dy)
+            if len > 0 then
+                tx = tx + (dx / len) * 5
+                ty = ty + (dy / len) * 5
+            end
+        elseif target.getWorldCenter then
             tx, ty = target:getWorldCenter()
         else
             tx, ty = target.worldX, target.worldY
