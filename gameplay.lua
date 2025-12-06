@@ -123,7 +123,8 @@ local input = {
     dragHoldTime = 0.25,
     dragMoveThreshold = 5,
     cursorState = "normal",
-    cursorChargeProgress = 0
+    cursorChargeProgress = 0,
+    attackMoveMode = false  -- 'a' key attack-move mode
 }
 
 -- UI Layout - Stone/Metal Medieval Theme
@@ -680,34 +681,74 @@ local function drawCursor()
         love.graphics.pop()
         
     else
-        -- Normal pointer cursor
-        local size = 20
+        -- Check for attack-move mode first
+        if input.attackMoveMode then
+            -- Attack cursor - red sword/crosshair
+            local size = 22
+            love.graphics.push()
+            love.graphics.translate(mx, my)
+            
+            -- Pulsing effect
+            local pulse = 1 + math.sin(love.timer.getTime() * 6) * 0.1
+            love.graphics.scale(pulse, pulse)
+            
+            -- Shadow
+            love.graphics.setColor(0, 0, 0, 0.4)
+            love.graphics.circle("line", 2, 2, size/2)
+            
+            -- Crosshair circle
+            love.graphics.setColor(0.9, 0.2, 0.2, 0.8)
+            love.graphics.setLineWidth(2)
+            love.graphics.circle("line", 0, 0, size/2)
+            
+            -- Cross lines
+            love.graphics.line(-size/2 - 4, 0, -size/4, 0)
+            love.graphics.line(size/4, 0, size/2 + 4, 0)
+            love.graphics.line(0, -size/2 - 4, 0, -size/4)
+            love.graphics.line(0, size/4, 0, size/2 + 4)
+            
+            -- Center dot
+            love.graphics.setColor(1, 0.3, 0.3, 1)
+            love.graphics.circle("fill", 0, 0, 3)
+            
+            -- Sword icon in center
+            love.graphics.setColor(0.8, 0.8, 0.85, 1)
+            love.graphics.setLineWidth(2)
+            love.graphics.line(0, -4, 0, 6)  -- Blade
+            love.graphics.setColor(0.6, 0.5, 0.3, 1)
+            love.graphics.line(-3, 0, 3, 0)  -- Crossguard
+            
+            love.graphics.pop()
+        else
+            -- Normal pointer cursor
+            local size = 20
+            
+            love.graphics.push()
+            love.graphics.translate(mx, my)
+            
+            -- Shadow
+            love.graphics.setColor(0, 0, 0, 0.3)
+            love.graphics.polygon("fill", 3, 3, 3, size + 3, 8, size - 4 + 3, 12, size + 5 + 3, 15, size + 3, 10, size - 3 + 3, 18, size - 3 + 3)
+            
+            -- Main arrow body (golden/bronze medieval style)
+            love.graphics.setColor(0.85, 0.7, 0.35, 1)
+            love.graphics.polygon("fill", 0, 0, 0, size, 5, size - 4, 9, size + 5, 12, size, 7, size - 3, 15, size - 3)
+            
+            -- Inner highlight
+            love.graphics.setColor(0.95, 0.85, 0.5, 1)
+            love.graphics.polygon("fill", 2, 4, 2, size - 4, 5, size - 6)
         
-        love.graphics.push()
-        love.graphics.translate(mx, my)
-        
-        -- Shadow
-        love.graphics.setColor(0, 0, 0, 0.3)
-        love.graphics.polygon("fill", 3, 3, 3, size + 3, 8, size - 4 + 3, 12, size + 5 + 3, 15, size + 3, 10, size - 3 + 3, 18, size - 3 + 3)
-        
-        -- Main arrow body (golden/bronze medieval style)
-        love.graphics.setColor(0.85, 0.7, 0.35, 1)
-        love.graphics.polygon("fill", 0, 0, 0, size, 5, size - 4, 9, size + 5, 12, size, 7, size - 3, 15, size - 3)
-        
-        -- Inner highlight
-        love.graphics.setColor(0.95, 0.85, 0.5, 1)
-        love.graphics.polygon("fill", 2, 4, 2, size - 4, 5, size - 6)
-        
-        -- Outline
-        love.graphics.setColor(0.3, 0.2, 0.1, 1)
-        love.graphics.setLineWidth(1.5)
-        love.graphics.polygon("line", 0, 0, 0, size, 5, size - 4, 9, size + 5, 12, size, 7, size - 3, 15, size - 3)
-        
-        -- Decorative dot at top
-        love.graphics.setColor(0.7, 0.5, 0.3, 1)
-        love.graphics.circle("fill", 1, 2, 2)
-        
-        love.graphics.pop()
+            -- Outline
+            love.graphics.setColor(0.3, 0.2, 0.1, 1)
+            love.graphics.setLineWidth(1.5)
+            love.graphics.polygon("line", 0, 0, 0, size, 5, size - 4, 9, size + 5, 12, size, 7, size - 3, 15, size - 3)
+            
+            -- Decorative dot at top
+            love.graphics.setColor(0.7, 0.5, 0.3, 1)
+            love.graphics.circle("fill", 1, 2, 2)
+            
+            love.graphics.pop()
+        end
     end
     
     love.graphics.setColor(1, 1, 1, 1)
@@ -729,15 +770,9 @@ end
 local function aiCreateBuilding(peon, buildingType, gridX, gridY, team)
     if not peon or not gridX or not gridY then return end
     
-    -- Get building center in world coords
-    local buildingSize = 2
-    if buildingType == "barracks" then buildingSize = 3 end
-    
-    local worldX = (gridX + buildingSize / 2) * 32
-    local worldY = (gridY + buildingSize / 2) * 32
-    
-    -- Tell peon to go build
-    peon:goToBuild(worldX, worldY, buildingType, function()
+    -- goToBuild expects grid coordinates, not world coordinates
+    -- Tell peon to go build at the grid location
+    peon:goToBuild(gridX, gridY, buildingType, function()
         -- This callback is called when peon arrives
         local actualTeam = team or peon.team
         
@@ -1204,7 +1239,7 @@ function Gameplay.load()
     local m3X, m3Y = map:findClearArea(buildingSize, buildingSize, 32, 32, 15)
     table.insert(goldMines, GoldMine.new({gridX = m3X, gridY = m3Y, gold = 100000, map = map}))
     
-    -- Enemy starting peons - send to closest mine
+    -- Enemy starting peons - send most to mine, keep one idle for building
     local enemySpawnX, enemySpawnY = enemyTownHall:getSpawnPos()
     for i = 1, 3 do
         local newPeon = Peon.new({
@@ -1217,11 +1252,14 @@ function Gameplay.load()
         setupPeonCallbacks(newPeon)
         pushUnitOutOfBuildings(newPeon)
         table.insert(peons, newPeon)
-        -- Auto-send to closest mine
-        local closestMine = findClosestMine(newPeon.worldX, newPeon.worldY)
-        if closestMine then
-            newPeon:goToMine(closestMine)
+        -- Send first 2 peons to mine, keep 3rd idle for building
+        if i <= 2 then
+            local closestMine = findClosestMine(newPeon.worldX, newPeon.worldY)
+            if closestMine then
+                newPeon:goToMine(closestMine)
+            end
         end
+        -- 3rd peon stays idle so AI can use it to build farm/barracks
     end
     
     -- Initialize AI controller
@@ -1315,6 +1353,14 @@ function Gameplay.update(dt)
             pushUnitOutOfBuildings(peon)
             farm.builderPeon = nil
             calculatePopulation()
+            -- Send AI peons back to mining
+            local enemyTeam = Teams and Teams.ENEMY or 2
+            if peon.team == enemyTeam then
+                local closestMine = findClosestMine(peon.worldX, peon.worldY)
+                if closestMine then
+                    peon:goToMine(closestMine)
+                end
+            end
         end
     end
     
@@ -1326,6 +1372,14 @@ function Gameplay.update(dt)
             peon:finishBuilding(barrack)
             pushUnitOutOfBuildings(peon)
             barrack.builderPeon = nil
+            -- Send AI peons back to mining
+            local enemyTeam = Teams and Teams.ENEMY or 2
+            if peon.team == enemyTeam then
+                local closestMine = findClosestMine(peon.worldX, peon.worldY)
+                if closestMine then
+                    peon:goToMine(closestMine)
+                end
+            end
         end
         if unitType and currentPop < maxPop then
             local spawnX, spawnY = barrack:getSpawnPos()
@@ -1681,8 +1735,28 @@ function Gameplay.keypressed(key)
     if key == "escape" then
         if isPlacingBuilding then
             cancelBuildingPlacement()
+        elseif input.attackMoveMode then
+            input.attackMoveMode = false
         else
             clearSelection()
+        end
+    end
+    
+    -- Attack-move mode with 'a' key
+    if key == "a" then
+        if #selectedEntities > 0 then
+            -- Check if any selected entity can attack
+            local canAttack = false
+            for _, entity in ipairs(selectedEntities) do
+                if entity.setAttackTarget then
+                    canAttack = true
+                    break
+                end
+            end
+            if canAttack then
+                input.attackMoveMode = true
+                addNotification("Attack-Move: Click to attack")
+            end
         end
     end
     
@@ -1725,6 +1799,64 @@ function Gameplay.mousepressed(x, y, button)
     if button == 1 and map:minimapClick(x, y) then return end
     
     if not map:isInViewport(x, y) then return end
+    
+    -- Attack-move mode handling
+    if button == 1 and input.attackMoveMode then
+        input.attackMoveMode = false
+        local worldX, worldY = map:screenToWorld(x, y)
+        local playerTeam = Teams and Teams.PLAYER or 1
+        
+        -- Check if clicked on an enemy - attack it directly
+        local clickedEnemy = nil
+        local allUnits = getAllUnits()
+        for _, unit in ipairs(allUnits) do
+            if unit.team and unit.team ~= playerTeam and unit:containsPoint(x, y) then
+                clickedEnemy = unit
+                break
+            end
+        end
+        
+        -- Check enemy buildings
+        if not clickedEnemy then
+            for _, building in ipairs(townHalls) do
+                if building.team and building.team ~= playerTeam and building:containsPoint(x, y) then
+                    clickedEnemy = building
+                    break
+                end
+            end
+        end
+        if not clickedEnemy then
+            for _, building in ipairs(barracks) do
+                if building.team and building.team ~= playerTeam and building:containsPoint(x, y) then
+                    clickedEnemy = building
+                    break
+                end
+            end
+        end
+        if not clickedEnemy then
+            for _, building in ipairs(farms) do
+                if building.team and building.team ~= playerTeam and building:containsPoint(x, y) then
+                    clickedEnemy = building
+                    break
+                end
+            end
+        end
+        
+        -- Issue attack-move command to all selected units
+        for _, entity in ipairs(selectedEntities) do
+            if clickedEnemy and entity.setAttackTarget then
+                -- Direct attack on clicked enemy
+                entity:setAttackTarget(clickedEnemy)
+            elseif entity.attackMoveTo then
+                -- Attack-move to location
+                entity:attackMoveTo(worldX, worldY)
+            elseif entity.moveTo then
+                -- Fallback to regular move
+                entity:moveTo(worldX, worldY)
+            end
+        end
+        return
+    end
     
     if button == 1 then
         isBoxSelecting = true
@@ -2074,10 +2206,15 @@ function handleRightClick(x, y)
     -- If clicked enemy, send attack command
     if clickedEnemy or clickedEnemyBuilding then
         local target = clickedEnemy or clickedEnemyBuilding
+        local attackCount = 0
         for _, entity in ipairs(selectedEntities) do
             if entity.setAttackTarget then
                 entity:setAttackTarget(target)
+                attackCount = attackCount + 1
             end
+        end
+        if attackCount > 0 then
+            addNotification("Attacking " .. (target.name or "target"))
         end
         return
     end

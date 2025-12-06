@@ -34,7 +34,7 @@ function Farm.new(params)
     self.team = params.team or (Teams and Teams.PLAYER or 1)
     
     -- Combat stats
-    self.maxHp = 200
+    self.maxHp = 50
     self.hp = self.maxHp
     self.sightRadius = 2
     
@@ -184,7 +184,12 @@ function Farm:draw()
     
     -- Selection
     if self.selected then
-        love.graphics.setColor(0, 1, 0, 0.8)
+        local playerTeam = Teams and Teams.PLAYER or 1
+        if self.team == playerTeam then
+            love.graphics.setColor(0, 1, 0, 0.8)  -- Green for player
+        else
+            love.graphics.setColor(1, 0, 0, 0.8)  -- Red for enemy
+        end
         love.graphics.setLineWidth(3)
         love.graphics.rectangle("line", x - 2, y - 2, size + 4, size + 4, 4)
     end

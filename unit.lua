@@ -270,6 +270,8 @@ function Unit:update(dt, buildings, allUnits, allBuildings)
         self:updateAttacking(dt, buildings, allUnits, allBuildings)
     elseif self.state == "Moving" then
         self:updateMoving(dt, buildings)
+    elseif self.state == "AttackMoving" then
+        self:updateAttackMoving(dt, buildings, allUnits, allBuildings)
     elseif self.state == "Idle" then
         -- Auto-acquire targets
         self:checkForEnemies(allUnits, allBuildings)
@@ -321,6 +323,91 @@ function Unit:updateMoving(dt, buildings)
     end
 end
 
+function Unit:updateAttackMoving(dt, buildings, allUnits, allBuildings)
+    -- Attack-move: move toward destination but attack any enemies in range
+    
+    -- First check for enemies in sight range
+    local sightRange = self:getSightRangePixels()
+    local myTeam = self.team
+    local foundEnemy = nil
+    
+    -- Check units
+    if allUnits then
+        for _, unit in ipairs(allUnits) do
+            if unit ~= self and unit.team and unit.team ~= myTeam and unit.hp and unit.hp > 0 then
+                local dist = self:distanceTo(unit)
+                if dist <= sightRange then
+                    foundEnemy = unit
+                    break
+                end
+            end
+        end
+    end
+    
+    -- Check buildings if no unit found
+    if not foundEnemy and allBuildings then
+        for _, building in ipairs(allBuildings) do
+            if building.team and building.team ~= myTeam and building.hp and building.hp > 0 then
+                local dist = self:distanceTo(building)
+                if dist <= sightRange then
+                    foundEnemy = building
+                    break
+                end
+            end
+        end
+    end
+    
+    -- If enemy found, switch to attacking
+    if foundEnemy then
+        self:setAttackTarget(foundEnemy)
+        return
+    end
+    
+    -- Otherwise, continue moving to destination
+    if not self.targetX or not self.targetY then
+        self.state = "Idle"
+        return
+    end
+    
+    -- Check if reached destination
+    local dx = self.targetX - self.worldX
+    local dy = self.targetY - self.worldY
+    local dist = math.sqrt(dx * dx + dy * dy)
+    
+    if dist < 10 then
+        self.state = "Idle"
+        self.targetX = nil
+        self.targetY = nil
+        self.path = nil
+        self.attackMoveTarget = nil
+        return
+    end
+    
+    -- Move toward target
+    if not self.path then
+        self.path = Pathfinding.findPath(self.worldX, self.worldY, self.targetX, self.targetY, buildings, self.map, self.radius)
+        self.currentWaypoint = 1
+    end
+    
+    if self.path then
+        local dirX, dirY = Pathfinding.getDirection(self.worldX, self.worldY, self.path, self.currentWaypoint)
+        if dirX then
+            if Pathfinding.reachedWaypoint(self.worldX, self.worldY, self.path, self.currentWaypoint, 12) then
+                self.currentWaypoint = self.currentWaypoint + 1
+            end
+            
+            local moveSpeed = self.speed * dt
+            local newX = self.worldX + dirX * moveSpeed
+            local newY = self.worldY + dirY * moveSpeed
+            
+            if self.map and self.map:isWorldPosPassable(newX, newY) then
+                self.worldX = newX
+                self.worldY = newY
+            end
+        end
+    end
+end
+
 function Unit:moveTo(worldX, worldY)
     self.targetX = worldX
     self.targetY = worldY
@@ -328,6 +415,17 @@ function Unit:moveTo(worldX, worldY)
     self.state = "Moving"
     self.path = nil
     self.currentWaypoint = 1
+end
+
+function Unit:attackMoveTo(worldX, worldY)
+    -- Move to target, but stay aggressive (attack enemies on the way)
+    self.targetX = worldX
+    self.targetY = worldY
+    self.attackTarget = nil
+    self.state = "AttackMoving"
+    self.path = nil
+    self.currentWaypoint = 1
+    self.attackMoveTarget = {x = worldX, y = worldY}  -- Remember destination
 end
 
 function Unit:drawOnMinimap(mapX, mapY, scale)

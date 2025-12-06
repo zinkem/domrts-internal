@@ -46,6 +46,10 @@ function Footman.new(params)
     self.lastWorldY = self.worldY
     self.dustTimer = 0
     
+    -- Attack animation
+    self.attackAnimTimer = 0  -- Timer for sword swing
+    self.isSwinging = false
+    
     return self
 end
 
@@ -53,6 +57,17 @@ end
 function Footman:update(dt, buildings, allUnits, allBuildings)
     self.animTimer = (self.animTimer or 0) + dt
     self.dustTimer = math.max(0, (self.dustTimer or 0) - dt)
+    
+    -- Update attack animation timer
+    if self.attackAnimTimer and self.attackAnimTimer > 0 then
+        self.attackAnimTimer = self.attackAnimTimer - dt
+        if self.attackAnimTimer <= 0 then
+            self.isSwinging = false
+        end
+    end
+    
+    -- Track when we're about to attack (check cooldown)
+    local wasReadyToAttack = self.attackCooldown <= 0
     
     -- Track movement for dust
     local moveDistSq = (self.worldX - (self.lastWorldX or self.worldX))^2 + 
@@ -67,6 +82,12 @@ function Footman:update(dt, buildings, allUnits, allBuildings)
     
     -- Call parent Unit update for combat logic
     Unit.update(self, dt, buildings, allUnits, allBuildings)
+    
+    -- Check if we just attacked (cooldown went from 0 to >0)
+    if wasReadyToAttack and self.attackCooldown > 0 then
+        self.isSwinging = true
+        self.attackAnimTimer = 0.3  -- Swing duration
+    end
 end
 
 function Footman:draw()
@@ -103,12 +124,25 @@ function Footman:draw()
     
     -- Selection circle
     if self.selected then
+        local playerTeam = Teams and Teams.PLAYER or 1
+        local selR, selG, selB = 0, 1, 0  -- Green for player
+        if self.team ~= playerTeam then
+            selR, selG, selB = 1, 0, 0  -- Red for enemy
+        end
         if DrawUtils then
-            DrawUtils.drawSelection(x, baseY, self.radius + 2, {0.3, 1, 0.4})
+            if self.team ~= playerTeam then
+                love.graphics.setColor(selR, selG, selB, 0.4)
+                love.graphics.circle("fill", x, baseY, self.radius + 4)
+                love.graphics.setColor(selR, selG, selB, 0.8)
+                love.graphics.setLineWidth(2)
+                love.graphics.circle("line", x, baseY, self.radius + 4)
+            else
+                DrawUtils.drawSelection(x, baseY, self.radius + 2, {0.3, 1, 0.4})
+            end
         else
-            love.graphics.setColor(0, 1, 0, 0.4)
+            love.graphics.setColor(selR, selG, selB, 0.4)
             love.graphics.circle("fill", x, baseY, self.radius + 4)
-            love.graphics.setColor(0, 1, 0, 0.8)
+            love.graphics.setColor(selR, selG, selB, 0.8)
             love.graphics.setLineWidth(2)
             love.graphics.circle("line", x, baseY, self.radius + 4)
         end
@@ -184,11 +218,22 @@ function Footman:draw()
         love.graphics.setColor(0.85, 0.72, 0.58, 1)
         love.graphics.circle("fill", x + 9, y + 6 - armSwing * 0.3, 3)
         
-        -- Sword with slight animation
+        -- Sword with attack swing animation
         local swordAngle = math.sin((self.animTimer or 0) * 2) * 0.05
+        local swingOffset = 0
+        local swingAngle = 0
+        
+        -- Attack swing animation
+        if self.isSwinging and self.attackAnimTimer then
+            local swingProgress = 1 - (self.attackAnimTimer / 0.3)  -- 0 to 1
+            -- Swing arc: start at rest, swing down and forward
+            swingAngle = math.sin(swingProgress * math.pi) * 1.5  -- Big rotation
+            swingOffset = math.sin(swingProgress * math.pi) * 8  -- Move forward
+        end
+        
         love.graphics.push()
-        love.graphics.translate(x + 9, y + 4 - armSwing * 0.3)
-        love.graphics.rotate(swordAngle)
+        love.graphics.translate(x + 9 + swingOffset, y + 4 - armSwing * 0.3)
+        love.graphics.rotate(swordAngle + swingAngle)
         -- Blade
         love.graphics.setColor(0.7, 0.7, 0.75, 1)
         love.graphics.setLineWidth(3)
@@ -205,6 +250,12 @@ function Footman:draw()
         love.graphics.setColor(0.65, 0.55, 0.25, 1)
         love.graphics.line(-4, 0, 4, 0)
         love.graphics.pop()
+        
+        -- Swing effect flash
+        if self.isSwinging then
+            love.graphics.setColor(1, 1, 0.8, 0.3)
+            love.graphics.arc("fill", x + 12, y - 5, 15, -math.pi * 0.3, math.pi * 0.3)
+        end
         
         -- Head
         love.graphics.setColor(0.85, 0.72, 0.58, 1)

@@ -271,18 +271,18 @@ function Map:update(dt)
         DrawUtils.update(dt)
     end
     
-    -- Keyboard scrolling
+    -- Keyboard scrolling (arrow keys only - WASD reserved for commands)
     local dx, dy = 0, 0
-    if love.keyboard.isDown("left") or love.keyboard.isDown("a") then
+    if love.keyboard.isDown("left") then
         dx = -self.scrollSpeed * dt
     end
-    if love.keyboard.isDown("right") or love.keyboard.isDown("d") then
+    if love.keyboard.isDown("right") then
         dx = self.scrollSpeed * dt
     end
-    if love.keyboard.isDown("up") or love.keyboard.isDown("w") then
+    if love.keyboard.isDown("up") then
         dy = -self.scrollSpeed * dt
     end
-    if love.keyboard.isDown("down") or love.keyboard.isDown("s") then
+    if love.keyboard.isDown("down") then
         dy = self.scrollSpeed * dt
     end
     

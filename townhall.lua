@@ -49,7 +49,7 @@ function TownHall.new(params)
     self.owner = params.owner or nil  -- Reference to Player object
     
     -- Combat stats
-    self.maxHp = 600
+    self.maxHp = 150
     self.hp = self.maxHp
     self.sightRadius = 2  -- Tiles
     
@@ -226,7 +226,12 @@ function TownHall:draw()
     
     -- Selection highlight
     if self.selected then
-        love.graphics.setColor(0, 1, 0, 0.8)
+        local playerTeam = Teams and Teams.PLAYER or 1
+        if self.team == playerTeam then
+            love.graphics.setColor(0, 1, 0, 0.8)  -- Green for player
+        else
+            love.graphics.setColor(1, 0, 0, 0.8)  -- Red for enemy
+        end
         love.graphics.setLineWidth(3)
         love.graphics.rectangle("line", x - 3, y - 3, size + 6, size + 6, 4)
     end
@@ -596,6 +601,10 @@ function TownHall:updateUI(resources, screenW, screenH, font, currentPop, maxPop
     self.currentPop = currentPop
     self.maxPop = maxPop
     
+    -- Don't show UI for enemy buildings
+    local playerTeam = Teams and Teams.PLAYER or 1
+    if self.team ~= playerTeam then return end
+    
     if self.selected and self.completed then
         -- New bottom panel positioning
         local panelX = screenW - 288
@@ -719,6 +728,10 @@ function TownHall:updateUI(resources, screenW, screenH, font, currentPop, maxPop
 end
 
 function TownHall:drawUI()
+    -- Don't show UI for enemy buildings
+    local playerTeam = Teams and Teams.PLAYER or 1
+    if self.team ~= playerTeam then return end
+    
     if self.selected and self.completed then
         if self.actionButton then
             self.actionButton:draw()

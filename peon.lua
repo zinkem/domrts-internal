@@ -814,7 +814,7 @@ function Peon:checkForEnemies(allUnits, allBuildings)
     -- Check units first
     if allUnits then
         for _, unit in ipairs(allUnits) do
-            if unit.team and unit.team ~= myTeam and unit.hp and unit.hp > 0 then
+            if unit ~= self and unit.team and unit.team ~= myTeam and unit.hp and unit.hp > 0 then
                 local dist = self:distanceTo(unit)
                 if dist <= sightRange then
                     self:setAttackTarget(unit)
@@ -928,12 +928,26 @@ function Peon:draw()
     -- Selection circle (don't apply movement offsets)
     local baseY = y + jumpOffset + walkBob + idleBob
     if self.selected then
+        local playerTeam = Teams and Teams.PLAYER or 1
+        local selR, selG, selB = 0, 1, 0  -- Green for player
+        if self.team ~= playerTeam then
+            selR, selG, selB = 1, 0, 0  -- Red for enemy
+        end
         if DrawUtils then
-            DrawUtils.drawSelection(x, baseY, self.radius + 2)
+            -- DrawUtils expects green, so draw manually for enemies
+            if self.team ~= playerTeam then
+                love.graphics.setColor(selR, selG, selB, 0.4)
+                love.graphics.circle("fill", x, baseY, self.radius + 4)
+                love.graphics.setColor(selR, selG, selB, 0.8)
+                love.graphics.setLineWidth(2)
+                love.graphics.circle("line", x, baseY, self.radius + 4)
+            else
+                DrawUtils.drawSelection(x, baseY, self.radius + 2)
+            end
         else
-            love.graphics.setColor(0, 1, 0, 0.4)
+            love.graphics.setColor(selR, selG, selB, 0.4)
             love.graphics.circle("fill", x, baseY, self.radius + 4)
-            love.graphics.setColor(0, 1, 0, 0.8)
+            love.graphics.setColor(selR, selG, selB, 0.8)
             love.graphics.setLineWidth(2)
             love.graphics.circle("line", x, baseY, self.radius + 4)
         end
@@ -1286,6 +1300,10 @@ local function getBuildingDefs()
 end
 
 function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
+    -- Don't show UI for enemy peons
+    local playerTeam = Teams and Teams.PLAYER or 1
+    if self.team ~= playerTeam then return end
+    
     if self.selected and self.state ~= Peon.STATE_BUILDING then
         -- New bottom panel positioning
         local panelX = screenW - 288
@@ -1437,6 +1455,10 @@ function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
 end
 
 function Peon:drawUI()
+    -- Don't show UI for enemy peons
+    local playerTeam = Teams and Teams.PLAYER or 1
+    if self.team ~= playerTeam then return end
+    
     if self.selected and self.state ~= Peon.STATE_BUILDING then
         for _, btnData in ipairs(self.buildButtons) do
             btnData.button:draw()
