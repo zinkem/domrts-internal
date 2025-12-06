@@ -7,6 +7,10 @@
 
 local Button = require("button")
 
+-- Team colors module
+local Teams
+pcall(function() Teams = require("teams") end)
+
 local Blacksmith = {}
 Blacksmith.__index = Blacksmith
 
@@ -30,6 +34,14 @@ function Blacksmith.new(params)
     self.selected = false
     self.type = "blacksmith"
     self.name = "Blacksmith"
+    
+    -- Team ownership
+    self.team = params.team or (Teams and Teams.PLAYER or 1)
+    
+    -- Combat stats
+    self.maxHp = 60
+    self.hp = self.maxHp
+    self.sightRadius = 5
     
     self.isBuilding = params.isBuilding or false
     self.buildProgress = params.buildProgress or 0
@@ -216,23 +228,29 @@ function Blacksmith:getUpgradeCost(level)
 end
 
 function Blacksmith:updateUI(resources, screenW, screenH, font)
+    -- Don't show UI for enemy buildings
+    local playerTeam = Teams and Teams.PLAYER or 1
+    if self.team ~= playerTeam then return end
+    
     if self.selected and self.completed then
-        local panelX = screenW - 180
-        local buttonY = 70 + 130
-        local buttonH = 28
-        local buttonW = 150
-        local spacing = 32
+        -- New bottom panel positioning (2x2 grid)
+        local panelX = screenW - 288
+        local panelY = screenH - 188
+        local buttonY = panelY + 55
+        local buttonH = 32
+        local buttonW = 125
+        local spacing = 36
         
         local selfRef = self
         
-        -- Melee Damage button
+        -- Melee Damage button (top left)
         if not self.meleeDamageButton then
             self.meleeDamageButton = Button.new({
-                x = panelX + 10, y = buttonY, width = buttonW, height = buttonH,
+                x = panelX + 12, y = buttonY, width = buttonW, height = buttonH,
                 text = "Melee Dmg", font = font,
                 colors = {
                     normal = {0.5, 0.35, 0.3, 1}, hover = {0.6, 0.45, 0.4, 1},
-                    pressed = {0.4, 0.25, 0.2, 1}, text = {1, 1, 1, 1}, border = {0.4, 0.25, 0.2, 1}
+                    pressed = {0.4, 0.25, 0.2, 1}, text = {0.95, 0.92, 0.85, 1}, border = {0.5, 0.35, 0.3, 1}
                 },
                 onClick = function()
                     if selfRef.meleeDamageLevel < 3 then
@@ -244,16 +262,19 @@ function Blacksmith:updateUI(resources, screenW, screenH, font)
                     end
                 end
             })
+        else
+            self.meleeDamageButton.x = panelX + 12
+            self.meleeDamageButton.y = buttonY
         end
         
-        -- Melee Armor button
+        -- Melee Armor button (top right)
         if not self.meleeArmorButton then
             self.meleeArmorButton = Button.new({
-                x = panelX + 10, y = buttonY + spacing, width = buttonW, height = buttonH,
+                x = panelX + 12 + buttonW + 8, y = buttonY, width = buttonW, height = buttonH,
                 text = "Melee Armor", font = font,
                 colors = {
                     normal = {0.35, 0.4, 0.5, 1}, hover = {0.45, 0.5, 0.6, 1},
-                    pressed = {0.25, 0.3, 0.4, 1}, text = {1, 1, 1, 1}, border = {0.25, 0.3, 0.4, 1}
+                    pressed = {0.25, 0.3, 0.4, 1}, text = {0.95, 0.92, 0.85, 1}, border = {0.35, 0.4, 0.5, 1}
                 },
                 onClick = function()
                     if selfRef.meleeArmorLevel < 3 then
@@ -265,16 +286,20 @@ function Blacksmith:updateUI(resources, screenW, screenH, font)
                     end
                 end
             })
+        else
+            self.meleeArmorButton.x = panelX + 12 + buttonW + 8
+            self.meleeArmorButton.y = buttonY
         end
         
         -- Ranged Damage button
+        -- Ranged Damage button (bottom left)
         if not self.rangedDamageButton then
             self.rangedDamageButton = Button.new({
-                x = panelX + 10, y = buttonY + spacing * 2, width = buttonW, height = buttonH,
+                x = panelX + 12, y = buttonY + spacing, width = buttonW, height = buttonH,
                 text = "Ranged Dmg", font = font,
                 colors = {
                     normal = {0.4, 0.5, 0.35, 1}, hover = {0.5, 0.6, 0.45, 1},
-                    pressed = {0.3, 0.4, 0.25, 1}, text = {1, 1, 1, 1}, border = {0.3, 0.4, 0.25, 1}
+                    pressed = {0.3, 0.4, 0.25, 1}, text = {0.95, 0.92, 0.85, 1}, border = {0.4, 0.5, 0.35, 1}
                 },
                 onClick = function()
                     if selfRef.rangedDamageLevel < 3 then
@@ -286,16 +311,19 @@ function Blacksmith:updateUI(resources, screenW, screenH, font)
                     end
                 end
             })
+        else
+            self.rangedDamageButton.x = panelX + 12
+            self.rangedDamageButton.y = buttonY + spacing
         end
         
-        -- Ranged Armor button
+        -- Ranged Armor button (bottom right)
         if not self.rangedArmorButton then
             self.rangedArmorButton = Button.new({
-                x = panelX + 10, y = buttonY + spacing * 3, width = buttonW, height = buttonH,
+                x = panelX + 12 + buttonW + 8, y = buttonY + spacing, width = buttonW, height = buttonH,
                 text = "Ranged Armor", font = font,
                 colors = {
                     normal = {0.45, 0.4, 0.5, 1}, hover = {0.55, 0.5, 0.6, 1},
-                    pressed = {0.35, 0.3, 0.4, 1}, text = {1, 1, 1, 1}, border = {0.35, 0.3, 0.4, 1}
+                    pressed = {0.35, 0.3, 0.4, 1}, text = {0.95, 0.92, 0.85, 1}, border = {0.45, 0.4, 0.5, 1}
                 },
                 onClick = function()
                     if selfRef.rangedArmorLevel < 3 then
@@ -307,6 +335,9 @@ function Blacksmith:updateUI(resources, screenW, screenH, font)
                     end
                 end
             })
+        else
+            self.rangedArmorButton.x = panelX + 12 + buttonW + 8
+            self.rangedArmorButton.y = buttonY + spacing
         end
         
         -- Update button text and enabled state
@@ -316,15 +347,15 @@ function Blacksmith:updateUI(resources, screenW, screenH, font)
                 btn:setEnabled(false)
             else
                 local cost = selfRef:getUpgradeCost(level + 1)
-                btn:setText(name .. " L" .. (level + 1) .. " (" .. cost .. "g)")
+                btn:setText(name .. " " .. (level + 1) .. " (" .. cost .. ")")
                 btn:setEnabled(resources.gold >= cost)
             end
             btn:update(0)
         end
         
-        updateButton(self.meleeDamageButton, self.meleeDamageLevel, "M.Dmg")
-        updateButton(self.meleeArmorButton, self.meleeArmorLevel, "M.Armor")
-        updateButton(self.rangedDamageButton, self.rangedDamageLevel, "R.Dmg")
+        updateButton(self.meleeDamageButton, self.meleeDamageLevel, "Melee+")
+        updateButton(self.meleeArmorButton, self.meleeArmorLevel, "Armor+")
+        updateButton(self.rangedDamageButton, self.rangedDamageLevel, "Range+")
         updateButton(self.rangedArmorButton, self.rangedArmorLevel, "R.Armor")
     else
         self.meleeDamageButton = nil
@@ -366,13 +397,51 @@ end
 
 function Blacksmith:drawOnMinimap(mapX, mapY, scale)
     if self.completed then
-        love.graphics.setColor(0.45, 0.4, 0.5, 1)
+        if Teams then
+            Teams.setColor(self.team, "minimapBuilding")
+        else
+            love.graphics.setColor(0.45, 0.4, 0.5, 1)
+        end
     else
         love.graphics.setColor(0.35, 0.32, 0.4, 0.6)
     end
     local x = mapX + (self.gridX - 1) * scale
     local y = mapY + (self.gridY - 1) * scale
     love.graphics.rectangle("fill", x, y, self.gridSize * scale, self.gridSize * scale)
+end
+
+-- Combat Methods --
+
+function Blacksmith:takeDamage(amount)
+    self.hp = self.hp - amount
+end
+
+function Blacksmith:isDead()
+    return self.hp <= 0
+end
+
+function Blacksmith:drawHealthBar()
+    if not self.selected and self.hp >= self.maxHp then return end
+    
+    local x, y = self:getScreenPos()
+    local barWidth = self.pixelSize - 10
+    local barHeight = 4
+    local barX = x + 5
+    local barY = y - 8
+    
+    -- Background
+    love.graphics.setColor(0.2, 0.2, 0.2, 0.8)
+    love.graphics.rectangle("fill", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
+    
+    -- Health bar
+    local healthPct = self.hp / self.maxHp
+    love.graphics.setColor(1 - healthPct, healthPct, 0.2, 1)
+    love.graphics.rectangle("fill", barX, barY, barWidth * healthPct, barHeight)
+    
+    -- Border
+    love.graphics.setColor(0, 0, 0, 0.8)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
 end
 
 return Blacksmith

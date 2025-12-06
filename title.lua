@@ -1,13 +1,10 @@
 --[[
-    Title Screen
-    Medieval stone-themed title screen with animated background
+    Title Screen - Desert Warrior Edition
+    Features the warrior prominently with a side panel UI
+    Color scheme: Teal, Gold, Sand
 ]]
 
 local Title = {}
-
--- Import UI drawing utilities
-local UIDraw
-pcall(function() UIDraw = require("ui_draw") end)
 
 -- Import audio
 local Audio
@@ -17,149 +14,301 @@ pcall(function() Audio = require("audio") end)
 local animTimer = 0
 local particles = {}
 local buttons = {}
+local checkboxes = {}
 
--- UI colors (same as main game)
-local UI = {
-    stoneLight = {0.32, 0.30, 0.26, 1},
-    stoneMid = {0.20, 0.18, 0.16, 1},
-    stoneDark = {0.10, 0.09, 0.08, 1},
-    stoneHighlight = {0.48, 0.44, 0.38, 1},
-    stoneShadow = {0.05, 0.04, 0.03, 1},
-    metalGold = {0.72, 0.58, 0.26, 1},
-    metalGoldLight = {0.88, 0.72, 0.42, 1},
-    metalBronze = {0.50, 0.38, 0.20, 1},
-    metalBronzeLight = {0.65, 0.50, 0.30, 1},
-    metalBronzeDark = {0.30, 0.22, 0.10, 1},
-    textLight = {0.92, 0.88, 0.80, 1},
-    textGold = {1, 0.82, 0.25, 1},
+-- Background image state
+local bgImage = nil
+local bgCanvas = nil
+local jiggleShader = nil
+local jiggleTime = 0
+local jiggleActive = false
+local jiggleDuration = 1.2
+local clickX, clickY = 0, 0
+
+-- Color palette inspired by the warrior
+local Colors = {
+    -- Teals (from her hair/clothes)
+    tealDark = {0.10, 0.25, 0.35, 1},
+    tealMid = {0.15, 0.40, 0.50, 1},
+    tealLight = {0.25, 0.55, 0.65, 1},
+    tealBright = {0.30, 0.70, 0.80, 1},
+    
+    -- Golds (from her armor)
+    goldDark = {0.45, 0.35, 0.15, 1},
+    goldMid = {0.72, 0.58, 0.22, 1},
+    goldLight = {0.92, 0.78, 0.35, 1},
+    goldBright = {1.0, 0.88, 0.45, 1},
+    
+    -- Sand/Stone (from environment)
+    sandDark = {0.25, 0.22, 0.18, 1},
+    sandMid = {0.45, 0.40, 0.32, 1},
+    sandLight = {0.65, 0.58, 0.48, 1},
+    
+    -- UI
+    panelBg = {0.08, 0.12, 0.18, 0.92},
+    panelBorder = {0.25, 0.45, 0.55, 1},
+    textLight = {0.95, 0.92, 0.85, 1},
+    textGold = {1.0, 0.85, 0.35, 1},
+    textMuted = {0.6, 0.55, 0.5, 1},
 }
 
--- Hash function for procedural effects
+-- Gelatin jiggle shader
+local jiggleShaderCode = [[
+extern float time;
+extern float intensity;
+extern vec2 clickPos;
+extern vec2 resolution;
+
+vec4 effect(vec4 color, Image texture, vec2 texture_coords, vec2 screen_coords) {
+    vec2 uv = texture_coords;
+    vec2 clickUV = clickPos / resolution;
+    float dist = distance(uv, clickUV);
+    
+    float wave = sin(dist * 20.0 - time * 10.0) * 0.5 + 0.5;
+    float decay = exp(-dist * 2.5) * exp(-time * 2.5);
+    
+    float jiggleX = sin(uv.y * 12.0 + time * 14.0) * wave * decay * intensity * 0.025;
+    float jiggleY = sin(uv.x * 10.0 + time * 12.0) * wave * decay * intensity * 0.02;
+    jiggleX += sin(uv.y * 6.0 - time * 8.0) * decay * intensity * 0.012;
+    jiggleY += cos(uv.x * 8.0 - time * 9.0) * decay * intensity * 0.01;
+    
+    vec2 displaced = clamp(uv + vec2(jiggleX, jiggleY), 0.0, 1.0);
+    return Texel(texture, displaced) * color;
+}
+]]
+
+-- Hash for procedural effects
 local function hash(a, b)
     local h = (a * 374761393 + b * 668265263) % 2147483647
     h = ((h * 1274126177) % 2147483647)
     return (h % 1000) / 1000
 end
 
--- Draw stone panel (simplified from ui_draw)
-local function drawStonePanel(x, y, w, h, cornerRadius, subtle)
-    cornerRadius = cornerRadius or 6
-    
-    -- Drop shadow
-    love.graphics.setColor(0, 0, 0, 0.4)
-    love.graphics.rectangle("fill", x + 4, y + 4, w, h, cornerRadius)
-    
-    -- Main panel with vertical gradient
-    local steps = h
-    for i = 0, steps - 1 do
-        local t = i / steps
-        local r = UI.stoneMid[1] * (1 - t * 0.3)
-        local g = UI.stoneMid[2] * (1 - t * 0.3)
-        local b = UI.stoneMid[3] * (1 - t * 0.3)
-        love.graphics.setColor(r, g, b, 1)
-        love.graphics.rectangle("fill", x, y + i, w, 1, i == 0 and cornerRadius or 0)
-    end
-    
-    -- Stone texture (if not subtle)
-    if not subtle then
-        -- Color blotches
-        local numBlotches = math.floor(w * h / 800)
-        for i = 1, numBlotches do
-            local bx = x + hash(i, 1) * w
-            local by = y + hash(1, i) * h
-            local bsize = 8 + hash(i, i) * 15
-            local colorVar = (hash(i * 3, i * 5) - 0.5) * 0.06
-            
-            love.graphics.setColor(UI.stoneMid[1] + colorVar, UI.stoneMid[2] + colorVar, UI.stoneMid[3] + colorVar, 0.15)
-            love.graphics.ellipse("fill", bx, by, bsize, bsize * 0.6)
-        end
-        
-        -- Sparse cracks
-        local numCracks = 3 + math.floor(hash(w, 1) * 4)
-        for c = 1, numCracks do
-            local cx = x + 10 + hash(c, 100) * (w - 20)
-            local cy = y + 10 + hash(100, c) * (h - 20)
-            local angle = hash(c, 101) * math.pi * 2
-            local length = 10 + hash(c, 102) * 20
-            
-            love.graphics.setColor(0, 0, 0, 0.2)
-            love.graphics.setLineWidth(1)
-            local px, py = cx, cy
-            for s = 1, math.floor(length / 4) do
-                angle = angle + (hash(c * s, s) - 0.5) * 0.5
-                local nx = px + math.cos(angle) * 4
-                local ny = py + math.sin(angle) * 3
-                if nx > x + 5 and nx < x + w - 5 and ny > y + 5 and ny < y + h - 5 then
-                    love.graphics.line(px, py, nx, ny)
-                    px, py = nx, ny
-                end
-            end
-        end
-    end
-    
-    -- Beveled border
-    -- Top/left highlight
-    love.graphics.setColor(UI.stoneHighlight[1], UI.stoneHighlight[2], UI.stoneHighlight[3], 0.5)
-    love.graphics.setLineWidth(2)
-    love.graphics.line(x + cornerRadius, y + 1, x + w - cornerRadius, y + 1)
-    love.graphics.line(x + 1, y + cornerRadius, x + 1, y + h - cornerRadius)
-    
-    -- Bottom/right shadow
-    love.graphics.setColor(UI.stoneShadow[1], UI.stoneShadow[2], UI.stoneShadow[3], 0.7)
-    love.graphics.line(x + cornerRadius, y + h - 1, x + w - cornerRadius, y + h - 1)
-    love.graphics.line(x + w - 1, y + cornerRadius, x + w - 1, y + h - cornerRadius)
-    
-    -- Metal trim at bottom
-    love.graphics.setColor(UI.metalBronze)
-    love.graphics.rectangle("fill", x, y + h - 4, w, 4)
-    love.graphics.setColor(UI.metalBronzeLight[1], UI.metalBronzeLight[2], UI.metalBronzeLight[3], 0.5)
-    love.graphics.rectangle("fill", x, y + h - 4, w, 1)
+-- Medallion sparks (separate from dust particles)
+local medallionSparks = {}
+
+-- Spawn desert dust particles
+local function spawnParticle()
+    local screenW, screenH = love.graphics.getDimensions()
+    local side = math.random() > 0.5
+    table.insert(particles, {
+        x = side and -10 or (screenW + 10),
+        y = math.random(screenH * 0.3, screenH),
+        vx = side and (20 + math.random() * 40) or (-20 - math.random() * 40),
+        vy = -5 - math.random() * 15,
+        size = 1 + math.random() * 3,
+        life = 4 + math.random() * 3,
+        maxLife = 4 + math.random() * 3,
+        alpha = 0.2 + math.random() * 0.3,
+        type = math.random() > 0.8 and "spark" or "dust"
+    })
 end
 
--- Draw a rivet
-local function drawRivet(cx, cy, radius)
-    love.graphics.setColor(UI.metalGold)
+-- Spawn sparks/embers from behind the medallion
+local function spawnMedallionSpark(cx, cy, radius)
+    -- Spawn from edge of medallion
+    local angle = math.random() * math.pi * 2
+    local spawnRadius = radius * (0.85 + math.random() * 0.3)
+    local sparkType = math.random()
+    
+    local spark = {
+        x = cx + math.cos(angle) * spawnRadius,
+        y = cy + math.sin(angle) * spawnRadius,
+        vx = math.cos(angle) * (10 + math.random() * 30) + (math.random() - 0.5) * 20,
+        vy = -40 - math.random() * 60,  -- Float upward
+        size = 1.5 + math.random() * 3,
+        life = 1.5 + math.random() * 2,
+        maxLife = 1.5 + math.random() * 2,
+        rotation = math.random() * math.pi * 2,
+        rotSpeed = (math.random() - 0.5) * 4,
+    }
+    
+    -- Different spark types
+    if sparkType < 0.4 then
+        -- Orange ember
+        spark.color = {1.0, 0.5 + math.random() * 0.3, 0.1, 1}
+        spark.type = "ember"
+    elseif sparkType < 0.7 then
+        -- Gold spark
+        spark.color = {1.0, 0.85, 0.3, 1}
+        spark.type = "spark"
+        spark.size = spark.size * 0.7
+    else
+        -- Red flame bit
+        spark.color = {1.0, 0.25, 0.1, 1}
+        spark.type = "flame"
+        spark.size = spark.size * 1.2
+    end
+    
+    table.insert(medallionSparks, spark)
+end
+
+-- Draw the stone/metal medallion frame
+local function drawMedallion(cx, cy, radius)
+    -- Outer glow (fire glow from behind) - extended to fill corners
+    for i = 30, 1, -1 do
+        local glowRadius = radius + i * 6
+        local alpha = (1 - i / 30) * 0.18
+        local flicker = 0.9 + math.sin(animTimer * 8 + i) * 0.1
+        love.graphics.setColor(1.0, 0.4, 0.1, alpha * flicker)
+        love.graphics.circle("fill", cx, cy, glowRadius)
+    end
+    
+    -- Dark stone base
+    love.graphics.setColor(0.08, 0.07, 0.06, 1)
     love.graphics.circle("fill", cx, cy, radius)
-    love.graphics.setColor(UI.metalGoldLight[1], UI.metalGoldLight[2], UI.metalGoldLight[3], 0.7)
-    love.graphics.circle("fill", cx - radius * 0.3, cy - radius * 0.3, radius * 0.4)
-    love.graphics.setColor(0, 0, 0, 0.3)
-    love.graphics.arc("fill", cx, cy, radius * 0.8, math.pi * 0.3, math.pi * 0.7)
+    
+    -- Stone texture rings
+    for i = 1, 5 do
+        local ringRadius = radius * (0.3 + i * 0.14)
+        local shade = 0.12 + i * 0.02
+        love.graphics.setColor(shade, shade * 0.9, shade * 0.8, 0.5)
+        love.graphics.setLineWidth(2)
+        love.graphics.circle("line", cx, cy, ringRadius)
+    end
+    
+    -- Inner gradient (darker center)
+    for i = 0, radius * 0.6, 2 do
+        local t = i / (radius * 0.6)
+        local alpha = (1 - t) * 0.4
+        love.graphics.setColor(0, 0, 0, alpha)
+        love.graphics.circle("fill", cx, cy, radius * 0.6 - i)
+    end
+    
+    -- Outer bronze ring
+    love.graphics.setLineWidth(12)
+    love.graphics.setColor(Colors.goldDark[1] * 0.7, Colors.goldDark[2] * 0.7, Colors.goldDark[3] * 0.7, 1)
+    love.graphics.circle("line", cx, cy, radius - 6)
+    
+    -- Bronze ring highlight
+    love.graphics.setLineWidth(3)
+    love.graphics.setColor(Colors.goldMid[1], Colors.goldMid[2], Colors.goldMid[3], 0.6)
+    love.graphics.arc("line", "open", cx, cy, radius - 6, -math.pi * 0.8, -math.pi * 0.2)
+    
+    -- Inner bronze ring
+    love.graphics.setLineWidth(6)
+    love.graphics.setColor(Colors.goldDark[1] * 0.6, Colors.goldDark[2] * 0.6, Colors.goldDark[3] * 0.6, 1)
+    love.graphics.circle("line", cx, cy, radius * 0.75)
+    
+    -- Decorative rivets around the edge
+    local numRivets = 16
+    for i = 1, numRivets do
+        local angle = (i / numRivets) * math.pi * 2 - math.pi / 2
+        local rx = cx + math.cos(angle) * (radius - 20)
+        local ry = cy + math.sin(angle) * (radius - 20)
+        
+        -- Rivet base
+        love.graphics.setColor(Colors.goldDark)
+        love.graphics.circle("fill", rx, ry, 6)
+        -- Rivet highlight
+        love.graphics.setColor(Colors.goldLight[1], Colors.goldLight[2], Colors.goldLight[3], 0.7)
+        love.graphics.circle("fill", rx - 1.5, ry - 1.5, 2.5)
+        -- Rivet shadow
+        love.graphics.setColor(0, 0, 0, 0.4)
+        love.graphics.arc("fill", rx, ry, 5, math.pi * 0.2, math.pi * 0.8)
+    end
+    
+    -- Center emblem (abstract symbol)
+    love.graphics.setColor(Colors.goldMid[1], Colors.goldMid[2], Colors.goldMid[3], 0.8)
+    love.graphics.setLineWidth(4)
+    -- Diamond shape
+    local emblemSize = radius * 0.25
+    love.graphics.polygon("line",
+        cx, cy - emblemSize,
+        cx + emblemSize, cy,
+        cx, cy + emblemSize,
+        cx - emblemSize, cy
+    )
+    -- Inner diamond
+    love.graphics.setLineWidth(2)
+    love.graphics.setColor(Colors.goldLight[1], Colors.goldLight[2], Colors.goldLight[3], 0.5)
+    local innerSize = emblemSize * 0.5
+    love.graphics.polygon("line",
+        cx, cy - innerSize,
+        cx + innerSize, cy,
+        cx, cy + innerSize,
+        cx - innerSize, cy
+    )
 end
 
--- Draw button
+-- Draw sparks (called after medallion so they appear in front)
+local function drawMedallionSparks()
+    for _, spark in ipairs(medallionSparks) do
+        local alpha = (spark.life / spark.maxLife)
+        local flickerAlpha = alpha * (0.7 + math.sin(animTimer * 20 + spark.rotation) * 0.3)
+        
+        love.graphics.setColor(spark.color[1], spark.color[2], spark.color[3], flickerAlpha)
+        
+        if spark.type == "ember" then
+            -- Glowing ember with soft edge
+            love.graphics.circle("fill", spark.x, spark.y, spark.size)
+            love.graphics.setColor(1, 0.9, 0.5, flickerAlpha * 0.5)
+            love.graphics.circle("fill", spark.x, spark.y, spark.size * 0.5)
+        elseif spark.type == "spark" then
+            -- Sharp bright spark
+            love.graphics.circle("fill", spark.x, spark.y, spark.size)
+        else
+            -- Flame wisp (elongated)
+            love.graphics.push()
+            love.graphics.translate(spark.x, spark.y)
+            love.graphics.rotate(spark.rotation)
+            love.graphics.ellipse("fill", 0, 0, spark.size * 0.6, spark.size * 1.5)
+            love.graphics.pop()
+        end
+    end
+end
+
+-- Draw a stylized button
 local function drawButton(btn, mx, my)
     local x, y, w, h = btn.x, btn.y, btn.w, btn.h
     local hovered = mx >= x and mx <= x + w and my >= y and my <= y + h
     local isPrimary = btn.primary
     
+    -- Button glow on hover
+    if hovered then
+        love.graphics.setColor(Colors.tealBright[1], Colors.tealBright[2], Colors.tealBright[3], 0.15)
+        love.graphics.rectangle("fill", x - 4, y - 4, w + 8, h + 8, 10)
+    end
+    
     -- Button background
     if isPrimary then
-        if hovered then
-            love.graphics.setColor(0.35, 0.28, 0.18, 1)
-        else
-            love.graphics.setColor(0.28, 0.22, 0.14, 1)
+        -- Gold gradient for primary
+        for i = 0, h - 1 do
+            local t = i / h
+            local r = Colors.goldDark[1] + (Colors.goldMid[1] - Colors.goldDark[1]) * (1 - t * 0.5)
+            local g = Colors.goldDark[2] + (Colors.goldMid[2] - Colors.goldDark[2]) * (1 - t * 0.5)
+            local b = Colors.goldDark[3] + (Colors.goldMid[3] - Colors.goldDark[3]) * (1 - t * 0.5)
+            if hovered then r, g, b = r + 0.1, g + 0.1, b + 0.05 end
+            love.graphics.setColor(r, g, b, 1)
+            love.graphics.rectangle("fill", x, y + i, w, 1)
         end
-    elseif hovered then
-        love.graphics.setColor(UI.stoneLight[1] + 0.05, UI.stoneLight[2] + 0.05, UI.stoneLight[3] + 0.05, 1)
     else
-        love.graphics.setColor(UI.stoneMid)
+        -- Teal for regular buttons
+        for i = 0, h - 1 do
+            local t = i / h
+            local baseColor = hovered and Colors.tealMid or Colors.tealDark
+            local r = baseColor[1] * (1 - t * 0.3)
+            local g = baseColor[2] * (1 - t * 0.3)
+            local b = baseColor[3] * (1 - t * 0.3)
+            love.graphics.setColor(r, g, b, 0.95)
+            love.graphics.rectangle("fill", x, y + i, w, 1)
+        end
     end
-    love.graphics.rectangle("fill", x, y, w, h, 6)
     
-    -- Beveled border
+    -- Border
+    love.graphics.setLineWidth(isPrimary and 2 or 1)
     if isPrimary then
-        love.graphics.setColor(UI.metalGold[1], UI.metalGold[2], UI.metalGold[3], hovered and 1 or 0.8)
+        love.graphics.setColor(Colors.goldLight)
     elseif hovered then
-        love.graphics.setColor(UI.metalGold[1], UI.metalGold[2], UI.metalGold[3], 0.8)
+        love.graphics.setColor(Colors.tealBright)
     else
-        love.graphics.setColor(UI.metalBronze)
+        love.graphics.setColor(Colors.tealLight[1], Colors.tealLight[2], Colors.tealLight[3], 0.6)
     end
-    love.graphics.setLineWidth(isPrimary and 3 or 2)
-    love.graphics.rectangle("line", x, y, w, h, 6)
+    love.graphics.rectangle("line", x, y, w, h, 4)
     
-    -- Highlight
-    love.graphics.setColor(UI.stoneHighlight[1], UI.stoneHighlight[2], UI.stoneHighlight[3], 0.4)
-    love.graphics.line(x + 6, y + 2, x + w - 6, y + 2)
+    -- Top highlight
+    love.graphics.setColor(1, 1, 1, isPrimary and 0.3 or 0.15)
+    love.graphics.line(x + 4, y + 1, x + w - 4, y + 1)
     
     -- Text
     local font = Game.fonts and Game.fonts.button or love.graphics.getFont()
@@ -168,90 +317,262 @@ local function drawButton(btn, mx, my)
     local textH = font:getHeight()
     
     -- Text shadow
-    love.graphics.setColor(0, 0, 0, 0.5)
+    love.graphics.setColor(0, 0, 0, 0.6)
     love.graphics.print(btn.text, x + (w - textW) / 2 + 1, y + (h - textH) / 2 + 1)
     
     -- Text
-    if isPrimary or hovered then
-        love.graphics.setColor(UI.textGold)
+    if isPrimary then
+        love.graphics.setColor(0.15, 0.1, 0.05, 1)
+    elseif hovered then
+        love.graphics.setColor(Colors.textGold)
     else
-        love.graphics.setColor(UI.textLight)
+        love.graphics.setColor(Colors.textLight)
     end
     love.graphics.print(btn.text, x + (w - textW) / 2, y + (h - textH) / 2)
     
     return hovered
 end
 
--- Spawn ambient particles
-local function spawnParticle()
+-- Draw checkbox
+local function drawCheckbox(cb, mx, my)
+    local x, y, size = cb.x, cb.y, cb.size or 20
+    local hovered = mx >= x and mx <= x + size + 80 and my >= y and my <= y + size
+    local checked = cb.checked
+    
+    -- Box background
+    love.graphics.setColor(Colors.tealDark[1], Colors.tealDark[2], Colors.tealDark[3], 0.8)
+    love.graphics.rectangle("fill", x, y, size, size, 3)
+    
+    -- Box border
+    if hovered then
+        love.graphics.setColor(Colors.tealBright)
+    else
+        love.graphics.setColor(Colors.tealLight[1], Colors.tealLight[2], Colors.tealLight[3], 0.6)
+    end
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", x, y, size, size, 3)
+    
+    -- Checkmark
+    if checked then
+        love.graphics.setColor(Colors.goldLight)
+        love.graphics.setLineWidth(2)
+        love.graphics.line(x + 4, y + size/2, x + size/2 - 1, y + size - 5)
+        love.graphics.line(x + size/2 - 1, y + size - 5, x + size - 4, y + 5)
+    end
+    
+    -- Label
+    local font = Game.fonts and Game.fonts.small or love.graphics.getFont()
+    love.graphics.setFont(font)
+    if hovered then
+        love.graphics.setColor(Colors.textGold)
+    else
+        love.graphics.setColor(Colors.textLight[1], Colors.textLight[2], Colors.textLight[3], 0.8)
+    end
+    love.graphics.print(cb.label, x + size + 8, y + (size - font:getHeight()) / 2)
+    
+    return hovered
+end
+
+-- Draw the side panel
+local function drawPanel(panelX, panelY, panelW, panelH)
+    -- Panel shadow
+    love.graphics.setColor(0, 0, 0, 0.4)
+    love.graphics.rectangle("fill", panelX + 6, panelY + 6, panelW, panelH, 8)
+    
+    -- Panel background with gradient
+    for i = 0, panelH - 1 do
+        local t = i / panelH
+        local alpha = Colors.panelBg[4] - t * 0.1
+        love.graphics.setColor(Colors.panelBg[1], Colors.panelBg[2], Colors.panelBg[3], alpha)
+        love.graphics.rectangle("fill", panelX, panelY + i, panelW, 1)
+    end
+    
+    -- Decorative top border (gold accent)
+    love.graphics.setColor(Colors.goldMid)
+    love.graphics.rectangle("fill", panelX, panelY, panelW, 3)
+    love.graphics.setColor(Colors.goldLight[1], Colors.goldLight[2], Colors.goldLight[3], 0.6)
+    love.graphics.rectangle("fill", panelX, panelY, panelW, 1)
+    
+    -- Side borders
+    love.graphics.setColor(Colors.panelBorder[1], Colors.panelBorder[2], Colors.panelBorder[3], 0.5)
+    love.graphics.setLineWidth(1)
+    love.graphics.line(panelX, panelY + 3, panelX, panelY + panelH)
+    love.graphics.line(panelX + panelW, panelY + 3, panelX + panelW, panelY + panelH)
+    
+    -- Bottom accent
+    love.graphics.setColor(Colors.tealMid[1], Colors.tealMid[2], Colors.tealMid[3], 0.5)
+    love.graphics.rectangle("fill", panelX, panelY + panelH - 2, panelW, 2)
+end
+
+-- Draw vignette overlay
+local function drawVignette(screenW, screenH)
+    local cx, cy = screenW / 2, screenH / 2
+    local maxDist = math.sqrt(cx * cx + cy * cy)
+    local gridSize = 12  -- Smaller cells for smoother gradient
+    
+    -- Draw grid cells with distance-based alpha (no overlapping)
+    for y = 0, screenH, gridSize do
+        for x = 0, screenW, gridSize do
+            -- Distance from center of this cell to screen center
+            local cellCx = x + gridSize / 2
+            local cellCy = y + gridSize / 2
+            local dx = cellCx - cx
+            local dy = cellCy - cy
+            local dist = math.sqrt(dx * dx + dy * dy)
+            local t = dist / maxDist  -- 0 at center, 1 at corners
+            
+            -- Harsher vignette - kicks in earlier and stronger
+            local alpha = math.max(0, (t - 0.15) / 0.85) ^ 1.4 * 0.9
+            
+            if alpha > 0.01 then
+                love.graphics.setColor(0.02, 0.03, 0.05, alpha)
+                love.graphics.rectangle("fill", x, y, gridSize, gridSize)
+            end
+        end
+    end
+end
+
+-- Draw background image
+local function drawBackgroundImage()
+    if not bgImage then return end
+    
     local screenW, screenH = love.graphics.getDimensions()
-    table.insert(particles, {
-        x = math.random(0, screenW),
-        y = screenH + 10,
-        vx = (math.random() - 0.5) * 20,
-        vy = -30 - math.random() * 40,
-        size = 1 + math.random() * 2,
-        life = 3 + math.random() * 2,
-        maxLife = 3 + math.random() * 2,
-        type = math.random() > 0.7 and "ember" or "dust"
-    })
+    local imgW, imgH = bgImage:getWidth(), bgImage:getHeight()
+    
+    -- Scale to cover, positioned to show the warrior on the right
+    local scale = math.max(screenW / imgW, screenH / imgH) * 1.05
+    local drawW = imgW * scale
+    local drawH = imgH * scale
+    
+    -- Offset to right side so warrior is visible (panel will be on left)
+    -- Shift down to show her face and flowing hair
+    local drawX = (screenW - drawW) / 2 + 100
+    local drawY = (screenH - drawH) / 2 + 140  -- Shift down more to show head
+    
+    -- Canvas for shader
+    if not bgCanvas or bgCanvas:getWidth() ~= screenW or bgCanvas:getHeight() ~= screenH then
+        bgCanvas = love.graphics.newCanvas(screenW, screenH)
+    end
+    
+    love.graphics.setCanvas(bgCanvas)
+    love.graphics.clear(0, 0, 0, 0)
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(bgImage, drawX, drawY, 0, scale, scale)
+    love.graphics.setCanvas()
+    
+    -- Apply jiggle shader if active
+    if jiggleActive and jiggleShader then
+        jiggleShader:send("time", jiggleTime)
+        jiggleShader:send("intensity", math.max(0, 1 - jiggleTime / jiggleDuration))
+        jiggleShader:send("clickPos", {clickX, clickY})
+        jiggleShader:send("resolution", {screenW, screenH})
+        love.graphics.setShader(jiggleShader)
+    end
+    
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(bgCanvas, 0, 0)
+    love.graphics.setShader()
 end
 
 function Title.load()
     animTimer = 0
     particles = {}
+    medallionSparks = {}
+    jiggleTime = 0
+    jiggleActive = false
     
-    -- Initialize audio if available
-    if Audio and Audio.init then
-        Audio.init()
+    -- Load background image
+    local imagePath = "images/female_desert_warrior_with_spear_and_shield.png"
+    local success, result = pcall(function()
+        return love.graphics.newImage(imagePath)
+    end)
+    if success then
+        bgImage = result
+        print("Title: Loaded warrior background")
+    else
+        bgImage = nil
+        print("Title: Could not load " .. imagePath)
     end
     
-    -- Start music
-    if Audio and Audio.playRandomMusic then
-        Audio.playRandomMusic()
+    -- Create jiggle shader
+    local shaderSuccess
+    shaderSuccess, jiggleShader = pcall(function()
+        return love.graphics.newShader(jiggleShaderCode)
+    end)
+    if not shaderSuccess then
+        print("Title: Shader error: " .. tostring(jiggleShader))
+        jiggleShader = nil
     end
     
-    -- Setup buttons - positioned relative to center panel
+    -- Audio
+    if Audio and Audio.init then Audio.init() end
+    if Audio and Audio.playRandomMusic then Audio.playRandomMusic() end
+    
+    -- Layout
     local screenW, screenH = love.graphics.getDimensions()
-    local btnW, btnH = 220, 45
-    local btnX = (screenW - btnW) / 2
+    local panelW = 280
+    local panelX = 100
+    local panelY = 80
+    local panelH = screenH - 160
     
-    -- Calculate panel position to align buttons
-    local panelH = 400
-    local panelY = (screenH - panelH) / 2 - 20
-    local btnStartY = panelY + 150  -- Below title and subtitle
-    local btnSpacing = 52
+    local btnW = panelW - 40
+    local btnH = 42
+    local btnX = panelX + 20
+    local btnStartY = panelY + 180
+    local btnSpacing = 50
     
     buttons = {
         {
-            text = "Quick Play",
+            text = "QUICK PLAY",
             x = btnX, y = btnStartY, w = btnW, h = btnH,
-            action = function()
-                -- Start with default options
-                Game.SceneManager.switch("gameplay")
-            end,
-            primary = true  -- Highlight this button
+            action = function() Game.SceneManager.switch("gameplay") end,
+            primary = true
         },
         {
             text = "New Game",
             x = btnX, y = btnStartY + btnSpacing, w = btnW, h = btnH,
-            action = function()
-                Game.SceneManager.switch("gameconfig")
-            end
+            action = function() Game.SceneManager.switch("gameconfig") end
         },
         {
             text = "How to Play",
             x = btnX, y = btnStartY + btnSpacing * 2, w = btnW, h = btnH,
-            action = function()
-                Game.SceneManager.switch("tutorial")
-            end
+            action = function() Game.SceneManager.switch("tutorial") end
         },
         {
             text = "Settings",
             x = btnX, y = btnStartY + btnSpacing * 3, w = btnW, h = btnH,
-            action = function()
-                -- Toggle settings (simple for now)
-                Game.settings.musicEnabled = not Game.settings.musicEnabled
+            action = function() 
+                -- Could open settings menu
+            end
+        },
+        {
+            text = "Exit Game",
+            x = btnX, y = btnStartY + btnSpacing * 4 + 20, w = btnW, h = btnH,
+            action = function() love.event.quit() end
+        }
+    }
+    
+    -- Checkboxes for audio
+    local cbY = panelY + panelH - 90
+    checkboxes = {
+        {
+            label = "Music",
+            x = btnX, y = cbY,
+            size = 22,
+            checked = Game.settings.musicEnabled,
+            toggle = function(cb)
+                cb.checked = not cb.checked
+                Game.settings.musicEnabled = cb.checked
+            end
+        },
+        {
+            label = "Sound FX",
+            x = btnX + 110, y = cbY,
+            size = 22,
+            checked = Game.settings.soundEnabled,
+            toggle = function(cb)
+                cb.checked = not cb.checked
+                Game.settings.soundEnabled = cb.checked
             end
         }
     }
@@ -260,13 +581,20 @@ end
 function Title.update(dt)
     animTimer = animTimer + dt
     
-    -- Update audio
-    if Audio and Audio.update then
-        Audio.update(dt)
+    -- Update jiggle
+    if jiggleActive then
+        jiggleTime = jiggleTime + dt
+        if jiggleTime >= jiggleDuration then
+            jiggleActive = false
+            jiggleTime = 0
+        end
     end
     
-    -- Spawn particles occasionally
-    if math.random() < dt * 2 then
+    -- Audio
+    if Audio and Audio.update then Audio.update(dt) end
+    
+    -- Spawn dust particles
+    if math.random() < dt * 1.5 then
         spawnParticle()
     end
     
@@ -276,75 +604,103 @@ function Title.update(dt)
         p.x = p.x + p.vx * dt
         p.y = p.y + p.vy * dt
         p.life = p.life - dt
-        
         if p.life <= 0 then
             table.remove(particles, i)
         end
     end
+    
+    -- Medallion sparks
+    local screenW, screenH = love.graphics.getDimensions()
+    local medallionX = 120
+    local medallionY = screenH / 2 - 100
+    local medallionRadius = 340
+    
+    -- Spawn new sparks
+    if math.random() < dt * 12 then  -- ~12 sparks per second
+        spawnMedallionSpark(medallionX, medallionY, medallionRadius)
+    end
+    
+    -- Update medallion sparks
+    for i = #medallionSparks, 1, -1 do
+        local s = medallionSparks[i]
+        s.x = s.x + s.vx * dt
+        s.y = s.y + s.vy * dt
+        s.vy = s.vy - 20 * dt  -- Slow down upward movement (gravity-ish but upward)
+        s.rotation = s.rotation + s.rotSpeed * dt
+        s.life = s.life - dt
+        if s.life <= 0 then
+            table.remove(medallionSparks, i)
+        end
+    end
+    
+    -- Sync checkboxes with settings
+    if checkboxes[1] then checkboxes[1].checked = Game.settings.musicEnabled end
+    if checkboxes[2] then checkboxes[2].checked = Game.settings.soundEnabled end
 end
 
 function Title.draw()
     local screenW, screenH = love.graphics.getDimensions()
     local mx, my = love.mouse.getPosition()
     
-    -- Dark stone background
-    love.graphics.setColor(UI.stoneDark)
-    love.graphics.rectangle("fill", 0, 0, screenW, screenH)
-    
-    -- Background texture
-    for i = 1, 50 do
-        local px = hash(i, 1) * screenW
-        local py = hash(1, i) * screenH
-        local size = 5 + hash(i, i) * 20
-        local dark = hash(i * 3, i * 5) > 0.5
-        
-        if dark then
-            love.graphics.setColor(0, 0, 0, 0.1)
-        else
-            love.graphics.setColor(UI.stoneLight[1], UI.stoneLight[2], UI.stoneLight[3], 0.05)
-        end
-        love.graphics.ellipse("fill", px, py, size, size * 0.7)
+    -- Background gradient (desert sky colors)
+    for i = 0, screenH - 1 do
+        local t = i / screenH
+        local r = 0.15 + t * 0.1
+        local g = 0.20 + t * 0.08
+        local b = 0.28 - t * 0.05
+        love.graphics.setColor(r, g, b, 1)
+        love.graphics.rectangle("fill", 0, i, screenW, 1)
     end
     
-    -- Animated particles (background embers/dust)
+    -- Background image
+    drawBackgroundImage()
+    
+    -- Vignette
+    drawVignette(screenW, screenH)
+    
+    -- Medallion (behind panel, offset up and left)
+    local medallionX = 120  -- Further left
+    local medallionY = screenH / 2 - 100  -- Up from center
+    local medallionRadius = 340
+    drawMedallion(medallionX, medallionY, medallionRadius)
+    
+    -- Medallion sparks (in front of medallion, behind panel)
+    drawMedallionSparks()
+    
+    -- Dust particles
     for _, p in ipairs(particles) do
-        local alpha = (p.life / p.maxLife) * 0.6
-        if p.type == "ember" then
-            love.graphics.setColor(1, 0.6, 0.2, alpha)
+        local alpha = (p.life / p.maxLife) * p.alpha
+        if p.type == "spark" then
+            love.graphics.setColor(Colors.goldLight[1], Colors.goldLight[2], Colors.goldLight[3], alpha)
         else
-            love.graphics.setColor(0.8, 0.75, 0.65, alpha * 0.5)
+            love.graphics.setColor(Colors.sandLight[1], Colors.sandLight[2], Colors.sandLight[3], alpha * 0.6)
         end
         love.graphics.circle("fill", p.x, p.y, p.size)
     end
     
-    -- Main title panel
-    local panelW, panelH = 500, 380
-    local panelX = (screenW - panelW) / 2
-    local panelY = (screenH - panelH) / 2 - 20
+    -- Side panel
+    local panelW = 280
+    local panelX = 100
+    local panelY = 80
+    local panelH = screenH - 160
     
-    drawStonePanel(panelX, panelY, panelW, panelH, 10)
+    drawPanel(panelX, panelY, panelW, panelH)
     
-    -- Corner rivets
-    local rivetOffset = 15
-    drawRivet(panelX + rivetOffset, panelY + rivetOffset, 5)
-    drawRivet(panelX + panelW - rivetOffset, panelY + rivetOffset, 5)
-    drawRivet(panelX + rivetOffset, panelY + panelH - rivetOffset, 5)
-    drawRivet(panelX + panelW - rivetOffset, panelY + panelH - rivetOffset, 5)
-    
-    -- Title text with glow
+    -- Title
     local titleFont = Game.fonts and Game.fonts.title or love.graphics.getFont()
     love.graphics.setFont(titleFont)
     
     local title = "DOMINION"
     local titleW = titleFont:getWidth(title)
-    local titleX = (screenW - titleW) / 2
-    local titleY = panelY + 30
+    -- Center title in panel, but ensure it doesn't go off-screen
+    local titleX = math.max(10, panelX + (panelW - titleW) / 2)
+    local titleY = panelY + 25
     
     -- Title glow
-    local glowPulse = 0.7 + math.sin(animTimer * 2) * 0.3
-    love.graphics.setColor(UI.metalGold[1], UI.metalGold[2], UI.metalGold[3], 0.3 * glowPulse)
-    for dx = -2, 2 do
-        for dy = -2, 2 do
+    local glowPulse = 0.6 + math.sin(animTimer * 2) * 0.4
+    love.graphics.setColor(Colors.goldMid[1], Colors.goldMid[2], Colors.goldMid[3], 0.25 * glowPulse)
+    for dx = -3, 3 do
+        for dy = -3, 3 do
             if dx ~= 0 or dy ~= 0 then
                 love.graphics.print(title, titleX + dx, titleY + dy)
             end
@@ -352,86 +708,104 @@ function Title.draw()
     end
     
     -- Title shadow
-    love.graphics.setColor(0, 0, 0, 0.6)
-    love.graphics.print(title, titleX + 3, titleY + 3)
+    love.graphics.setColor(0, 0, 0, 0.7)
+    love.graphics.print(title, titleX + 2, titleY + 2)
     
     -- Title main
-    love.graphics.setColor(UI.textGold)
+    love.graphics.setColor(Colors.goldBright)
     love.graphics.print(title, titleX, titleY)
     
     -- Subtitle
     local subtitleFont = Game.fonts and Game.fonts.subtitle or love.graphics.getFont()
     love.graphics.setFont(subtitleFont)
-    local subtitle = "A Real-Time Strategy Game"
+    local subtitle = "Rise to Power"
     local subtitleW = subtitleFont:getWidth(subtitle)
     
-    love.graphics.setColor(0, 0, 0, 0.4)
-    love.graphics.print(subtitle, (screenW - subtitleW) / 2 + 1, titleY + 65 + 1)
-    love.graphics.setColor(UI.textLight[1], UI.textLight[2], UI.textLight[3], 0.8)
-    love.graphics.print(subtitle, (screenW - subtitleW) / 2, titleY + 65)
+    love.graphics.setColor(0, 0, 0, 0.5)
+    love.graphics.print(subtitle, panelX + (panelW - subtitleW) / 2 + 1, titleY + 55 + 1)
+    love.graphics.setColor(Colors.tealBright[1], Colors.tealBright[2], Colors.tealBright[3], 0.9)
+    love.graphics.print(subtitle, panelX + (panelW - subtitleW) / 2, titleY + 55)
     
-    -- Decorative line
-    love.graphics.setColor(UI.metalBronze)
-    love.graphics.setLineWidth(2)
-    local lineY = titleY + 100
-    love.graphics.line(panelX + 50, lineY, panelX + panelW - 50, lineY)
+    -- Decorative line under subtitle
+    local lineY = titleY + 95
+    love.graphics.setColor(Colors.goldMid[1], Colors.goldMid[2], Colors.goldMid[3], 0.6)
+    love.graphics.setLineWidth(1)
+    love.graphics.line(panelX + 30, lineY, panelX + panelW - 30, lineY)
     
-    -- Line rivets
-    drawRivet(panelX + 50, lineY, 3)
-    drawRivet(panelX + panelW - 50, lineY, 3)
+    -- Diamond accent in center of line
+    local diamondX = panelX + panelW / 2
+    love.graphics.setColor(Colors.goldLight)
+    love.graphics.polygon("fill", 
+        diamondX, lineY - 5,
+        diamondX + 5, lineY,
+        diamondX, lineY + 5,
+        diamondX - 5, lineY
+    )
     
     -- Buttons
     for _, btn in ipairs(buttons) do
         drawButton(btn, mx, my)
     end
     
-    -- Settings indicator
-    local settingsFont = Game.fonts and Game.fonts.small or love.graphics.getFont()
-    love.graphics.setFont(settingsFont)
-    local musicStatus = Game.settings.musicEnabled and "Music: ON" or "Music: OFF"
-    local soundStatus = Game.settings.soundEnabled and "Sound: ON" or "Sound: OFF"
+    -- Audio section label
+    local smallFont = Game.fonts and Game.fonts.small or love.graphics.getFont()
+    love.graphics.setFont(smallFont)
+    love.graphics.setColor(Colors.textMuted)
+    love.graphics.print("Audio", panelX + 20, panelY + panelH - 115)
     
-    love.graphics.setColor(UI.textLight[1], UI.textLight[2], UI.textLight[3], 0.6)
-    love.graphics.print(musicStatus .. "  |  " .. soundStatus, panelX + 20, panelY + panelH - 35)
+    -- Checkboxes
+    for _, cb in ipairs(checkboxes) do
+        drawCheckbox(cb, mx, my)
+    end
     
-    -- Version/credits
-    love.graphics.setColor(UI.textLight[1], UI.textLight[2], UI.textLight[3], 0.4)
-    love.graphics.print("Made with LÖVE", screenW - 120, screenH - 25)
-    
-    -- Controls hint
-    local controlsY = panelY + panelH + 20
-    love.graphics.setColor(UI.textLight[1], UI.textLight[2], UI.textLight[3], 0.5)
-    local controlsText = "Controls: Click to select, Right-click to command, Arrow keys to scroll"
-    local controlsW = settingsFont:getWidth(controlsText)
-    love.graphics.print(controlsText, (screenW - controlsW) / 2, controlsY)
+    -- Version in corner
+    love.graphics.setColor(Colors.textLight[1], Colors.textLight[2], Colors.textLight[3], 0.3)
+    love.graphics.print("v0.1 - Made with LÖVE", screenW - 150, screenH - 25)
 end
 
 function Title.keypressed(key)
     if key == "return" or key == "space" then
         Game.SceneManager.switch("gameplay")
+    elseif key == "escape" then
+        love.event.quit()
     elseif key == "m" then
         Game.settings.musicEnabled = not Game.settings.musicEnabled
-    elseif key == "s" then
-        Game.settings.soundEnabled = not Game.settings.soundEnabled
     end
 end
 
 function Title.mousepressed(x, y, button)
-    if button == 1 then
-        for _, btn in ipairs(buttons) do
-            if x >= btn.x and x <= btn.x + btn.w and
-               y >= btn.y and y <= btn.y + btn.h then
-                if btn.action then
-                    btn.action()
-                end
-                return
-            end
+    if button ~= 1 then return end
+    
+    -- Trigger jiggle on background click
+    if bgImage then
+        jiggleActive = true
+        jiggleTime = 0
+        clickX = x
+        clickY = y
+    end
+    
+    -- Check buttons
+    for _, btn in ipairs(buttons) do
+        if x >= btn.x and x <= btn.x + btn.w and
+           y >= btn.y and y <= btn.y + btn.h then
+            if btn.action then btn.action() end
+            return
+        end
+    end
+    
+    -- Check checkboxes
+    for _, cb in ipairs(checkboxes) do
+        local size = cb.size or 20
+        if x >= cb.x and x <= cb.x + size + 80 and
+           y >= cb.y and y <= cb.y + size then
+            if cb.toggle then cb.toggle(cb) end
+            return
         end
     end
 end
 
 function Title.unload()
-    -- Don't stop music - let it continue into gameplay
+    bgCanvas = nil
 end
 
 return Title

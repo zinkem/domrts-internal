@@ -29,7 +29,6 @@ Peon.STATE_HARVESTING = "Harvesting"
 Peon.STATE_RETURNING = "Returning"
 Peon.STATE_CHOPPING = "Chopping"
 Peon.STATE_BUILDING = "Building"
-Peon.STATE_ATTACKING = "Attacking"
 
 Peon.RADIUS = 14  -- Fits inside 1 tile (32x32 pixels)
 
@@ -48,17 +47,15 @@ function Peon.new(params)
     
     -- Team ownership
     self.team = params.team or (Teams and Teams.PLAYER or 1)
-    self.owner = params.owner or nil  -- Reference to Player object
     
     -- Combat stats
-    self.maxHp = 4
+    self.maxHp = params.maxHp or 30
     self.hp = self.maxHp
-    self.damage = 1
-    self.attackSpeed = 1.0  -- Attacks per second
+    self.damage = params.damage or 2
+    self.attackSpeed = 0.8
     self.attackCooldown = 0
-    self.sightRadius = 5  -- Tiles
     self.attackTarget = nil
-    self.isAttacking = false
+    self.flashTimer = 0
     
     self.targetX = nil
     self.targetY = nil
@@ -162,119 +159,155 @@ function Peon:isTouchingBuilding(building, contactBuffer)
     return dist <= self.radius + contactBuffer
 end
 
--- Get separation force from nearby units (pushes units apart when overlapping)
--- Peons carrying gold or heading to a mine skip this to allow phasing through other units
-function Peon:getUnitSeparation(allUnits)
-    -- Skip separation if carrying gold (allows phasing through other units)
-    if self.carryingGold and self.carryingGold > 0 then
-        return 0, 0
-    end
-    
-    -- Skip separation if heading to a mine (prevents congestion at entrance)
-    if self.targetMine then
-        return 0, 0
-    end
-    
-    local sepX, sepY = 0, 0
-    local separationDist = self.radius * 2.5
-    
-    if not allUnits then return 0, 0 end
-    
-    for _, other in ipairs(allUnits) do
-        if other ~= self and other.worldX and other.worldY then
-            -- Skip separation with other gold carriers or mine-bound peons
-            if (other.carryingGold and other.carryingGold > 0) or other.targetMine then
-                goto continue
-            end
-            
-            local dx = self.worldX - other.worldX
-            local dy = self.worldY - other.worldY
-            local dist = math.sqrt(dx * dx + dy * dy)
-            
-            if dist < separationDist and dist > 0.1 then
-                local force = (separationDist - dist) / separationDist
-                sepX = sepX + (dx / dist) * force
-                sepY = sepY + (dy / dist) * force
-            elseif dist < 0.1 then
-                local angle = math.random() * math.pi * 2
-                sepX = sepX + math.cos(angle)
-                sepY = sepY + math.sin(angle)
-            end
-            
-            ::continue::
-        end
-    end
-    
-    local len = math.sqrt(sepX * sepX + sepY * sepY)
-    if len > 1 then
-        sepX = sepX / len
-        sepY = sepY / len
-    end
-    
-    return sepX, sepY
-end
-
--- Compute path to target using A* pathfinding
-function Peon:computePath(targetX, targetY)
-    return Pathfinding.findPath(self.worldX, self.worldY, targetX, targetY, self.radius)
-end
-
--- Simple movement along path - paths are pre-validated by A*
-function Peon:moveToward(targetX, targetY, dt, allUnits)
-    local dx = targetX - self.worldX
-    local dy = targetY - self.worldY
-    local dist = math.sqrt(dx * dx + dy * dy)
-    
-    if dist < 1 then return end
-    
-    local dirX = dx / dist
-    local dirY = dy / dist
-    
-    -- Apply unit-unit separation (unless carrying gold)
-    local sepX, sepY = self:getUnitSeparation(allUnits)
-    local sepStrength = 0.3
-    
-    dirX = dirX + sepX * sepStrength
-    dirY = dirY + sepY * sepStrength
-    
-    -- Re-normalize
-    local len = math.sqrt(dirX * dirX + dirY * dirY)
-    if len > 0.1 then
-        dirX = dirX / len
-        dirY = dirY / len
-    end
-    
-    local moveSpeed = self.speed * dt
-    local newX = self.worldX + dirX * moveSpeed
-    local newY = self.worldY + dirY * moveSpeed
-    
-    -- Safety check - don't walk into trees (unless targeting that tree)
-    local canMove = true
+function Peon:canMoveTo(newX, newY, buildings)
+    -- Check tree collision
     if self.map then
         local targetGridX, targetGridY = self.map:worldToGrid(newX, newY)
         local isTargetTree = self.targetTreeX and targetGridX == self.targetTreeX and targetGridY == self.targetTreeY
         if not isTargetTree and not self.map:isWorldPosPassable(newX, newY) then
-            canMove = false
+            return false
         end
     end
     
-    if canMove then
-        self.worldX = newX
-        self.worldY = newY
-    elseif self.map then
-        -- Try axis-aligned movement as fallback
-        local canMoveX = self.map:isWorldPosPassable(newX, self.worldY)
-        local canMoveY = self.map:isWorldPosPassable(self.worldX, newY)
-        if canMoveX then
-            self.worldX = newX
-        elseif canMoveY then
-            self.worldY = newY
+    if not buildings then return true end
+    
+    for _, b in ipairs(buildings) do
+        -- Skip collision check for target mine (peon needs to walk into it)
+        if self.targetMine and b == self.targetMine then
+            goto continue
+        end
+        
+        local currentPen = self:getBuildingPenetration(self.worldX, self.worldY, b)
+        local newPen = self:getBuildingPenetration(newX, newY, b)
+        
+        if newPen > 0 then
+            -- Would be inside building
+            if currentPen > 0 then
+                -- Already inside - only allow if reducing penetration (escaping)
+                if newPen >= currentPen then
+                    return false
+                end
+            else
+                -- Not inside currently, don't allow entering
+                return false
+            end
+        end
+        
+        ::continue::
+    end
+    
+    return true
+end
+
+-- Compute path to target using line-of-sight pathfinding
+function Peon:computePath(targetX, targetY, buildings)
+    -- Filter out target mine so pathfinding goes TO it, not around it
+    local filteredBuildings = buildings
+    if self.targetMine and buildings then
+        filteredBuildings = {}
+        for _, b in ipairs(buildings) do
+            if b ~= self.targetMine then
+                table.insert(filteredBuildings, b)
+            end
+        end
+    end
+    return Pathfinding.findPath(self.worldX, self.worldY, targetX, targetY, filteredBuildings, self.map, self.radius)
+end
+
+-- Advance to next waypoint if we've reached current one AND can see the next one
+function Peon:updateWaypoint(buildings)
+    if Pathfinding.reachedWaypoint(self.worldX, self.worldY, self.path, self.currentWaypoint, 12) then
+        local nextWp = self.currentWaypoint + 1
+        if nextWp <= #self.path then
+            local nextTarget = self.path[nextWp]
+            -- Filter out target mine for line-of-sight check
+            local filteredBuildings = buildings
+            if self.targetMine and buildings then
+                filteredBuildings = {}
+                for _, b in ipairs(buildings) do
+                    if b ~= self.targetMine then
+                        table.insert(filteredBuildings, b)
+                    end
+                end
+            end
+            -- Only advance if we have clear line of sight to next waypoint
+            if Pathfinding.canSee(self.worldX, self.worldY, nextTarget.x, nextTarget.y, filteredBuildings, self.map, self.radius) then
+                self.currentWaypoint = nextWp
+            end
+        else
+            self.currentWaypoint = nextWp
         end
     end
 end
 
+-- Try to move at full speed in the given direction
+-- If blocked, find alternative directions that maintain full speed
+function Peon:tryMove(dirX, dirY, moveSpeed, buildings)
+    local moveX = dirX * moveSpeed
+    local moveY = dirY * moveSpeed
+    local newX = self.worldX + moveX
+    local newY = self.worldY + moveY
+    
+    -- First try direct movement
+    if self:canMoveTo(newX, newY, buildings) then
+        self.worldX = newX
+        self.worldY = newY
+        return true
+    end
+    
+    -- Blocked - try sliding along walls at FULL SPEED
+    -- Test 8 alternative directions, pick best one that's closest to intended direction
+    local alternatives = {
+        {dx = 1, dy = 0},
+        {dx = -1, dy = 0},
+        {dx = 0, dy = 1},
+        {dx = 0, dy = -1},
+        {dx = 0.707, dy = 0.707},
+        {dx = -0.707, dy = 0.707},
+        {dx = 0.707, dy = -0.707},
+        {dx = -0.707, dy = -0.707},
+    }
+    
+    -- Sort by how aligned they are with intended direction (dot product)
+    table.sort(alternatives, function(a, b)
+        local dotA = a.dx * dirX + a.dy * dirY
+        local dotB = b.dx * dirX + b.dy * dirY
+        return dotA > dotB
+    end)
+    
+    -- Try each alternative at full speed
+    for _, alt in ipairs(alternatives) do
+        local dot = alt.dx * dirX + alt.dy * dirY
+        -- Only use alternatives that are at least somewhat aligned (dot > 0)
+        if dot > 0.1 then
+            local altX = self.worldX + alt.dx * moveSpeed
+            local altY = self.worldY + alt.dy * moveSpeed
+            if self:canMoveTo(altX, altY, buildings) then
+                self.worldX = altX
+                self.worldY = altY
+                return true
+            end
+        end
+    end
+    
+    -- Still stuck - try smaller movements in the intended direction
+    for fraction = 0.75, 0.25, -0.25 do
+        local smallX = self.worldX + moveX * fraction
+        local smallY = self.worldY + moveY * fraction
+        if self:canMoveTo(smallX, smallY, buildings) then
+            self.worldX = smallX
+            self.worldY = smallY
+            return true
+        end
+    end
+    
+    return false  -- Completely stuck
+end
+
 -- Get direction to move towards current waypoint
-function Peon:getMoveDirection(targetX, targetY)
+function Peon:getMoveDirection(targetX, targetY, buildings)
+    -- Update waypoint progression
+    self:updateWaypoint(buildings)
     
     -- Get direction from pathfinding
     local dirX, dirY = Pathfinding.getDirection(self.worldX, self.worldY, self.path, self.currentWaypoint)
@@ -294,22 +327,9 @@ function Peon:getMoveDirection(targetX, targetY)
     return nil, nil
 end
 
-function Peon:update(dt, buildings, townHall, goldMine, resources, allUnits, allBuildings)
+function Peon:update(dt, buildings, townHall, goldMine, resources)
     -- Update animation timer
     self.animTimer = self.animTimer + dt
-    
-    -- Update flash timer
-    if self.flashTimer and self.flashTimer > 0 then
-        self.flashTimer = self.flashTimer - dt
-        if self.flashTimer <= 0 then
-            self.damageFlash = false
-        end
-    end
-    
-    -- Update attack cooldown
-    if self.attackCooldown > 0 then
-        self.attackCooldown = self.attackCooldown - dt
-    end
     
     -- Track movement for dust effects
     local moved = false
@@ -332,27 +352,20 @@ function Peon:update(dt, buildings, townHall, goldMine, resources, allUnits, all
     self.lastWorldX = self.worldX
     self.lastWorldY = self.worldY
     
-    -- Auto-acquire targets if idle and enemies nearby
-    if self.state == Peon.STATE_IDLE and allUnits then
-        self:checkForEnemies(allUnits, allBuildings)
-    end
-    
     if self.state == Peon.STATE_MOVING then
-        self:updateMoving(dt, buildings, goldMine, allUnits)
+        self:updateMoving(dt, buildings, goldMine)
     elseif self.state == Peon.STATE_HARVESTING then
         self:updateHarvesting(dt, resources)
     elseif self.state == Peon.STATE_RETURNING then
-        self:updateReturning(dt, buildings, townHall, resources, allUnits)
+        self:updateReturning(dt, buildings, townHall, resources)
     elseif self.state == Peon.STATE_CHOPPING then
         self:updateChopping(dt, resources)
     elseif self.state == Peon.STATE_BUILDING then
         -- Building update is handled by gameplay.lua
-    elseif self.state == Peon.STATE_ATTACKING then
-        self:updateAttacking(dt, buildings, allUnits, allBuildings)
     end
 end
 
-function Peon:updateMoving(dt, buildings, goldMine, allUnits)
+function Peon:updateMoving(dt, buildings, goldMine)
     if not self.targetX or not self.targetY then
         self.state = Peon.STATE_IDLE
         return
@@ -443,73 +456,41 @@ function Peon:updateMoving(dt, buildings, goldMine, allUnits)
     
     -- Make sure we have a path
     if not self.path then
-        self.path = self:computePath(self.targetX, self.targetY)
+        self.path = self:computePath(self.targetX, self.targetY, buildings)
         self.currentWaypoint = 1
     end
     
-    -- Move along path
-    if self.path and self.currentWaypoint <= #self.path then
-        local wp = self.path[self.currentWaypoint]
-        
-        if Pathfinding.reachedWaypoint(self.worldX, self.worldY, self.path, self.currentWaypoint, 8) then
-            self.currentWaypoint = self.currentWaypoint + 1
-        end
-        
-        if self.currentWaypoint <= #self.path then
-            wp = self.path[self.currentWaypoint]
-            self:moveToward(wp.x, wp.y, dt, allUnits)
-        end
-    else
-        -- No path or reached end - move directly toward target
-        self:moveToward(self.targetX, self.targetY, dt, allUnits)
+    local moveDirX, moveDirY = self:getMoveDirection(self.targetX, self.targetY, buildings)
+    
+    if not moveDirX or not moveDirY then
+        return
     end
+    
+    local moveSpeed = self.speed * dt
+    self:tryMove(moveDirX, moveDirY, moveSpeed, buildings)
 end
 
 function Peon:updateHarvesting(dt, resources)
     self.harvestTimer = self.harvestTimer + dt
     
     if self.harvestTimer >= self.harvestTime then
-        -- Actually extract gold from the mine
-        local goldExtracted = self.harvestAmount
-        if self.targetMine and self.targetMine.extractGold then
-            goldExtracted = self.targetMine:extractGold(self.harvestAmount)
-        end
-        
-        self.carryingGold = goldExtracted
+        self.carryingGold = self.harvestAmount
         self.visible = true
         self.state = Peon.STATE_RETURNING
-        
-        -- If mine is depleted, clear target
-        if self.targetMine and self.targetMine.depleted then
-            self.targetMine = nil
-        end
     end
 end
 
-function Peon:updateReturning(dt, buildings, townHall, resources, allUnits)
-    -- If no town hall, drop gold and go idle
-    if not townHall or (townHall.isDead and townHall:isDead()) then
-        self.carryingGold = 0
-        self.carryingLumber = 0
+function Peon:updateReturning(dt, buildings, townHall, resources)
+    if not townHall then
         self.state = Peon.STATE_IDLE
-        self.targetMine = nil
-        self.targetTreeX = nil
-        self.targetTreeY = nil
         return
     end
     
     if self:isTouchingBuilding(townHall, 4) then
         if self.carryingGold > 0 then
-            -- Use callback if available, otherwise direct access
-            if self.addResources then
-                self.addResources(self.carryingGold, 0)
-            else
-                resources.gold = resources.gold + self.carryingGold
-            end
+            resources.gold = resources.gold + self.carryingGold
             self.carryingGold = 0
-            
-            -- Check if mine is still valid
-            if self.targetMine and not self.targetMine.depleted then
+            if self.targetMine then
                 local cx, cy = self.targetMine:getWorldCenter()
                 self.targetX = cx
                 self.targetY = cy
@@ -517,17 +498,10 @@ function Peon:updateReturning(dt, buildings, townHall, resources, allUnits)
                 self.currentWaypoint = 1
                 self.state = Peon.STATE_MOVING
             else
-                -- Mine depleted or gone, go idle
-                self.targetMine = nil
                 self.state = Peon.STATE_IDLE
             end
         elseif self.carryingLumber > 0 then
-            -- Use callback if available, otherwise direct access
-            if self.addResources then
-                self.addResources(0, self.carryingLumber)
-            else
-                resources.lumber = resources.lumber + self.carryingLumber
-            end
+            resources.lumber = resources.lumber + self.carryingLumber
             self.carryingLumber = 0
             if self.targetTreeX and self.targetTreeY then
                 -- Have a target tree (original or adjacent), go chop it
@@ -559,9 +533,16 @@ function Peon:updateReturning(dt, buildings, townHall, resources, allUnits)
     end
     
     local targetX, targetY = townHall:getWorldCenter()
+    local dx = targetX - self.worldX
+    local dy = targetY - self.worldY
+    local dist = math.sqrt(dx * dx + dy * dy)
     
-    -- Move toward town hall
-    self:moveToward(targetX, targetY, dt, allUnits)
+    if dist > 0.1 then
+        local moveDirX = dx / dist
+        local moveDirY = dy / dist
+        local moveSpeed = self.speed * dt
+        self:tryMove(moveDirX, moveDirY, moveSpeed, buildings)
+    end
 end
 
 -- Find an adjacent tree that is accessible (has a passable tile next to it)
@@ -708,211 +689,8 @@ function Peon:finishBuilding(building)
     self.buildEntryY = nil
 end
 
--- Combat Methods --
-
-function Peon:setAttackTarget(target)
-    self.attackTarget = target
-    self.targetMine = nil
-    self.targetTreeX = nil
-    self.targetTreeY = nil
-    self.carryingGold = 0
-    self.carryingLumber = 0
-    self.state = Peon.STATE_ATTACKING
-    self.path = nil
-end
-
-function Peon:getAttackRange()
-    return self.radius + 4  -- Tight melee range (about 18 pixels)
-end
-
-function Peon:getSightRangePixels()
-    return self.sightRadius * 32  -- Convert tiles to pixels
-end
-
-function Peon:distanceTo(target)
-    local tx, ty
-    
-    -- For buildings, calculate distance to nearest edge, not center
-    if target.getWorldBounds then
-        local bx1, by1, bx2, by2 = target:getWorldBounds()
-        -- Find closest point on building bounds to unit
-        local closestX = math.max(bx1, math.min(self.worldX, bx2))
-        local closestY = math.max(by1, math.min(self.worldY, by2))
-        local dx = closestX - self.worldX
-        local dy = closestY - self.worldY
-        return math.sqrt(dx * dx + dy * dy)
-    elseif target.getWorldCenter then
-        tx, ty = target:getWorldCenter()
-    else
-        tx, ty = target.worldX, target.worldY
-    end
-    
-    -- Calculate center-to-center distance
-    local dx = tx - self.worldX
-    local dy = ty - self.worldY
-    local centerDist = math.sqrt(dx * dx + dy * dy)
-    
-    -- Subtract target's radius to get edge-to-center distance
-    local targetRadius = target.radius or 0
-    return math.max(0, centerDist - targetRadius)
-end
-
-function Peon:updateAttacking(dt, buildings, allUnits, allBuildings)
-    -- Check if target is dead or gone
-    if not self.attackTarget or (self.attackTarget.isDead and self.attackTarget:isDead()) then
-        self.attackTarget = nil
-        self.state = Peon.STATE_IDLE
-        -- Try to find new target
-        if allUnits then
-            self:checkForEnemies(allUnits, allBuildings)
-        end
-        return
-    end
-    
-    local target = self.attackTarget
-    local dist = self:distanceTo(target)
-    local attackRange = self:getAttackRange()
-    
-    if dist <= attackRange then
-        -- In range - attack if cooldown ready
-        self.path = nil  -- Clear path when in attack range
-        if self.attackCooldown <= 0 then
-            -- Perform attack
-            if target.takeDamage then
-                target:takeDamage(self.damage)
-                self.attackCooldown = 1.0 / self.attackSpeed
-                
-                -- Visual/sound effects
-                if Effects then
-                    local tx, ty = target.worldX or target:getWorldCenter()
-                    local targetY = target.worldY or select(2, target:getWorldCenter())
-                    Effects.blood(tx or target.worldX, targetY or target.worldY)
-                end
-            end
-        end
-    else
-        -- Move toward target
-        local tx, ty
-        if target.getWorldCenter then
-            tx, ty = target:getWorldCenter()
-        else
-            tx, ty = target.worldX, target.worldY
-        end
-        
-        -- Compute path if needed
-        if not self.path then
-            self.targetX = tx
-            self.targetY = ty
-            self.path = self:computePath(tx, ty)
-            self.currentWaypoint = 1
-        end
-        
-        -- Move along path
-        if self.path and self.currentWaypoint <= #self.path then
-            local wp = self.path[self.currentWaypoint]
-            
-            if Pathfinding.reachedWaypoint(self.worldX, self.worldY, self.path, self.currentWaypoint, 8) then
-                self.currentWaypoint = self.currentWaypoint + 1
-            end
-            
-            if self.currentWaypoint <= #self.path then
-                wp = self.path[self.currentWaypoint]
-                self:moveToward(wp.x, wp.y, dt, allUnits)
-            end
-        else
-            -- No path - move directly toward target
-            self:moveToward(tx, ty, dt, allUnits)
-        end
-    end
-end
-
-function Peon:checkForEnemies(allUnits, allBuildings)
-    local sightRange = self:getSightRangePixels()
-    local myTeam = self.team
-    
-    -- Check units first
-    if allUnits then
-        for _, unit in ipairs(allUnits) do
-            if unit ~= self and unit.team and unit.team ~= myTeam and unit.hp and unit.hp > 0 then
-                local dist = self:distanceTo(unit)
-                if dist <= sightRange then
-                    self:setAttackTarget(unit)
-                    return
-                end
-            end
-        end
-    end
-    
-    -- Check buildings
-    if allBuildings then
-        for _, building in ipairs(allBuildings) do
-            if building.team and building.team ~= myTeam and building.hp and building.hp > 0 then
-                local dist = self:distanceTo(building)
-                if dist <= sightRange then
-                    self:setAttackTarget(building)
-                    return
-                end
-            end
-        end
-    end
-end
-
-function Peon:takeDamage(amount)
-    self.hp = self.hp - amount
-    
-    -- Flash effect (always set, even without DrawUtils)
-    self.flashTimer = 0.15
-    self.damageFlash = true  -- Extra flag for visible feedback
-    
-    -- Aggro back if not already attacking
-    if self.state ~= Peon.STATE_ATTACKING then
-        -- Will auto-acquire on next update
-    end
-end
-
-function Peon:isDead()
-    return self.hp <= 0
-end
-
-function Peon:drawHealthBar()
-    if not self.selected and self.hp >= self.maxHp then return end
-    
-    local x, y = self:getScreenPos()
-    local barWidth = 24
-    local barHeight = 4
-    local segmentWidth = barWidth / self.maxHp
-    local barX = x - barWidth / 2
-    local barY = y - 28
-    
-    -- Background
-    love.graphics.setColor(0.2, 0.2, 0.2, 0.8)
-    love.graphics.rectangle("fill", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
-    
-    -- Health segments
-    for i = 1, self.maxHp do
-        local segX = barX + (i - 1) * segmentWidth
-        if i <= self.hp then
-            -- Filled segment - green to red based on health
-            local healthPct = self.hp / self.maxHp
-            love.graphics.setColor(1 - healthPct, healthPct, 0.2, 1)
-        else
-            -- Empty segment
-            love.graphics.setColor(0.4, 0.1, 0.1, 0.6)
-        end
-        love.graphics.rectangle("fill", segX + 0.5, barY, segmentWidth - 1, barHeight)
-    end
-    
-    -- Border
-    love.graphics.setColor(0, 0, 0, 0.8)
-    love.graphics.setLineWidth(1)
-    love.graphics.rectangle("line", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
-end
-
 function Peon:draw()
     if not self.visible then return end
-    
-    -- Draw health bar if selected or damaged
-    self:drawHealthBar()
     
     local x, y = self:getScreenPos()
     
@@ -946,26 +724,12 @@ function Peon:draw()
     -- Selection circle (don't apply movement offsets)
     local baseY = y + jumpOffset + walkBob + idleBob
     if self.selected then
-        local playerTeam = Teams and Teams.PLAYER or 1
-        local selR, selG, selB = 0, 1, 0  -- Green for player
-        if self.team ~= playerTeam then
-            selR, selG, selB = 1, 0, 0  -- Red for enemy
-        end
         if DrawUtils then
-            -- DrawUtils expects green, so draw manually for enemies
-            if self.team ~= playerTeam then
-                love.graphics.setColor(selR, selG, selB, 0.4)
-                love.graphics.circle("fill", x, baseY, self.radius + 4)
-                love.graphics.setColor(selR, selG, selB, 0.8)
-                love.graphics.setLineWidth(2)
-                love.graphics.circle("line", x, baseY, self.radius + 4)
-            else
-                DrawUtils.drawSelection(x, baseY, self.radius + 2)
-            end
+            DrawUtils.drawSelection(x, baseY, self.radius + 2)
         else
-            love.graphics.setColor(selR, selG, selB, 0.4)
+            love.graphics.setColor(0, 1, 0, 0.4)
             love.graphics.circle("fill", x, baseY, self.radius + 4)
-            love.graphics.setColor(selR, selG, selB, 0.8)
+            love.graphics.setColor(0, 1, 0, 0.8)
             love.graphics.setLineWidth(2)
             love.graphics.circle("line", x, baseY, self.radius + 4)
         end
@@ -981,12 +745,6 @@ function Peon:draw()
     
     -- Draw the peon body with outline
     local function drawBody()
-        -- Get team colors (fallback to neutral brown if no Teams module)
-        local teamColors = Teams and Teams.getColors(self.team) or nil
-        local shirtColor = teamColors and teamColors.primary or {0.55, 0.45, 0.35, 1}
-        local hoodColor = teamColors and teamColors.dark or {0.5, 0.4, 0.3, 1}
-        local beltColor = {0.35, 0.25, 0.15, 1}  -- Belt stays neutral brown
-        
         -- Feet
         love.graphics.setColor(0.4, 0.3, 0.2, 1)
         love.graphics.ellipse("fill", x - 5, y + 7, 5, 3)
@@ -997,22 +755,22 @@ function Peon:draw()
         love.graphics.rectangle("fill", x - 6, y + 2, 5, 7, 1)
         love.graphics.rectangle("fill", x + 1, y + 2, 5, 7, 1)
         
-        -- Body (work shirt) - TEAM COLOR - with breathing
-        love.graphics.setColor(shirtColor)
+        -- Body (work shirt) - with breathing
+        love.graphics.setColor(0.55, 0.45, 0.35, 1)
         love.graphics.rectangle("fill", x - 8 - breathe * 0.5, y - 6, 16 + breathe, 12, 2)
         
         -- Belt
-        love.graphics.setColor(beltColor)
+        love.graphics.setColor(0.35, 0.25, 0.15, 1)
         love.graphics.rectangle("fill", x - 8, y + 1, 16, 3)
         love.graphics.setColor(0.6, 0.5, 0.2, 1)
         love.graphics.rectangle("fill", x - 2, y + 1, 4, 3)  -- Buckle
         
-        -- Arms - TEAM COLOR - with slight swing when walking
+        -- Arms - with slight swing when walking
         local armSwing = 0
         if self.state == Peon.STATE_MOVING or self.state == Peon.STATE_RETURNING then
             armSwing = math.sin(self.animTimer * 10) * 2
         end
-        love.graphics.setColor(shirtColor)
+        love.graphics.setColor(0.55, 0.45, 0.35, 1)
         love.graphics.rectangle("fill", x - 11, y - 4 + armSwing, 5, 10, 1)
         love.graphics.rectangle("fill", x + 6, y - 4 - armSwing, 5, 10, 1)
         
@@ -1025,8 +783,8 @@ function Peon:draw()
         love.graphics.setColor(0.85, 0.7, 0.55, 1)
         love.graphics.ellipse("fill", x, y - 10, 6, 7)
         
-        -- Hood/cap - TEAM COLOR (darker shade)
-        love.graphics.setColor(hoodColor)
+        -- Hood/cap
+        love.graphics.setColor(0.5, 0.4, 0.3, 1)
         love.graphics.arc("fill", x, y - 10, 7, math.pi, 2 * math.pi)
         love.graphics.rectangle("fill", x - 7, y - 12, 14, 4, 1)
         
@@ -1109,14 +867,10 @@ function Peon:draw()
     else
         -- Fallback: just draw body
         drawBody()
-        
-        -- Manual flash effect if damaged
-        if self.flashTimer and self.flashTimer > 0 then
-            local x, y = self:getScreenPos()
-            love.graphics.setColor(1, 0.3, 0.3, 0.5)
-            love.graphics.circle("fill", x, y, self.radius + 5)
-        end
     end
+    
+    -- Draw health bar
+    self:drawHealthBar()
     
     love.graphics.setLineWidth(1)
     love.graphics.setColor(1, 1, 1, 1)
@@ -1325,10 +1079,6 @@ local function getBuildingDefs()
 end
 
 function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
-    -- Don't show UI for enemy peons
-    local playerTeam = Teams and Teams.PLAYER or 1
-    if self.team ~= playerTeam then return end
-    
     if self.selected and self.state ~= Peon.STATE_BUILDING then
         -- New bottom panel positioning
         local panelX = screenW - 288
@@ -1480,10 +1230,6 @@ function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
 end
 
 function Peon:drawUI()
-    -- Don't show UI for enemy peons
-    local playerTeam = Teams and Teams.PLAYER or 1
-    if self.team ~= playerTeam then return end
-    
     if self.selected and self.state ~= Peon.STATE_BUILDING then
         for _, btnData in ipairs(self.buildButtons) do
             btnData.button:draw()
@@ -1526,14 +1272,7 @@ end
 
 function Peon:drawOnMinimap(mapX, mapY, scale)
     if not self.visible then return end
-    
-    -- Use team color for minimap
-    if Teams then
-        Teams.setColor(self.team, "minimapUnit")
-    else
-        love.graphics.setColor(0.3, 0.8, 0.3, 1)  -- Fallback green
-    end
-    
+    love.graphics.setColor(0.3, 0.8, 0.3, 1)
     local gridX, gridY = 1, 1
     if self.map then
         gridX, gridY = self.map:worldToGrid(self.worldX, self.worldY)
@@ -1541,6 +1280,36 @@ function Peon:drawOnMinimap(mapX, mapY, scale)
     local x = mapX + (gridX - 0.5) * scale
     local y = mapY + (gridY - 0.5) * scale
     love.graphics.circle("fill", x, y, math.max(2, scale * 0.5))
+end
+
+function Peon:isDead()
+    return self.hp <= 0
+end
+
+function Peon:takeDamage(amount)
+    self.hp = self.hp - amount
+    self.flashTimer = 0.1
+    return self.hp <= 0
+end
+
+function Peon:drawHealthBar()
+    if not self.selected and self.hp >= self.maxHp then return end
+    
+    local x, y = self:getScreenPos()
+    local barWidth = 24
+    local barHeight = 4
+    local barY = y - self.radius - 8
+    
+    -- Background
+    love.graphics.setColor(0, 0, 0, 0.7)
+    love.graphics.rectangle("fill", x - barWidth/2 - 1, barY - 1, barWidth + 2, barHeight + 2)
+    
+    -- Health bar
+    local healthPct = self.hp / self.maxHp
+    local r = healthPct < 0.5 and 1 or (1 - healthPct) * 2
+    local g = healthPct > 0.5 and 1 or healthPct * 2
+    love.graphics.setColor(r, g, 0, 1)
+    love.graphics.rectangle("fill", x - barWidth/2, barY, barWidth * healthPct, barHeight)
 end
 
 return Peon

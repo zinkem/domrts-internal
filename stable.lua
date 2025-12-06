@@ -9,6 +9,10 @@
 local Button = require("button")
 local Requirements = require("requirements")
 
+-- Team colors module
+local Teams
+pcall(function() Teams = require("teams") end)
+
 local Stable = {}
 Stable.__index = Stable
 
@@ -30,6 +34,14 @@ function Stable.new(params)
     self.selected = false
     self.type = "stable"
     self.name = "Stable"
+    
+    -- Team ownership
+    self.team = params.team or (Teams and Teams.PLAYER or 1)
+    
+    -- Combat stats
+    self.maxHp = 60
+    self.hp = self.maxHp
+    self.sightRadius = 5
     
     self.isBuilding = params.isBuilding or false
     self.buildProgress = params.buildProgress or 0
@@ -352,13 +364,51 @@ function Stable:drawOnMinimap(mapX, mapY, scale)
     if self.hasPaladinUpgrade then
         love.graphics.setColor(0.7, 0.6, 0.25, 1)
     elseif self.completed then
-        love.graphics.setColor(0.55, 0.45, 0.3, 1)
+        if Teams then
+            Teams.setColor(self.team, "minimapBuilding")
+        else
+            love.graphics.setColor(0.55, 0.45, 0.3, 1)
+        end
     else
         love.graphics.setColor(0.45, 0.38, 0.25, 0.6)
     end
     local x = mapX + (self.gridX - 1) * scale
     local y = mapY + (self.gridY - 1) * scale
     love.graphics.rectangle("fill", x, y, self.gridSize * scale, self.gridSize * scale)
+end
+
+-- Combat Methods --
+
+function Stable:takeDamage(amount)
+    self.hp = self.hp - amount
+end
+
+function Stable:isDead()
+    return self.hp <= 0
+end
+
+function Stable:drawHealthBar()
+    if not self.selected and self.hp >= self.maxHp then return end
+    
+    local x, y = self:getScreenPos()
+    local barWidth = self.pixelSize - 10
+    local barHeight = 4
+    local barX = x + 5
+    local barY = y - 8
+    
+    -- Background
+    love.graphics.setColor(0.2, 0.2, 0.2, 0.8)
+    love.graphics.rectangle("fill", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
+    
+    -- Health bar
+    local healthPct = self.hp / self.maxHp
+    love.graphics.setColor(1 - healthPct, healthPct, 0.2, 1)
+    love.graphics.rectangle("fill", barX, barY, barWidth * healthPct, barHeight)
+    
+    -- Border
+    love.graphics.setColor(0, 0, 0, 0.8)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
 end
 
 return Stable

@@ -12,6 +12,117 @@ local Requirements = require("requirements")
 local Teams
 pcall(function() Teams = require("teams") end)
 
+-- Shared gradient/texture helper functions for building rendering
+local function gradientRect(rx, ry, rw, rh, c1, c2, weathering)
+    for i = 0, rh - 1 do
+        local t = i / rh
+        local r = c1[1] + (c2[1] - c1[1]) * t
+        local g = c1[2] + (c2[2] - c1[2]) * t
+        local b = c1[3] + (c2[3] - c1[3]) * t
+        if weathering then
+            local noise = (math.sin(rx * 0.3 + i * 0.5) * 0.02 + math.cos(ry * 0.2 + i * 0.7) * 0.02)
+            r, g, b = r + noise, g + noise, b + noise
+        end
+        love.graphics.setColor(r, g, b, 1)
+        love.graphics.rectangle("fill", rx, ry + i, rw, 1)
+    end
+end
+
+local function weatheredRect(rx, ry, rw, rh, baseColor, darken)
+    darken = darken or 0.15
+    gradientRect(rx, ry, rw, rh, 
+        {baseColor[1] + 0.05, baseColor[2] + 0.05, baseColor[3] + 0.05},
+        {baseColor[1] - darken, baseColor[2] - darken, baseColor[3] - darken}, true)
+    love.graphics.setColor(0, 0, 0, 0.04)
+    for i = 1, 3 do
+        local stainX = rx + math.sin(rx + i * 17) * rw * 0.3 + rw * 0.3
+        local stainY = ry + math.cos(ry + i * 13) * rh * 0.3 + rh * 0.5
+        love.graphics.ellipse("fill", stainX, stainY, rw * 0.12, rh * 0.08)
+    end
+end
+
+local function drawColumn(cx, cy, cw, ch, marble, marbleDark)
+    for i = 0, cw - 1 do
+        local t = i / cw
+        local shade = 1 - (math.abs(t - 0.35) * 1.2)
+        shade = math.max(0.7, math.min(1.0, shade))
+        local r = marble[1] * shade
+        local g = marble[2] * shade
+        local b = marble[3] * shade
+        love.graphics.setColor(r, g, b, 1)
+        love.graphics.rectangle("fill", cx + i, cy, 1, ch)
+    end
+    love.graphics.setColor(0, 0, 0, 0.06)
+    love.graphics.rectangle("fill", cx + cw * 0.25, cy + 3, 1, ch - 6)
+    love.graphics.rectangle("fill", cx + cw * 0.5, cy + 3, 1, ch - 6)
+    love.graphics.rectangle("fill", cx + cw * 0.75, cy + 3, 1, ch - 6)
+    love.graphics.setColor(1, 1, 1, 0.12)
+    love.graphics.rectangle("fill", cx + 1, cy + 2, 1, ch - 4)
+end
+
+local function drawAcroterion(ax, ay, asize, goldMid, goldLight)
+    for row = 0, asize do
+        local t = row / asize
+        local rowW = asize * (1 - t) * 0.8
+        local shade = goldMid[1] + (goldLight[1] - goldMid[1]) * (1 - t)
+        love.graphics.setColor(shade, shade * 0.85, shade * 0.4, 1)
+        love.graphics.rectangle("fill", ax - rowW/2, ay - row, rowW, 1)
+    end
+end
+
+local function drawTorchFlame(tx, ty)
+    for r = 8, 1, -1 do
+        local alpha = (1 - r/8) * 0.15
+        love.graphics.setColor(1, 0.5, 0.1, alpha)
+        love.graphics.circle("fill", tx, ty, r)
+    end
+    love.graphics.setColor(1, 0.8, 0.3, 0.9)
+    love.graphics.circle("fill", tx, ty, 3)
+    love.graphics.setColor(1, 0.95, 0.7, 0.7)
+    love.graphics.circle("fill", tx, ty - 1, 1.5)
+end
+
+local function drawBronzeDoor(dx, dy, dw, dh, bronze, bronzeLight, goldMid, goldDark)
+    gradientRect(dx, dy, dw, dh,
+        {bronzeLight[1], bronzeLight[2], bronzeLight[3]},
+        {bronze[1] - 0.1, bronze[2] - 0.1, bronze[3] - 0.05}, true)
+    local panelW = (dw - 4) / 2
+    local panelH = (dh - 6) / 2
+    for py = 0, 1 do
+        for px = 0, 1 do
+            local panelX = dx + 2 + px * (panelW + 1)
+            local panelY = dy + 2 + py * (panelH + 1)
+            gradientRect(panelX, panelY, panelW - 1, panelH - 1,
+                {bronze[1] - 0.03, bronze[2] - 0.03, bronze[3]},
+                {bronze[1] - 0.12, bronze[2] - 0.12, bronze[3] - 0.08}, false)
+            love.graphics.setColor(bronzeLight[1], bronzeLight[2], bronzeLight[3], 0.3)
+            love.graphics.rectangle("fill", panelX, panelY, panelW - 1, 1)
+        end
+    end
+    love.graphics.setColor(goldMid[1], goldMid[2], goldMid[3], 1)
+    love.graphics.circle("fill", dx + dw/2 - dw/5, dy + dh * 0.6, 2.5)
+    love.graphics.circle("fill", dx + dw/2 + dw/5, dy + dh * 0.6, 2.5)
+    love.graphics.setColor(goldDark[1], goldDark[2], goldDark[3], 1)
+    love.graphics.circle("fill", dx + dw/2 - dw/5, dy + dh * 0.6, 1.2)
+    love.graphics.circle("fill", dx + dw/2 + dw/5, dy + dh * 0.6, 1.2)
+end
+
+local function drawBanner(bx, by, bannerColor, emblemColor, goldDark, goldMid)
+    gradientRect(bx - 1, by - 30, 2, 22,
+        {goldMid[1], goldMid[2], goldMid[3]},
+        {goldDark[1] - 0.1, goldDark[2] - 0.1, goldDark[3] - 0.05}, false)
+    love.graphics.setColor(bannerColor)
+    love.graphics.polygon("fill", bx + 1, by - 28, bx + 18, by - 22, bx + 15, by - 14, bx + 1, by - 10)
+    love.graphics.setColor(1, 1, 1, 0.12)
+    love.graphics.polygon("fill", bx + 1, by - 28, bx + 8, by - 25, bx + 6, by - 18, bx + 1, by - 16)
+    love.graphics.setColor(0, 0, 0, 0.15)
+    love.graphics.polygon("fill", bx + 12, by - 23, bx + 18, by - 22, bx + 15, by - 14, bx + 10, by - 16)
+    love.graphics.setColor(emblemColor)
+    love.graphics.circle("fill", bx + 9, by - 19, 4)
+    love.graphics.setColor(0, 0, 0, 0.25)
+    love.graphics.circle("fill", bx + 9, by - 19, 2)
+end
+
 local TownHall = {}
 TownHall.__index = TownHall
 
@@ -277,256 +388,691 @@ function TownHall:draw()
 end
 
 function TownHall:drawTownHall(x, y, size)
-    -- Shadow
-    love.graphics.setColor(0, 0, 0, 0.3)
-    love.graphics.ellipse("fill", x + size/2, y + size + 5, size/2 - 5, 8)
+    -- Desert Warrior color palette
+    local tealDark = {0.10, 0.25, 0.35}
+    local tealMid = {0.15, 0.40, 0.50}
+    local tealLight = {0.25, 0.55, 0.65}
+    local goldDark = {0.45, 0.35, 0.15}
+    local goldMid = {0.72, 0.58, 0.22}
+    local goldLight = {0.92, 0.78, 0.35}
+    local marble = {0.88, 0.86, 0.82}
+    local marbleDark = {0.70, 0.68, 0.64}
+    local marbleShadow = {0.55, 0.53, 0.50}
+    local bronze = {0.55, 0.45, 0.30}
+    local bronzeLight = {0.70, 0.58, 0.38}
     
-    -- Main castle base (stone walls)
-    love.graphics.setColor(0.45, 0.42, 0.38, 1)
-    love.graphics.rectangle("fill", x + 8, y + 20, size - 16, size - 20, 2)
-    
-    -- Stone texture pattern
-    love.graphics.setColor(0.4, 0.37, 0.33, 1)
-    for row = 0, 4 do
-        for col = 0, 3 do
-            local offsetX = (row % 2) * 12
-            love.graphics.rectangle("fill", x + 12 + col * 20 + offsetX, y + 25 + row * 14, 16, 10, 1)
+    -- Helper: draw vertical gradient rectangle
+    local function gradientRect(rx, ry, rw, rh, c1, c2, weathering)
+        for i = 0, rh - 1 do
+            local t = i / rh
+            local r = c1[1] + (c2[1] - c1[1]) * t
+            local g = c1[2] + (c2[2] - c1[2]) * t
+            local b = c1[3] + (c2[3] - c1[3]) * t
+            -- Add subtle noise for weathering
+            if weathering then
+                local noise = (math.sin(rx * 0.3 + i * 0.5) * 0.02 + math.cos(ry * 0.2 + i * 0.7) * 0.02)
+                r, g, b = r + noise, g + noise, b + noise
+            end
+            love.graphics.setColor(r, g, b, 1)
+            love.graphics.rectangle("fill", rx, ry + i, rw, 1)
         end
     end
     
-    -- Left tower
-    love.graphics.setColor(0.5, 0.47, 0.42, 1)
-    love.graphics.rectangle("fill", x, y + 10, 24, size - 10, 2)
-    love.graphics.setColor(0.45, 0.42, 0.38, 1)
-    for i = 0, 2 do
-        love.graphics.rectangle("fill", x + i * 9, y + 2, 6, 12)
-    end
-    love.graphics.setColor(0.2, 0.25, 0.35, 1)
-    love.graphics.rectangle("fill", x + 8, y + 30, 8, 12, 1)
-    love.graphics.setColor(0.6, 0.5, 0.3, 1)
-    love.graphics.rectangle("fill", x + 11, y + 30, 2, 12)
-    
-    -- Right tower  
-    love.graphics.setColor(0.5, 0.47, 0.42, 1)
-    love.graphics.rectangle("fill", x + size - 24, y + 10, 24, size - 10, 2)
-    love.graphics.setColor(0.45, 0.42, 0.38, 1)
-    for i = 0, 2 do
-        love.graphics.rectangle("fill", x + size - 24 + i * 9, y + 2, 6, 12)
-    end
-    love.graphics.setColor(0.2, 0.25, 0.35, 1)
-    love.graphics.rectangle("fill", x + size - 16, y + 30, 8, 12, 1)
-    love.graphics.setColor(0.6, 0.5, 0.3, 1)
-    love.graphics.rectangle("fill", x + size - 13, y + 30, 2, 12)
-    
-    -- Center battlements
-    love.graphics.setColor(0.48, 0.45, 0.4, 1)
-    for i = 0, 4 do
-        love.graphics.rectangle("fill", x + 28 + i * 9, y + 12, 6, 10)
+    -- Helper: draw weathered/aged surface
+    local function weatheredRect(rx, ry, rw, rh, baseColor, darken)
+        darken = darken or 0.15
+        gradientRect(rx, ry, rw, rh, 
+            {baseColor[1] + 0.05, baseColor[2] + 0.05, baseColor[3] + 0.05},
+            {baseColor[1] - darken, baseColor[2] - darken, baseColor[3] - darken},
+            true)
+        -- Add some staining/aging marks
+        love.graphics.setColor(0, 0, 0, 0.05)
+        for i = 1, 3 do
+            local stainX = rx + math.sin(rx + i * 17) * rw * 0.3 + rw * 0.3
+            local stainY = ry + math.cos(ry + i * 13) * rh * 0.3 + rh * 0.5
+            love.graphics.ellipse("fill", stainX, stainY, rw * 0.15, rh * 0.1)
+        end
     end
     
-    -- Main entrance arch
-    love.graphics.setColor(0.15, 0.12, 0.08, 1)
-    love.graphics.rectangle("fill", x + size/2 - 14, y + size - 45, 28, 45)
-    love.graphics.arc("fill", x + size/2, y + size - 45, 14, math.pi, 2 * math.pi)
+    -- Helper: draw column with cylindrical shading
+    local function drawColumn(cx, cy, cw, ch)
+        -- Column is lighter on left (lit side), darker on right
+        for i = 0, cw - 1 do
+            local t = i / cw
+            -- Cylindrical falloff
+            local shade = 1 - (math.abs(t - 0.35) * 1.2)
+            shade = math.max(0.7, math.min(1.0, shade))
+            local r = marble[1] * shade
+            local g = marble[2] * shade
+            local b = marble[3] * shade
+            -- Vertical weathering gradient
+            love.graphics.setColor(r, g, b, 1)
+            love.graphics.rectangle("fill", cx + i, cy, 1, ch)
+        end
+        -- Subtle fluting (grooves)
+        love.graphics.setColor(0, 0, 0, 0.08)
+        love.graphics.rectangle("fill", cx + cw * 0.25, cy + 3, 1, ch - 6)
+        love.graphics.rectangle("fill", cx + cw * 0.5, cy + 3, 1, ch - 6)
+        love.graphics.rectangle("fill", cx + cw * 0.75, cy + 3, 1, ch - 6)
+        -- Highlight on lit edge
+        love.graphics.setColor(1, 1, 1, 0.15)
+        love.graphics.rectangle("fill", cx + 1, cy + 2, 1, ch - 4)
+    end
     
-    -- Wooden door
-    love.graphics.setColor(0.4, 0.28, 0.15, 1)
-    love.graphics.rectangle("fill", x + size/2 - 12, y + size - 40, 24, 40)
-    love.graphics.setColor(0.3, 0.2, 0.1, 1)
-    love.graphics.rectangle("fill", x + size/2 - 1, y + size - 40, 2, 40)
-    love.graphics.setColor(0.35, 0.3, 0.25, 1)
-    love.graphics.circle("fill", x + size/2 - 8, y + size - 30, 2)
-    love.graphics.circle("fill", x + size/2 + 8, y + size - 30, 2)
-    love.graphics.circle("fill", x + size/2 - 8, y + size - 15, 2)
-    love.graphics.circle("fill", x + size/2 + 8, y + size - 15, 2)
+    -- Shadow
+    love.graphics.setColor(0, 0, 0, 0.35)
+    love.graphics.ellipse("fill", x + size/2, y + size + 5, size/2 - 5, 10)
     
-    -- Banner/flag on center - TEAM COLORED
-    local bannerColor = Teams and Teams.getColor(self.team, "banner") or {0.8, 0.2, 0.2, 1}
-    local emblemColor = Teams and Teams.getColor(self.team, "emblem") or {0.9, 0.8, 0.2, 1}
+    -- Stone foundation / steps (3 levels) with gradient
+    for i = 2, 0, -1 do
+        local stepY = y + size - 8 + i * 4
+        local stepInset = i * 4
+        local baseShade = 0.65 - i * 0.05
+        gradientRect(x + stepInset, stepY, size - stepInset*2, 6,
+            {baseShade + 0.08, baseShade + 0.06, baseShade + 0.04},
+            {baseShade - 0.05, baseShade - 0.06, baseShade - 0.06}, true)
+        -- Step edge highlight
+        love.graphics.setColor(1, 1, 1, 0.2)
+        love.graphics.rectangle("fill", x + stepInset, stepY, size - stepInset*2, 1)
+        -- Step edge shadow
+        love.graphics.setColor(0, 0, 0, 0.15)
+        love.graphics.rectangle("fill", x + stepInset, stepY + 5, size - stepInset*2, 1)
+    end
     
-    love.graphics.setColor(0.5, 0.35, 0.2, 1)
-    love.graphics.rectangle("fill", x + size/2 - 1, y - 15, 2, 25)
+    -- Main temple base platform with weathering
+    weatheredRect(x + 4, y + 35, size - 8, size - 43, marbleDark, 0.12)
+    
+    -- Back wall (inner sanctum) - darker gradient
+    gradientRect(x + 20, y + 28, size - 40, 50,
+        {marbleShadow[1] + 0.05, marbleShadow[2] + 0.05, marbleShadow[3] + 0.05},
+        {marbleShadow[1] - 0.1, marbleShadow[2] - 0.1, marbleShadow[3] - 0.08}, true)
+    
+    -- Columns (6 across front)
+    local numColumns = 6
+    local colSpacing = (size - 24) / (numColumns - 1)
+    local colWidth = 8
+    local colHeight = 55
+    
+    for i = 0, numColumns - 1 do
+        local colX = x + 12 + i * colSpacing - colWidth/2
+        local colY = y + 25
+        
+        -- Column shadow on ground
+        love.graphics.setColor(0, 0, 0, 0.12)
+        love.graphics.ellipse("fill", colX + colWidth/2 + 2, colY + colHeight + 2, colWidth/2 + 1, 3)
+        
+        -- Column shaft with cylindrical shading
+        drawColumn(colX, colY + 8, colWidth, colHeight - 8)
+        
+        -- Column base (torus) with gradient
+        gradientRect(colX - 2, colY + colHeight - 2, colWidth + 4, 4,
+            {marbleDark[1] + 0.05, marbleDark[2] + 0.05, marbleDark[3] + 0.05},
+            {marbleDark[1] - 0.08, marbleDark[2] - 0.08, marbleDark[3] - 0.08}, false)
+        
+        -- Capital (Ionic style with gold) - gradient
+        gradientRect(colX - 3, colY + 4, colWidth + 6, 6,
+            {goldLight[1], goldLight[2], goldLight[3]},
+            {goldDark[1], goldDark[2], goldDark[3]}, false)
+        -- Volutes (spiral decorations) with highlight
+        love.graphics.setColor(goldMid[1], goldMid[2], goldMid[3], 1)
+        love.graphics.circle("fill", colX - 1, colY + 7, 3)
+        love.graphics.circle("fill", colX + colWidth + 1, colY + 7, 3)
+        love.graphics.setColor(goldLight[1], goldLight[2], goldLight[3], 0.6)
+        love.graphics.circle("fill", colX - 2, colY + 6, 1.5)
+        love.graphics.circle("fill", colX + colWidth, colY + 6, 1.5)
+        love.graphics.setColor(goldDark[1], goldDark[2], goldDark[3], 1)
+        love.graphics.circle("fill", colX - 1, colY + 7, 1.2)
+        love.graphics.circle("fill", colX + colWidth + 1, colY + 7, 1.2)
+        
+        -- Abacus (top of capital) with gradient
+        gradientRect(colX - 4, colY, colWidth + 8, 5,
+            {marble[1] + 0.05, marble[2] + 0.05, marble[3] + 0.05},
+            {marble[1] - 0.05, marble[2] - 0.05, marble[3] - 0.05}, false)
+    end
+    
+    -- Entablature (horizontal beam above columns) with gradient
+    gradientRect(x + 2, y + 18, size - 4, 8,
+        {marble[1] + 0.03, marble[2] + 0.03, marble[3] + 0.03},
+        {marble[1] - 0.08, marble[2] - 0.08, marble[3] - 0.08}, true)
+    -- Frieze with teal gradient
+    gradientRect(x + 4, y + 20, size - 8, 4,
+        {tealMid[1] + 0.05, tealMid[2] + 0.05, tealMid[3] + 0.05},
+        {tealDark[1], tealDark[2], tealDark[3]}, false)
+    -- Gold meander pattern on frieze
+    love.graphics.setColor(goldMid[1], goldMid[2], goldMid[3], 1)
+    for i = 0, 8 do
+        local px = x + 10 + i * 10
+        love.graphics.rectangle("fill", px, y + 21, 6, 2)
+    end
+    
+    -- Pediment (triangular roof) with gradient shading
+    -- Draw as horizontal slices for gradient effect
+    local pedHeight = 26
+    for row = 0, pedHeight do
+        local t = row / pedHeight
+        local rowWidth = (size) * (1 - t)
+        local rowX = x + (size - rowWidth) / 2
+        local shade = marble[1] - t * 0.08
+        -- Add slight variation
+        local noise = math.sin(row * 0.5) * 0.01
+        love.graphics.setColor(shade + noise, shade - 0.02 + noise, shade - 0.04 + noise, 1)
+        love.graphics.rectangle("fill", rowX, y + 18 - row, rowWidth, 1)
+    end
+    
+    -- Pediment shadow/depth line
+    love.graphics.setColor(0, 0, 0, 0.2)
+    love.graphics.line(x + 6, y + 16, x + size/2, y - 2)
+    love.graphics.line(x + size - 6, y + 16, x + size/2, y - 2)
+    
+    -- Tympanum (inner triangle) with gradient
+    love.graphics.setColor(tealDark[1], tealDark[2], tealDark[3], 0.85)
+    love.graphics.polygon("fill", x + 15, y + 14, x + size - 15, y + 14, x + size/2, y + 2)
+    -- Tympanum depth shading
+    love.graphics.setColor(0, 0, 0, 0.15)
+    love.graphics.polygon("fill", x + 18, y + 12, x + size - 18, y + 12, x + size/2, y + 4)
+    
+    -- Central relief figure (warrior/deity) with metallic shading
+    gradientRect(x + size/2 - 4, y + 4, 8, 10,
+        {goldLight[1], goldLight[2], goldLight[3]},
+        {goldDark[1], goldDark[2], goldDark[3]}, false)
+    love.graphics.setColor(goldMid[1], goldMid[2], goldMid[3], 1)
+    love.graphics.circle("fill", x + size/2, y + 3, 3)
+    love.graphics.setColor(goldLight[1], goldLight[2], goldLight[3], 0.5)
+    love.graphics.circle("fill", x + size/2 - 1, y + 2, 1.5)
+    
+    -- Acroteria (roof corner decorations) with gradient
+    local function drawAcroterion(ax, ay, asize, flip)
+        for row = 0, asize do
+            local t = row / asize
+            local rowW = asize * (1 - t) * 0.8
+            local shade = goldMid[1] + (goldLight[1] - goldMid[1]) * (1 - t)
+            love.graphics.setColor(shade, shade * 0.85, shade * 0.4, 1)
+            love.graphics.rectangle("fill", ax - rowW/2, ay - row, rowW, 1)
+        end
+    end
+    drawAcroterion(x + size/2, y - 6, 8, false)
+    drawAcroterion(x + 2, y + 13, 5, false)
+    drawAcroterion(x + size - 2, y + 13, 5, false)
+    
+    -- Bronze doors with metallic gradient
+    gradientRect(x + size/2 - 12, y + 50, 24, 35,
+        {bronzeLight[1], bronzeLight[2], bronzeLight[3]},
+        {bronze[1] - 0.1, bronze[2] - 0.1, bronze[3] - 0.05}, true)
+    -- Door panel insets with darker gradient
+    for py = 0, 1 do
+        for px = 0, 1 do
+            local panelX = x + size/2 - 10 + px * 11
+            local panelY = y + 53 + py * 16
+            gradientRect(panelX, panelY, 9, 14,
+                {bronze[1] - 0.05, bronze[2] - 0.05, bronze[3] - 0.02},
+                {bronze[1] - 0.15, bronze[2] - 0.15, bronze[3] - 0.1}, false)
+            -- Panel highlight edge
+            love.graphics.setColor(bronzeLight[1], bronzeLight[2], bronzeLight[3], 0.4)
+            love.graphics.rectangle("fill", panelX, panelY, 9, 1)
+            love.graphics.rectangle("fill", panelX, panelY, 1, 14)
+        end
+    end
+    -- Door handles (gold rings)
+    love.graphics.setColor(goldLight[1], goldLight[2], goldLight[3], 1)
+    love.graphics.circle("fill", x + size/2 - 5, y + 68, 2.5)
+    love.graphics.circle("fill", x + size/2 + 5, y + 68, 2.5)
+    love.graphics.setColor(goldDark[1], goldDark[2], goldDark[3], 1)
+    love.graphics.circle("fill", x + size/2 - 5, y + 68, 1.2)
+    love.graphics.circle("fill", x + size/2 + 5, y + 68, 1.2)
+    
+    -- Torch flames with glow gradient
+    for _, tx in ipairs({x + 16, x + size - 16}) do
+        -- Outer glow
+        for r = 8, 1, -1 do
+            local alpha = (1 - r/8) * 0.15
+            love.graphics.setColor(1, 0.5, 0.1, alpha)
+            love.graphics.circle("fill", tx, y + 45, r)
+        end
+        -- Inner flame
+        love.graphics.setColor(1, 0.8, 0.3, 0.9)
+        love.graphics.circle("fill", tx, y + 45, 3)
+        love.graphics.setColor(1, 0.95, 0.7, 0.7)
+        love.graphics.circle("fill", tx, y + 44, 1.5)
+    end
+    
+    -- Team colored banner with fabric folds
+    local bannerColor = Teams and Teams.getColor(self.team, "banner") or {tealMid[1], tealMid[2], tealMid[3], 1}
+    local emblemColor = Teams and Teams.getColor(self.team, "emblem") or {goldMid[1], goldMid[2], goldMid[3], 1}
+    
+    -- Banner pole with metallic gradient
+    gradientRect(x + size/2 - 1, y - 30, 2, 22,
+        {goldMid[1], goldMid[2], goldMid[3]},
+        {goldDark[1] - 0.1, goldDark[2] - 0.1, goldDark[3] - 0.05}, false)
+    
+    -- Banner with subtle fold shading
     love.graphics.setColor(bannerColor)
-    love.graphics.polygon("fill", 
-        x + size/2 + 1, y - 15,
-        x + size/2 + 16, y - 8,
-        x + size/2 + 1, y
+    love.graphics.polygon("fill",
+        x + size/2 + 1, y - 28,
+        x + size/2 + 18, y - 22,
+        x + size/2 + 15, y - 14,
+        x + size/2 + 1, y - 10
     )
+    -- Banner fold highlight
+    love.graphics.setColor(1, 1, 1, 0.15)
+    love.graphics.polygon("fill",
+        x + size/2 + 1, y - 28,
+        x + size/2 + 8, y - 25,
+        x + size/2 + 6, y - 18,
+        x + size/2 + 1, y - 16
+    )
+    -- Banner fold shadow
+    love.graphics.setColor(0, 0, 0, 0.2)
+    love.graphics.polygon("fill",
+        x + size/2 + 12, y - 23,
+        x + size/2 + 18, y - 22,
+        x + size/2 + 15, y - 14,
+        x + size/2 + 10, y - 16
+    )
+    -- Emblem on banner
     love.graphics.setColor(emblemColor)
-    love.graphics.circle("fill", x + size/2 + 8, y - 8, 3)
+    love.graphics.circle("fill", x + size/2 + 9, y - 19, 4)
+    love.graphics.setColor(0, 0, 0, 0.3)
+    love.graphics.circle("fill", x + size/2 + 9, y - 19, 2)
     
-    -- Torch lights
-    love.graphics.setColor(1, 0.7, 0.3, 0.8)
-    love.graphics.circle("fill", x + 12, y + 55, 4)
-    love.graphics.circle("fill", x + size - 12, y + 55, 4)
-    love.graphics.setColor(1, 0.9, 0.5, 0.4)
-    love.graphics.circle("fill", x + 12, y + 55, 7)
-    love.graphics.circle("fill", x + size - 12, y + 55, 7)
+    love.graphics.setLineWidth(1)
 end
 
 function TownHall:drawHold(x, y, size)
-    -- Shadow
-    love.graphics.setColor(0, 0, 0, 0.3)
-    love.graphics.ellipse("fill", x + size/2, y + size + 5, size/2 - 3, 8)
+    -- Desert Warrior color palette
+    local tealDark = {0.10, 0.25, 0.35}
+    local tealMid = {0.15, 0.40, 0.50}
+    local goldDark = {0.45, 0.35, 0.15}
+    local goldMid = {0.72, 0.58, 0.22}
+    local goldLight = {0.92, 0.78, 0.35}
+    local marble = {0.88, 0.86, 0.82}
+    local marbleDark = {0.70, 0.68, 0.64}
+    local marbleShadow = {0.55, 0.53, 0.50}
+    local bronze = {0.55, 0.45, 0.30}
+    local bronzeLight = {0.70, 0.58, 0.38}
     
-    -- Larger stone base
-    love.graphics.setColor(0.42, 0.4, 0.36, 1)
-    love.graphics.rectangle("fill", x + 5, y + 18, size - 10, size - 18, 2)
-    
-    -- Stone texture
-    love.graphics.setColor(0.38, 0.36, 0.32, 1)
-    for row = 0, 5 do
-        for col = 0, 4 do
-            local offsetX = (row % 2) * 10
-            love.graphics.rectangle("fill", x + 8 + col * 18 + offsetX, y + 22 + row * 12, 14, 9, 1)
-        end
+    -- Shadow with soft gradient
+    for r = 12, 1, -1 do
+        local alpha = (1 - r/12) * 0.25
+        love.graphics.setColor(0, 0, 0, alpha)
+        love.graphics.ellipse("fill", x + size/2, y + size + 5, size/2 - 3 + r/2, 8 + r/3)
     end
     
-    -- Taller towers (4 corners)
-    love.graphics.setColor(0.48, 0.45, 0.4, 1)
-    -- Left front tower
-    love.graphics.rectangle("fill", x - 2, y + 5, 26, size - 5, 2)
-    -- Right front tower
-    love.graphics.rectangle("fill", x + size - 24, y + 5, 26, size - 5, 2)
-    
-    -- Tower tops (crenellations)
-    love.graphics.setColor(0.45, 0.42, 0.38, 1)
-    for i = 0, 2 do
-        love.graphics.rectangle("fill", x - 2 + i * 10, y - 5, 7, 14)
-        love.graphics.rectangle("fill", x + size - 24 + i * 10, y - 5, 7, 14)
+    -- Foundation steps with gradients
+    for i = 3, 0, -1 do
+        local stepY = y + size - 6 + i * 4
+        local stepInset = i * 3
+        local baseShade = 0.68 - i * 0.04
+        gradientRect(x + stepInset, stepY, size - stepInset*2, 6,
+            {baseShade + 0.06, baseShade + 0.04, baseShade + 0.02},
+            {baseShade - 0.06, baseShade - 0.07, baseShade - 0.07}, true)
+        -- Step highlight
+        love.graphics.setColor(1, 1, 1, 0.18)
+        love.graphics.rectangle("fill", x + stepInset, stepY, size - stepInset*2, 1)
+        -- Step shadow
+        love.graphics.setColor(0, 0, 0, 0.12)
+        love.graphics.rectangle("fill", x + stepInset, stepY + 5, size - stepInset*2, 1)
     end
     
-    -- Conical tower roofs
-    love.graphics.setColor(0.35, 0.25, 0.2, 1)
-    love.graphics.polygon("fill", x + 11, y - 18, x - 4, y - 2, x + 26, y - 2)
-    love.graphics.polygon("fill", x + size - 11, y - 18, x + size - 26, y - 2, x + size + 4, y - 2)
+    -- Main platform with weathering
+    weatheredRect(x + 2, y + 30, size - 4, size - 40, marbleDark, 0.1)
     
-    -- Center section with larger door
-    love.graphics.setColor(0.12, 0.1, 0.08, 1)
-    love.graphics.rectangle("fill", x + size/2 - 18, y + size - 50, 36, 50)
-    love.graphics.arc("fill", x + size/2, y + size - 50, 18, math.pi, 2 * math.pi)
+    -- Back wall with gradient
+    gradientRect(x + 15, y + 24, size - 30, 55,
+        {marbleShadow[1] + 0.03, marbleShadow[2] + 0.03, marbleShadow[3] + 0.03},
+        {marbleShadow[1] - 0.12, marbleShadow[2] - 0.12, marbleShadow[3] - 0.1}, true)
     
-    -- Reinforced door
-    love.graphics.setColor(0.38, 0.26, 0.14, 1)
-    love.graphics.rectangle("fill", x + size/2 - 16, y + size - 45, 32, 45)
-    love.graphics.setColor(0.45, 0.42, 0.45, 1)
-    love.graphics.rectangle("fill", x + size/2 - 16, y + size - 40, 32, 3)
-    love.graphics.rectangle("fill", x + size/2 - 16, y + size - 25, 32, 3)
-    love.graphics.rectangle("fill", x + size/2 - 16, y + size - 10, 32, 3)
+    -- Wall frieze decoration
+    gradientRect(x + 20, y + 30, size - 40, 8,
+        {tealMid[1], tealMid[2], tealMid[3]},
+        {tealDark[1], tealDark[2], tealDark[3]}, false)
+    love.graphics.setColor(goldMid[1], goldMid[2], goldMid[3], 0.7)
+    for i = 0, 6 do
+        love.graphics.rectangle("fill", x + 25 + i * 11, y + 31, 7, 6)
+    end
     
-    -- Windows
-    love.graphics.setColor(0.2, 0.25, 0.35, 1)
-    love.graphics.rectangle("fill", x + 8, y + 28, 10, 14, 1)
-    love.graphics.rectangle("fill", x + size - 18, y + 28, 10, 14, 1)
+    -- 8 columns with cylindrical shading
+    local numColumns = 8
+    local colSpacing = (size - 20) / (numColumns - 1)
+    local colWidth = 7
+    local colHeight = 52
     
-    -- Banners (two flags) - TEAM COLORED
-    local bannerColor = Teams and Teams.getColor(self.team, "banner") or {0.7, 0.2, 0.2, 1}
-    love.graphics.setColor(0.5, 0.35, 0.2, 1)
-    love.graphics.rectangle("fill", x + 10, y - 28, 2, 15)
-    love.graphics.rectangle("fill", x + size - 12, y - 28, 2, 15)
-    love.graphics.setColor(bannerColor)
-    love.graphics.polygon("fill", x + 12, y - 28, x + 25, y - 23, x + 12, y - 16)
-    love.graphics.polygon("fill", x + size - 10, y - 28, x + size - 23, y - 23, x + size - 10, y - 16)
+    for i = 0, numColumns - 1 do
+        local colX = x + 10 + i * colSpacing - colWidth/2
+        local colY = y + 22
+        
+        -- Column ground shadow
+        love.graphics.setColor(0, 0, 0, 0.1)
+        love.graphics.ellipse("fill", colX + colWidth/2 + 2, colY + colHeight + 2, colWidth/2 + 1, 2)
+        
+        -- Column with cylindrical shading
+        drawColumn(colX, colY + 7, colWidth, colHeight - 7, marble, marbleDark)
+        
+        -- Base with gradient
+        gradientRect(colX - 2, colY + colHeight - 2, colWidth + 4, 4,
+            {marbleDark[1] + 0.04, marbleDark[2] + 0.04, marbleDark[3] + 0.04},
+            {marbleDark[1] - 0.06, marbleDark[2] - 0.06, marbleDark[3] - 0.06}, false)
+        
+        -- Capital with gold gradient
+        gradientRect(colX - 3, colY + 3, colWidth + 6, 6,
+            {goldLight[1], goldLight[2], goldLight[3]},
+            {goldDark[1], goldDark[2], goldDark[3]}, false)
+        love.graphics.setColor(goldLight[1], goldLight[2], goldLight[3], 0.7)
+        love.graphics.polygon("fill", colX - 2, colY + 6, colX + colWidth/2, colY - 1, colX + colWidth + 2, colY + 6)
+        
+        -- Abacus
+        gradientRect(colX - 4, colY - 1, colWidth + 8, 5,
+            {marble[1] + 0.03, marble[2] + 0.03, marble[3] + 0.03},
+            {marble[1] - 0.04, marble[2] - 0.04, marble[3] - 0.04}, false)
+    end
     
-    -- Gold trim
-    love.graphics.setColor(0.8, 0.7, 0.2, 1)
-    love.graphics.rectangle("fill", x + size/2 - 20, y + 10, 40, 4)
+    -- Entablature with gradient
+    gradientRect(x, y + 14, size, 9,
+        {marble[1] + 0.02, marble[2] + 0.02, marble[3] + 0.02},
+        {marble[1] - 0.06, marble[2] - 0.06, marble[3] - 0.06}, true)
+    
+    -- Frieze
+    gradientRect(x + 2, y + 16, size - 4, 5,
+        {tealMid[1] + 0.03, tealMid[2] + 0.03, tealMid[3] + 0.03},
+        {tealDark[1], tealDark[2], tealDark[3]}, false)
+    love.graphics.setColor(goldMid[1], goldMid[2], goldMid[3], 1)
+    for i = 0, 10 do
+        love.graphics.rectangle("fill", x + 8 + i * 9, y + 17, 5, 3)
+    end
+    
+    -- Pediment with gradient shading (slice by slice)
+    local pedHeight = 29
+    for row = 0, pedHeight do
+        local t = row / pedHeight
+        local rowWidth = (size + 6) * (1 - t)
+        local rowX = x - 3 + (size + 6 - rowWidth) / 2
+        local shade = marble[1] - t * 0.06
+        local noise = math.sin(row * 0.5) * 0.01
+        love.graphics.setColor(shade + noise, shade - 0.02 + noise, shade - 0.04 + noise, 1)
+        love.graphics.rectangle("fill", rowX, y + 14 - row, rowWidth, 1)
+    end
+    
+    -- Pediment edge shadows
+    love.graphics.setColor(0, 0, 0, 0.15)
+    love.graphics.setLineWidth(1)
+    love.graphics.line(x + 8, y + 12, x + size/2, y - 8)
+    love.graphics.line(x + size - 8, y + 12, x + size/2, y - 8)
+    
+    -- Tympanum with gradient
+    love.graphics.setColor(tealDark[1], tealDark[2], tealDark[3], 0.75)
+    love.graphics.polygon("fill", x + 15, y + 10, x + size - 15, y + 10, x + size/2, y - 3)
+    love.graphics.setColor(0, 0, 0, 0.12)
+    love.graphics.polygon("fill", x + 18, y + 8, x + size - 18, y + 8, x + size/2, y - 1)
+    
+    -- Warrior figures with metallic shading
+    for _, wx in ipairs({x + size/2, x + size/2 - 18, x + size/2 + 18}) do
+        local figSize = (wx == x + size/2) and 1.3 or 1.0
+        gradientRect(wx - 4*figSize, y + 6 - 4*figSize, 8*figSize, 10*figSize,
+            {goldLight[1], goldLight[2], goldLight[3]},
+            {goldDark[1], goldDark[2], goldDark[3]}, false)
+        love.graphics.setColor(goldMid[1], goldMid[2], goldMid[3], 1)
+        love.graphics.circle("fill", wx, y + 2 - 2*figSize, 3*figSize)
+        love.graphics.setColor(goldLight[1], goldLight[2], goldLight[3], 0.5)
+        love.graphics.circle("fill", wx - 1, y + 1 - 2*figSize, 1.5*figSize)
+    end
+    
+    -- Acroteria with gradient
+    drawAcroterion(x + size/2, y - 13, 10, goldMid, goldLight)
+    drawAcroterion(x + 2, y + 10, 6, goldMid, goldLight)
+    drawAcroterion(x + size - 2, y + 10, 6, goldMid, goldLight)
+    
+    -- Bronze doors
+    drawBronzeDoor(x + size/2 - 15, y + 45, 30, 40, bronze, bronzeLight, goldMid, goldDark)
+    
+    -- Torches
+    drawTorchFlame(x + 14, y + 42)
+    drawTorchFlame(x + size - 14, y + 42)
+    
+    -- Two banners
+    local bannerColor = Teams and Teams.getColor(self.team, "banner") or {tealMid[1], tealMid[2], tealMid[3], 1}
+    local emblemColor = Teams and Teams.getColor(self.team, "emblem") or {goldMid[1], goldMid[2], goldMid[3], 1}
+    drawBanner(x + size/2 - 24, y, bannerColor, emblemColor, goldDark, goldMid)
+    drawBanner(x + size/2 + 24, y, bannerColor, emblemColor, goldDark, goldMid)
+    
+    love.graphics.setLineWidth(1)
 end
 
 function TownHall:drawKeep(x, y, size)
-    -- Shadow
-    love.graphics.setColor(0, 0, 0, 0.35)
-    love.graphics.ellipse("fill", x + size/2, y + size + 6, size/2, 9)
+    -- Desert Warrior color palette
+    local tealDark = {0.10, 0.25, 0.35}
+    local tealMid = {0.15, 0.40, 0.50}
+    local goldDark = {0.45, 0.35, 0.15}
+    local goldMid = {0.72, 0.58, 0.22}
+    local goldLight = {0.92, 0.78, 0.35}
+    local marble = {0.92, 0.90, 0.86}
+    local marbleDark = {0.75, 0.73, 0.69}
+    local marbleShadow = {0.58, 0.56, 0.52}
+    local bronze = {0.58, 0.48, 0.32}
+    local bronzeLight = {0.75, 0.62, 0.42}
     
-    -- Massive stone base
-    love.graphics.setColor(0.4, 0.38, 0.35, 1)
-    love.graphics.rectangle("fill", x + 2, y + 15, size - 4, size - 15, 3)
-    
-    -- Stone texture (darker, more imposing)
-    love.graphics.setColor(0.35, 0.33, 0.3, 1)
-    for row = 0, 5 do
-        for col = 0, 5 do
-            local offsetX = (row % 2) * 8
-            love.graphics.rectangle("fill", x + 5 + col * 15 + offsetX, y + 20 + row * 12, 12, 8, 1)
-        end
+    -- Grand shadow with soft gradient
+    for r = 14, 1, -1 do
+        local alpha = (1 - r/14) * 0.3
+        love.graphics.setColor(0, 0, 0, alpha)
+        love.graphics.ellipse("fill", x + size/2, y + size + 6, size/2 + r/2, 9 + r/3)
     end
     
-    -- Grand towers (taller, more ornate)
-    love.graphics.setColor(0.45, 0.43, 0.4, 1)
-    love.graphics.rectangle("fill", x - 5, y - 5, 30, size + 5, 2)
-    love.graphics.rectangle("fill", x + size - 25, y - 5, 30, size + 5, 2)
-    
-    -- Tower battlements
-    love.graphics.setColor(0.42, 0.4, 0.37, 1)
-    for i = 0, 3 do
-        love.graphics.rectangle("fill", x - 5 + i * 8, y - 15, 6, 14)
-        love.graphics.rectangle("fill", x + size - 25 + i * 8, y - 15, 6, 14)
+    -- Massive foundation with 5 gradient steps
+    for i = 4, 0, -1 do
+        local stepY = y + size - 5 + i * 4
+        local stepInset = i * 2.5
+        local baseShade = 0.72 - i * 0.03
+        gradientRect(x + stepInset - 3, stepY, size - stepInset*2 + 6, 6,
+            {baseShade + 0.05, baseShade + 0.03, baseShade + 0.01},
+            {baseShade - 0.05, baseShade - 0.06, baseShade - 0.06}, true)
+        love.graphics.setColor(1, 1, 1, 0.15)
+        love.graphics.rectangle("fill", x + stepInset - 3, stepY, size - stepInset*2 + 6, 1)
+        love.graphics.setColor(0, 0, 0, 0.1)
+        love.graphics.rectangle("fill", x + stepInset - 3, stepY + 5, size - stepInset*2 + 6, 1)
     end
     
-    -- Grand tower roofs with gold tips
-    love.graphics.setColor(0.3, 0.22, 0.18, 1)
-    love.graphics.polygon("fill", x + 10, y - 35, x - 8, y - 10, x + 28, y - 10)
-    love.graphics.polygon("fill", x + size - 10, y - 35, x + size - 28, y - 10, x + size + 8, y - 10)
-    -- Gold tips
-    love.graphics.setColor(0.9, 0.8, 0.2, 1)
-    love.graphics.polygon("fill", x + 10, y - 40, x + 7, y - 32, x + 13, y - 32)
-    love.graphics.polygon("fill", x + size - 10, y - 40, x + size - 13, y - 32, x + size - 7, y - 32)
+    -- Grand platform with weathering
+    weatheredRect(x - 2, y + 28, size + 4, size - 38, marbleDark, 0.08)
     
-    -- Center grand entrance
-    love.graphics.setColor(0.1, 0.08, 0.06, 1)
-    love.graphics.rectangle("fill", x + size/2 - 22, y + size - 55, 44, 55)
-    love.graphics.arc("fill", x + size/2, y + size - 55, 22, math.pi, 2 * math.pi)
+    -- Inner sanctum with gradient
+    gradientRect(x + 12, y + 20, size - 24, 60,
+        {marbleShadow[1] + 0.02, marbleShadow[2] + 0.02, marbleShadow[3] + 0.02},
+        {marbleShadow[1] - 0.1, marbleShadow[2] - 0.1, marbleShadow[3] - 0.08}, true)
     
-    -- Ornate door
-    love.graphics.setColor(0.35, 0.24, 0.12, 1)
-    love.graphics.rectangle("fill", x + size/2 - 20, y + size - 50, 40, 50)
-    -- Gold door trim
-    love.graphics.setColor(0.8, 0.7, 0.2, 1)
-    love.graphics.rectangle("fill", x + size/2 - 20, y + size - 50, 40, 4)
-    love.graphics.rectangle("fill", x + size/2 - 20, y + size - 30, 40, 3)
-    love.graphics.rectangle("fill", x + size/2 - 20, y + size - 10, 40, 3)
-    love.graphics.rectangle("fill", x + size/2 - 1, y + size - 50, 2, 50)
+    -- Statue alcove with depth gradient
+    gradientRect(x + size/2 - 12, y + 38, 24, 30,
+        {tealDark[1] + 0.05, tealDark[2] + 0.05, tealDark[3] + 0.05},
+        {tealDark[1] - 0.05, tealDark[2] - 0.05, tealDark[3] - 0.03}, false)
+    love.graphics.setColor(tealDark[1], tealDark[2], tealDark[3], 0.7)
+    love.graphics.arc("fill", x + size/2, y + 38, 12, math.pi, 2 * math.pi)
     
-    -- Stained glass window above door
-    love.graphics.setColor(0.3, 0.4, 0.6, 1)
-    love.graphics.circle("fill", x + size/2, y + 30, 12)
-    love.graphics.setColor(0.8, 0.7, 0.2, 1)
+    -- Golden statue with metallic gradient
+    gradientRect(x + size/2 - 5, y + 48, 10, 20,
+        {goldLight[1], goldLight[2], goldLight[3]},
+        {goldDark[1], goldDark[2], goldDark[3]}, false)
+    -- Statue head with highlight
+    love.graphics.setColor(goldMid[1], goldMid[2], goldMid[3], 1)
+    love.graphics.circle("fill", x + size/2, y + 45, 5)
+    love.graphics.setColor(goldLight[1], goldLight[2], goldLight[3], 0.6)
+    love.graphics.circle("fill", x + size/2 - 1.5, y + 43.5, 2)
+    -- Crown with gradient
+    drawAcroterion(x + size/2, y + 38, 6, goldMid, goldLight)
+    -- Shield with bronze gradient
+    for i = 0, 7 do
+        local t = i / 7
+        local shade = bronzeLight[1] - t * 0.15
+        love.graphics.setColor(shade, shade * 0.85, shade * 0.6, 1)
+        love.graphics.ellipse("fill", x + size/2 - 8, y + 54, 4 - t*0.5, 7 - t*0.5)
+    end
+    -- Spear with metallic sheen
+    love.graphics.setColor(goldLight[1], goldLight[2], goldLight[3], 1)
     love.graphics.setLineWidth(2)
-    love.graphics.circle("line", x + size/2, y + 30, 12)
-    love.graphics.line(x + size/2 - 10, y + 30, x + size/2 + 10, y + 30)
-    love.graphics.line(x + size/2, y + 20, x + size/2, y + 40)
+    love.graphics.line(x + size/2 + 8, y + 68, x + size/2 + 10, y + 38)
+    love.graphics.setColor(1, 1, 1, 0.3)
+    love.graphics.setLineWidth(1)
+    love.graphics.line(x + size/2 + 8.5, y + 68, x + size/2 + 10.5, y + 40)
     
-    -- Royal banner (center, large) - TEAM COLORED
-    local bannerColor = Teams and Teams.getColor(self.team, "banner") or {0.6, 0.15, 0.15, 1}
-    local emblemColor = Teams and Teams.getColor(self.team, "emblem") or {0.9, 0.8, 0.2, 1}
+    -- 10 grand columns with cylindrical shading
+    local numColumns = 10
+    local colSpacing = (size + 4) / (numColumns - 1)
+    local colWidth = 6
+    local colHeight = 50
     
-    love.graphics.setColor(0.5, 0.35, 0.2, 1)
-    love.graphics.rectangle("fill", x + size/2 - 1, y - 45, 3, 35)
-    love.graphics.setColor(bannerColor)
-    love.graphics.polygon("fill", 
-        x + size/2 + 2, y - 45,
-        x + size/2 + 25, y - 35,
-        x + size/2 + 2, y - 15
-    )
-    -- Crown emblem
-    love.graphics.setColor(emblemColor)
-    love.graphics.polygon("fill", 
-        x + size/2 + 8, y - 38,
-        x + size/2 + 10, y - 32,
-        x + size/2 + 14, y - 38,
-        x + size/2 + 16, y - 32,
-        x + size/2 + 20, y - 38,
-        x + size/2 + 18, y - 28,
-        x + size/2 + 6, y - 28
-    )
+    for i = 0, numColumns - 1 do
+        local colX = x - 2 + i * colSpacing - colWidth/2
+        local colY = y + 20
+        
+        -- Column ground shadow
+        love.graphics.setColor(0, 0, 0, 0.08)
+        love.graphics.ellipse("fill", colX + colWidth/2 + 2, colY + colHeight + 2, colWidth/2 + 1, 2)
+        
+        -- Column with cylindrical shading
+        drawColumn(colX, colY + 6, colWidth, colHeight - 6, marble, marbleDark)
+        
+        -- Base with gradient
+        gradientRect(colX - 1.5, colY + colHeight - 2, colWidth + 3, 4,
+            {marbleDark[1] + 0.03, marbleDark[2] + 0.03, marbleDark[3] + 0.03},
+            {marbleDark[1] - 0.05, marbleDark[2] - 0.05, marbleDark[3] - 0.05}, false)
+        
+        -- Capital with gold gradient
+        gradientRect(colX - 2, colY + 2, colWidth + 4, 5,
+            {goldLight[1], goldLight[2], goldLight[3]},
+            {goldDark[1], goldDark[2], goldDark[3]}, false)
+        love.graphics.setColor(goldLight[1], goldLight[2], goldLight[3], 0.8)
+        love.graphics.polygon("fill", colX - 1, colY + 5, colX + colWidth/2, colY - 2, colX + colWidth + 1, colY + 5)
+        
+        -- Abacus
+        gradientRect(colX - 3, colY - 2, colWidth + 6, 5,
+            {marble[1] + 0.02, marble[2] + 0.02, marble[3] + 0.02},
+            {marble[1] - 0.03, marble[2] - 0.03, marble[3] - 0.03}, false)
+    end
+    
+    -- Grand entablature with gradient
+    gradientRect(x - 5, y + 10, size + 10, 11,
+        {marble[1] + 0.02, marble[2] + 0.02, marble[3] + 0.02},
+        {marble[1] - 0.05, marble[2] - 0.05, marble[3] - 0.05}, true)
+    
+    -- Elaborate frieze
+    gradientRect(x - 3, y + 12, size + 6, 6,
+        {tealMid[1] + 0.03, tealMid[2] + 0.03, tealMid[3] + 0.03},
+        {tealDark[1], tealDark[2], tealDark[3]}, false)
+    love.graphics.setColor(goldMid[1], goldMid[2], goldMid[3], 1)
+    for i = 0, 12 do
+        love.graphics.rectangle("fill", x + 4 + i * 8, y + 13, 5, 4)
+    end
+    
+    -- Grand pediment with gradient shading
+    local pedHeight = 32
+    for row = 0, pedHeight do
+        local t = row / pedHeight
+        local rowWidth = (size + 16) * (1 - t)
+        local rowX = x - 8 + (size + 16 - rowWidth) / 2
+        local shade = marble[1] - t * 0.05
+        local noise = math.sin(row * 0.4) * 0.008
+        love.graphics.setColor(shade + noise, shade - 0.015 + noise, shade - 0.03 + noise, 1)
+        love.graphics.rectangle("fill", rowX, y + 10 - row, rowWidth, 1)
+    end
+    
+    -- Pediment edge shadows
+    love.graphics.setColor(0, 0, 0, 0.12)
+    love.graphics.setLineWidth(1)
+    love.graphics.line(x + 5, y + 8, x + size/2, y - 15)
+    love.graphics.line(x + size - 5, y + 8, x + size/2, y - 15)
+    
+    -- Grand tympanum
+    love.graphics.setColor(tealDark[1], tealDark[2], tealDark[3], 0.7)
+    love.graphics.polygon("fill", x + 12, y + 6, x + size - 12, y + 6, x + size/2, y - 10)
+    love.graphics.setColor(0, 0, 0, 0.1)
+    love.graphics.polygon("fill", x + 16, y + 4, x + size - 16, y + 4, x + size/2, y - 8)
+    
+    -- Epic battle scene with metallic figures
+    local figurePositions = {
+        {x + size/2, 1.5},          -- Center deity
+        {x + size/2 - 22, 1.0},     -- Left warrior 1
+        {x + size/2 + 22, 1.0},     -- Right warrior 1
+        {x + size/2 - 35, 0.8},     -- Left warrior 2
+        {x + size/2 + 35, 0.8},     -- Right warrior 2
+    }
+    for _, fig in ipairs(figurePositions) do
+        local fx, fscale = fig[1], fig[2]
+        gradientRect(fx - 4*fscale, y + 4 - 3*fscale, 8*fscale, 9*fscale,
+            {goldLight[1], goldLight[2], goldLight[3]},
+            {goldDark[1], goldDark[2], goldDark[3]}, false)
+        love.graphics.setColor(goldMid[1], goldMid[2], goldMid[3], 1)
+        love.graphics.circle("fill", fx, y + 1 - 5*fscale, 2.5*fscale)
+        love.graphics.setColor(goldLight[1], goldLight[2], goldLight[3], 0.5)
+        love.graphics.circle("fill", fx - 0.8*fscale, y - 5.5*fscale, 1.2*fscale)
+    end
+    -- Radiating light from central figure
+    love.graphics.setColor(goldLight[1], goldLight[2], goldLight[3], 0.3)
+    for ray = 0, 5 do
+        local angle = math.pi + ray * math.pi / 6
+        love.graphics.line(x + size/2, y - 6, x + size/2 + math.cos(angle) * 10, y - 6 + math.sin(angle) * 8)
+    end
+    
+    -- Grand acroteria
+    drawAcroterion(x + size/2, y - 20, 14, goldMid, goldLight)
+    drawAcroterion(x - 2, y + 6, 8, goldMid, goldLight)
+    drawAcroterion(x + size + 2, y + 6, 8, goldMid, goldLight)
+    
+    -- Grand bronze doors
+    drawBronzeDoor(x + size/2 - 18, y + 70, 36, 25, bronze, bronzeLight, goldMid, goldDark)
     
     -- Grand torches
-    love.graphics.setColor(1, 0.7, 0.3, 0.9)
-    love.graphics.circle("fill", x + 15, y + 50, 5)
-    love.graphics.circle("fill", x + size - 15, y + 50, 5)
-    love.graphics.setColor(1, 0.9, 0.5, 0.5)
-    love.graphics.circle("fill", x + 15, y + 50, 9)
-    love.graphics.circle("fill", x + size - 15, y + 50, 9)
+    drawTorchFlame(x + 8, y + 40)
+    drawTorchFlame(x + size - 8, y + 40)
+    
+    -- Royal banner (center, large)
+    local bannerColor = Teams and Teams.getColor(self.team, "banner") or {tealMid[1], tealMid[2], tealMid[3], 1}
+    local emblemColor = Teams and Teams.getColor(self.team, "emblem") or {goldMid[1], goldMid[2], goldMid[3], 1}
+    
+    -- Banner pole with metallic gradient
+    gradientRect(x + size/2 - 1, y - 55, 3, 35,
+        {goldMid[1], goldMid[2], goldMid[3]},
+        {goldDark[1] - 0.1, goldDark[2] - 0.1, goldDark[3] - 0.05}, false)
+    -- Pole top ornament
+    love.graphics.setColor(goldLight[1], goldLight[2], goldLight[3], 1)
+    love.graphics.circle("fill", x + size/2, y - 58, 4)
+    love.graphics.setColor(goldMid[1], goldMid[2], goldMid[3], 0.6)
+    love.graphics.circle("fill", x + size/2 + 1, y - 59, 1.5)
+    
+    -- Large banner with fabric folds
+    love.graphics.setColor(bannerColor)
+    love.graphics.polygon("fill",
+        x + size/2 + 2, y - 53,
+        x + size/2 + 28, y - 42,
+        x + size/2 + 25, y - 28,
+        x + size/2 + 2, y - 22
+    )
+    -- Fabric highlight
+    love.graphics.setColor(1, 1, 1, 0.12)
+    love.graphics.polygon("fill",
+        x + size/2 + 2, y - 53,
+        x + size/2 + 12, y - 48,
+        x + size/2 + 10, y - 35,
+        x + size/2 + 2, y - 32
+    )
+    -- Fabric shadow
+    love.graphics.setColor(0, 0, 0, 0.15)
+    love.graphics.polygon("fill",
+        x + size/2 + 18, y - 44,
+        x + size/2 + 28, y - 42,
+        x + size/2 + 25, y - 28,
+        x + size/2 + 16, y - 30
+    )
+    
+    -- Crown emblem on banner
+    love.graphics.setColor(emblemColor)
+    love.graphics.polygon("fill",
+        x + size/2 + 8, y - 46,
+        x + size/2 + 11, y - 38,
+        x + size/2 + 15, y - 46,
+        x + size/2 + 18, y - 38,
+        x + size/2 + 22, y - 46,
+        x + size/2 + 20, y - 32,
+        x + size/2 + 6, y - 32
+    )
+    
+    love.graphics.setLineWidth(1)
 end
 
 function TownHall:containsPoint(screenX, screenY)
@@ -739,9 +1285,12 @@ function TownHall:updateUI(resources, screenW, screenH, font, currentPop, maxPop
             self.upgradeButton:setEnabled(canAffordUpgrade and self:canUpgrade())
             
             -- Set disabled reason for hover tooltip
+            -- Check requirements FIRST, then resources
             local reason = nil
             if self.isProducing then
                 reason = "Busy training peon"
+            elseif self.tier == 1 and not Requirements.hasBarracks() then
+                reason = "Requires Barracks"
             elseif not canAffordUpgrade then
                 if resources.gold < upgradeCostGold and resources.lumber < upgradeCostLumber then
                     reason = "Need more gold & lumber"
@@ -750,8 +1299,6 @@ function TownHall:updateUI(resources, screenW, screenH, font, currentPop, maxPop
                 else
                     reason = "Need more lumber"
                 end
-            elseif self.tier == 1 and not Requirements.hasBarracks() then
-                reason = "Requires Barracks"
             end
             self.upgradeButton:setDisabledReason(reason)
             

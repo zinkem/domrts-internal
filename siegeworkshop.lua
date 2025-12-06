@@ -8,6 +8,10 @@
 
 local Button = require("button")
 
+-- Team colors module
+local Teams
+pcall(function() Teams = require("teams") end)
+
 local SiegeWorkshop = {}
 SiegeWorkshop.__index = SiegeWorkshop
 
@@ -41,6 +45,14 @@ function SiegeWorkshop.new(params)
     self.selected = false
     self.type = "siegeworkshop"
     self.name = "Siege Workshop"
+    
+    -- Team ownership
+    self.team = params.team or (Teams and Teams.PLAYER or 1)
+    
+    -- Combat stats
+    self.maxHp = 90
+    self.hp = self.maxHp
+    self.sightRadius = 6
     
     self.isBuilding = params.isBuilding or false
     self.buildProgress = params.buildProgress or 0
@@ -314,9 +326,16 @@ function SiegeWorkshop:updateUI(resources, screenW, screenH, font, currentPop, m
     self.currentPop = currentPop
     self.maxPop = maxPop
     
+    -- Don't show UI for enemy buildings
+    local playerTeam = Teams and Teams.PLAYER or 1
+    if self.team ~= playerTeam then return end
+    
     if self.selected and self.completed then
-        local panelX = screenW - 180
-        local buttonY = 70 + 125
+        -- New bottom panel positioning (matches barracks layout)
+        local panelX = screenW - 288
+        local panelY = screenH - 188
+        local buttonY = panelY + 55
+        local buttonW = 125
         local buttonH = 32
         local spacing = 36
         
@@ -325,11 +344,11 @@ function SiegeWorkshop:updateUI(resources, screenW, screenH, font, currentPop, m
         -- Flying Scout button
         if not self.flyingScoutButton then
             self.flyingScoutButton = Button.new({
-                x = panelX + 10, y = buttonY, width = 150, height = buttonH,
-                text = "F.Scout (200g 100L)", font = font,
+                x = panelX + 12, y = buttonY, width = buttonW, height = buttonH,
+                text = "Scout (200/100)", font = font,
                 colors = {
                     normal = {0.4, 0.5, 0.55, 1}, hover = {0.5, 0.6, 0.65, 1},
-                    pressed = {0.3, 0.4, 0.45, 1}, text = {1, 1, 1, 1}, border = {0.3, 0.4, 0.45, 1}
+                    pressed = {0.3, 0.4, 0.45, 1}, text = {0.95, 0.92, 0.85, 1}, border = {0.4, 0.5, 0.55, 1}
                 },
                 onClick = function()
                     if resources.gold >= SiegeWorkshop.FLYINGSCOUT_COST_GOLD and
@@ -341,16 +360,19 @@ function SiegeWorkshop:updateUI(resources, screenW, screenH, font, currentPop, m
                     end
                 end
             })
+        else
+            self.flyingScoutButton.x = panelX + 12
+            self.flyingScoutButton.y = buttonY
         end
         
-        -- Ballista button
+        -- Ballista button (second column)
         if not self.ballistaButton then
             self.ballistaButton = Button.new({
-                x = panelX + 10, y = buttonY + spacing, width = 150, height = buttonH,
-                text = "Ballista (500g 200L)", font = font,
+                x = panelX + 12 + buttonW + 8, y = buttonY, width = buttonW, height = buttonH,
+                text = "Ballista (500/200)", font = font,
                 colors = {
                     normal = {0.55, 0.45, 0.35, 1}, hover = {0.65, 0.55, 0.45, 1},
-                    pressed = {0.45, 0.35, 0.25, 1}, text = {1, 1, 1, 1}, border = {0.45, 0.35, 0.25, 1}
+                    pressed = {0.45, 0.35, 0.25, 1}, text = {0.95, 0.92, 0.85, 1}, border = {0.55, 0.45, 0.35, 1}
                 },
                 onClick = function()
                     if resources.gold >= SiegeWorkshop.BALLISTA_COST_GOLD and
@@ -362,16 +384,19 @@ function SiegeWorkshop:updateUI(resources, screenW, screenH, font, currentPop, m
                     end
                 end
             })
+        else
+            self.ballistaButton.x = panelX + 12 + buttonW + 8
+            self.ballistaButton.y = buttonY
         end
         
-        -- Kamikaze button
+        -- Kamikaze button (second row)
         if not self.kamikazeButton then
             self.kamikazeButton = Button.new({
-                x = panelX + 10, y = buttonY + spacing * 2, width = 150, height = buttonH,
-                text = "Kamikaze (300g 100L)", font = font,
+                x = panelX + 12, y = buttonY + spacing, width = buttonW, height = buttonH,
+                text = "Kamikaze (300/100)", font = font,
                 colors = {
-                    normal = {0.6, 0.35, 0.3, 1}, hover = {0.7, 0.45, 0.4, 1},
-                    pressed = {0.5, 0.25, 0.2, 1}, text = {1, 1, 1, 1}, border = {0.5, 0.25, 0.2, 1}
+                    normal = {0.6, 0.35, 0.35, 1}, hover = {0.7, 0.45, 0.45, 1},
+                    pressed = {0.5, 0.25, 0.25, 1}, text = {0.95, 0.92, 0.85, 1}, border = {0.6, 0.35, 0.35, 1}
                 },
                 onClick = function()
                     if resources.gold >= SiegeWorkshop.KAMIKAZE_COST_GOLD and
@@ -383,18 +408,22 @@ function SiegeWorkshop:updateUI(resources, screenW, screenH, font, currentPop, m
                     end
                 end
             })
+        else
+            self.kamikazeButton.x = panelX + 12
+            self.kamikazeButton.y = buttonY + spacing
         end
         
-        local canFlyingScout = resources.gold >= SiegeWorkshop.FLYINGSCOUT_COST_GOLD and 
+        -- Update button states
+        local canAffordScout = resources.gold >= SiegeWorkshop.FLYINGSCOUT_COST_GOLD and 
                               resources.lumber >= SiegeWorkshop.FLYINGSCOUT_COST_LUMBER
-        local canBallista = resources.gold >= SiegeWorkshop.BALLISTA_COST_GOLD and 
-                           resources.lumber >= SiegeWorkshop.BALLISTA_COST_LUMBER
-        local canKamikaze = resources.gold >= SiegeWorkshop.KAMIKAZE_COST_GOLD and 
-                           resources.lumber >= SiegeWorkshop.KAMIKAZE_COST_LUMBER
+        local canAffordBallista = resources.gold >= SiegeWorkshop.BALLISTA_COST_GOLD and 
+                                 resources.lumber >= SiegeWorkshop.BALLISTA_COST_LUMBER
+        local canAffordKamikaze = resources.gold >= SiegeWorkshop.KAMIKAZE_COST_GOLD and 
+                                 resources.lumber >= SiegeWorkshop.KAMIKAZE_COST_LUMBER
         
-        self.flyingScoutButton:setEnabled(canFlyingScout and currentPop < maxPop and self:canProduce())
-        self.ballistaButton:setEnabled(canBallista and currentPop < maxPop and self:canProduce())
-        self.kamikazeButton:setEnabled(canKamikaze and currentPop < maxPop and self:canProduce())
+        self.flyingScoutButton:setEnabled(canAffordScout and currentPop < maxPop and self:canProduce())
+        self.ballistaButton:setEnabled(canAffordBallista and currentPop < maxPop and self:canProduce())
+        self.kamikazeButton:setEnabled(canAffordKamikaze and currentPop < maxPop and self:canProduce())
         
         self.flyingScoutButton:update(0)
         self.ballistaButton:update(0)
@@ -414,9 +443,10 @@ function SiegeWorkshop:drawUI()
         
         if self.currentPop >= self.maxPop then
             local screenW = love.graphics.getWidth()
+            local screenH = love.graphics.getHeight()
             love.graphics.setColor(1, 0.4, 0.4, 1)
             love.graphics.setFont(Game.fonts.small)
-            love.graphics.print("Need more farms!", screenW - 170, 70 + 235)
+            love.graphics.print("Need more farms!", screenW - 276, screenH - 188 + 95)
             love.graphics.setColor(1, 1, 1, 1)
         end
     end
@@ -435,10 +465,52 @@ function SiegeWorkshop:mousereleased(x, y, button)
 end
 
 function SiegeWorkshop:drawOnMinimap(mapX, mapY, scale)
-    love.graphics.setColor(self.completed and 0.5 or 0.4, self.completed and 0.4 or 0.32, self.completed and 0.35 or 0.28, self.completed and 1 or 0.6)
+    if self.completed then
+        if Teams then
+            Teams.setColor(self.team, "minimapBuilding")
+        else
+            love.graphics.setColor(0.5, 0.4, 0.35, 1)
+        end
+    else
+        love.graphics.setColor(0.4, 0.32, 0.28, 0.6)
+    end
     local x = mapX + (self.gridX - 1) * scale
     local y = mapY + (self.gridY - 1) * scale
     love.graphics.rectangle("fill", x, y, self.gridSize * scale, self.gridSize * scale)
+end
+
+-- Combat Methods --
+
+function SiegeWorkshop:takeDamage(amount)
+    self.hp = self.hp - amount
+end
+
+function SiegeWorkshop:isDead()
+    return self.hp <= 0
+end
+
+function SiegeWorkshop:drawHealthBar()
+    if not self.selected and self.hp >= self.maxHp then return end
+    
+    local x, y = self:getScreenPos()
+    local barWidth = self.pixelSize - 10
+    local barHeight = 4
+    local barX = x + 5
+    local barY = y - 8
+    
+    -- Background
+    love.graphics.setColor(0.2, 0.2, 0.2, 0.8)
+    love.graphics.rectangle("fill", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
+    
+    -- Health bar
+    local healthPct = self.hp / self.maxHp
+    love.graphics.setColor(1 - healthPct, healthPct, 0.2, 1)
+    love.graphics.rectangle("fill", barX, barY, barWidth * healthPct, barHeight)
+    
+    -- Border
+    love.graphics.setColor(0, 0, 0, 0.8)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
 end
 
 return SiegeWorkshop

@@ -5,6 +5,10 @@
     No requirements to build
 ]]
 
+-- Team colors module
+local Teams
+pcall(function() Teams = require("teams") end)
+
 local LumberMill = {}
 LumberMill.__index = LumberMill
 
@@ -25,6 +29,14 @@ function LumberMill.new(params)
     self.selected = false
     self.type = "lumbermill"
     self.name = "Lumber Mill"
+    
+    -- Team ownership
+    self.team = params.team or (Teams and Teams.PLAYER or 1)
+    
+    -- Combat stats
+    self.maxHp = 50
+    self.hp = self.maxHp
+    self.sightRadius = 5
     
     self.isBuilding = params.isBuilding or false
     self.buildProgress = params.buildProgress or 0
@@ -198,13 +210,51 @@ function LumberMill:mousereleased(x, y, button) end
 
 function LumberMill:drawOnMinimap(mapX, mapY, scale)
     if self.completed then
-        love.graphics.setColor(0.5, 0.4, 0.25, 1)
+        if Teams then
+            Teams.setColor(self.team, "minimapBuilding")
+        else
+            love.graphics.setColor(0.5, 0.4, 0.25, 1)
+        end
     else
         love.graphics.setColor(0.4, 0.35, 0.2, 0.6)
     end
     local x = mapX + (self.gridX - 1) * scale
     local y = mapY + (self.gridY - 1) * scale
     love.graphics.rectangle("fill", x, y, self.gridSize * scale, self.gridSize * scale)
+end
+
+-- Combat Methods --
+
+function LumberMill:takeDamage(amount)
+    self.hp = self.hp - amount
+end
+
+function LumberMill:isDead()
+    return self.hp <= 0
+end
+
+function LumberMill:drawHealthBar()
+    if not self.selected and self.hp >= self.maxHp then return end
+    
+    local x, y = self:getScreenPos()
+    local barWidth = self.pixelSize - 10
+    local barHeight = 4
+    local barX = x + 5
+    local barY = y - 8
+    
+    -- Background
+    love.graphics.setColor(0.2, 0.2, 0.2, 0.8)
+    love.graphics.rectangle("fill", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
+    
+    -- Health bar
+    local healthPct = self.hp / self.maxHp
+    love.graphics.setColor(1 - healthPct, healthPct, 0.2, 1)
+    love.graphics.rectangle("fill", barX, barY, barWidth * healthPct, barHeight)
+    
+    -- Border
+    love.graphics.setColor(0, 0, 0, 0.8)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
 end
 
 return LumberMill

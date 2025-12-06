@@ -232,6 +232,13 @@ local function countPlayerUnits(unitList)
     return count
 end
 
+-- Check if entity belongs to human player (for command filtering)
+local function isPlayerOwned(entity)
+    if not entity then return false end
+    local playerTeam = Teams and Teams.PLAYER or 1
+    return entity.team == nil or entity.team == playerTeam
+end
+
 -- Find the closest non-depleted gold mine to a world position
 local function findClosestMine(worldX, worldY)
     local closestMine = nil
@@ -518,8 +525,10 @@ local function getCommandButtons()
             enabled = true,
             action = function()
                 for _, entity in ipairs(selectedEntities) do
-                    if entity.stop then entity:stop()
-                    elseif entity.state then entity.state = "Idle" end
+                    if isPlayerOwned(entity) then
+                        if entity.stop then entity:stop()
+                        elseif entity.state then entity.state = "Idle" end
+                    end
                 end
             end
         })
@@ -1621,13 +1630,6 @@ local function clearSelection()
     selectedEntities = {}
 end
 
--- Check if entity belongs to human player (for selection filtering)
-local function isPlayerOwned(entity)
-    if not entity then return false end
-    local playerTeam = Teams and Teams.PLAYER or 1
-    return entity.team == nil or entity.team == playerTeam
-end
-
 -- Helper to check if current selection contains units
 local function selectionHasUnits()
     for _, e in ipairs(selectedEntities) do
@@ -1850,7 +1852,7 @@ function Gameplay.load(options)
     victory = false
     defeat = false
     endScreenButton = nil
-    resources.gold = 1000
+    resources.gold = 2000
     resources.lumber = 400
     notifications = {}
     peons = {}
@@ -1939,13 +1941,21 @@ function Gameplay.load(options)
     local m1X, m1Y = map:findClearArea(buildingSize, buildingSize, thGridX + 8, thGridY + 5, 10)
     table.insert(goldMines, GoldMine.new({gridX = m1X, gridY = m1Y, gold = 50000, map = map}))
     
-    -- Player starting farm (already built) - place it further from town hall to avoid overlap
+    -- Player starting farms (2 already built) - place them further from town hall to avoid overlap
     -- Town hall is 3x3, so farm at thGridX + 4 ensures no overlap
     local farmX, farmY = map:findClearArea(2, 2, thGridX + 4, thGridY, 8)
     if farmX then
         local startFarm = Farm.new({gridX = farmX, gridY = farmY, map = map, isBuilding = false, team = playerTeam})
         startFarm.completed = true
         table.insert(farms, startFarm)
+    end
+    
+    -- Second starting farm
+    local farm2X, farm2Y = map:findClearArea(2, 2, thGridX + 4, thGridY + 3, 8)
+    if farm2X then
+        local startFarm2 = Farm.new({gridX = farm2X, gridY = farm2Y, map = map, isBuilding = false, team = playerTeam})
+        startFarm2.completed = true
+        table.insert(farms, startFarm2)
     end
     
     -- Player starting peons - 7 total, 6 on gold, 1 on lumber (every 7th)
@@ -2746,12 +2756,15 @@ function Gameplay.keypressed(key)
     -- Stop command (S) - works for all units even when not in command buttons
     if key == "s" then
         for _, entity in ipairs(selectedEntities) do
-            if entity.stop then 
-                entity:stop()
-            elseif entity.state then 
-                entity.state = "Idle"
-                if entity.path then entity.path = nil end
-                if entity.attackTarget then entity.attackTarget = nil end
+            -- Only issue commands to player-owned units
+            if isPlayerOwned(entity) then
+                if entity.stop then 
+                    entity:stop()
+                elseif entity.state then 
+                    entity.state = "Idle"
+                    if entity.path then entity.path = nil end
+                    if entity.attackTarget then entity.attackTarget = nil end
+                end
             end
         end
     end
@@ -2843,8 +2856,46 @@ function Gameplay.mousepressed(x, y, button)
         end
         
         -- Issue attack-move command to all selected units
+        -- For peons, attack-move on resources means gather/chop
+        local clickedMine = nil
+        local clickedTreeX, clickedTreeY = nil, nil
+        
+        -- Check if clicked on a gold mine
+        for _, mine in ipairs(goldMines) do
+            if mine:containsPoint(x, y) and not mine:isDepleted() then
+                clickedMine = mine
+                break
+            end
+        end
+        
+        -- Check if clicked on a tree (only if not on a mine)
+        if not clickedMine and map then
+            local gridX, gridY = map:screenToGrid(x, y)
+            if map:isTileTree(gridX, gridY) then
+                clickedTreeX, clickedTreeY = gridX, gridY
+            end
+        end
+        
         for _, entity in ipairs(selectedEntities) do
-            if clickedEnemy and entity.setAttackTarget then
+            -- Only issue commands to player-owned units
+            if not isPlayerOwned(entity) then
+                -- Skip enemy units - can't command them
+            -- Special handling for peons - attack-move on resources = gather
+            elseif entity.type == "peon" then
+                if clickedMine then
+                    -- Peon attack-move on gold mine = gather gold
+                    entity:goToGather(clickedMine, resources)
+                elseif clickedTreeX and clickedTreeY then
+                    -- Peon attack-move on tree = chop lumber
+                    entity:goToChop(clickedTreeX, clickedTreeY, resources)
+                elseif clickedEnemy and entity.setAttackTarget then
+                    entity:setAttackTarget(clickedEnemy)
+                elseif entity.attackMoveTo then
+                    entity:attackMoveTo(worldX, worldY)
+                elseif entity.moveTo then
+                    entity:moveTo(worldX, worldY)
+                end
+            elseif clickedEnemy and entity.setAttackTarget then
                 -- Direct attack on clicked enemy
                 entity:setAttackTarget(clickedEnemy)
             elseif entity.attackMoveTo then
@@ -3293,7 +3344,8 @@ function handleRightClick(x, y)
         local target = clickedEnemy or clickedEnemyBuilding
         local attackCount = 0
         for _, entity in ipairs(selectedEntities) do
-            if entity.setAttackTarget then
+            -- Only issue attack commands to player-owned units
+            if isPlayerOwned(entity) and entity.setAttackTarget then
                 entity:setAttackTarget(target)
                 attackCount = attackCount + 1
             end
@@ -3374,9 +3426,12 @@ function handleRightClick(x, y)
         end
     end
     
-    -- Command all selected units
+    -- Command all selected units (only player-owned)
     for _, entity in ipairs(selectedEntities) do
-        if entity.type == "peon" then
+        -- Skip enemy units - can't command them
+        if not isPlayerOwned(entity) then
+            -- Do nothing for enemy units
+        elseif entity.type == "peon" then
             local peon = entity
             
             if clickedMine then

@@ -90,11 +90,63 @@ function Unit:setAttackTarget(target)
 end
 
 function Unit:getAttackRange()
-    return self.radius + 4  -- Tight melee range (about 18 pixels)
+    -- Use attackRange property if set (for ranged units), otherwise tight melee range
+    return self.attackRange or (self.radius + 4)  -- Default melee ~18 pixels
 end
 
 function Unit:getSightRangePixels()
     return self.sightRadius * 32  -- Convert tiles to pixels
+end
+
+-- Get the midpoint of the closest edge of a building/target
+-- Returns the point on the target's edge that this unit should path to
+function Unit:getClosestEdgeMidpoint(target)
+    if not target.getWorldBounds then
+        -- Not a building, use center
+        if target.getWorldCenter then
+            return target:getWorldCenter()
+        end
+        return target.worldX, target.worldY
+    end
+    
+    local bx1, by1, bx2, by2 = target:getWorldBounds()
+    local cx, cy = (bx1 + bx2) / 2, (by1 + by2) / 2  -- Building center
+    
+    -- Calculate distances to each side midpoint
+    local midLeft = {x = bx1, y = cy}
+    local midRight = {x = bx2, y = cy}
+    local midTop = {x = cx, y = by1}
+    local midBottom = {x = cx, y = by2}
+    
+    local function distToPoint(px, py)
+        local dx = px - self.worldX
+        local dy = py - self.worldY
+        return dx * dx + dy * dy  -- Squared distance is fine for comparison
+    end
+    
+    -- Find closest midpoint
+    local closest = midLeft
+    local closestDist = distToPoint(midLeft.x, midLeft.y)
+    
+    local rightDist = distToPoint(midRight.x, midRight.y)
+    if rightDist < closestDist then
+        closest = midRight
+        closestDist = rightDist
+    end
+    
+    local topDist = distToPoint(midTop.x, midTop.y)
+    if topDist < closestDist then
+        closest = midTop
+        closestDist = topDist
+    end
+    
+    local bottomDist = distToPoint(midBottom.x, midBottom.y)
+    if bottomDist < closestDist then
+        closest = midBottom
+        closestDist = bottomDist
+    end
+    
+    return closest.x, closest.y
 end
 
 -- Get separation force from nearby units (pushes units apart when overlapping)
@@ -150,7 +202,19 @@ function Unit:moveToward(targetX, targetY, dt, allUnits)
     
     -- Apply unit-unit separation
     local sepX, sepY = self:getUnitSeparation(allUnits)
+    
+    -- Increase separation strength when close to final destination (within 2 tiles = 64px)
+    -- This helps units spread out when they're bunching up at a target
     local sepStrength = 0.3
+    if self.targetX and self.targetY then
+        local finalDx = self.targetX - self.worldX
+        local finalDy = self.targetY - self.worldY
+        local distToFinal = math.sqrt(finalDx * finalDx + finalDy * finalDy)
+        if distToFinal < 64 then
+            -- Much stronger separation when close to destination
+            sepStrength = 0.6 + (1 - distToFinal / 64) * 0.4  -- 0.6 to 1.0
+        end
+    end
     
     dirX = dirX + sepX * sepStrength
     dirY = dirY + sepY * sepStrength
@@ -253,9 +317,12 @@ function Unit:updateAttacking(dt, buildings, allUnits, allBuildings)
             end
         end
     else
-        -- Not in range - move toward target
+        -- Not in range - move toward target's closest edge
         local tx, ty
-        if target.getWorldCenter then
+        if target.getWorldBounds then
+            -- Building - get closest edge midpoint instead of center
+            tx, ty = self:getClosestEdgeMidpoint(target)
+        elseif target.getWorldCenter then
             tx, ty = target:getWorldCenter()
         else
             tx, ty = target.worldX, target.worldY
