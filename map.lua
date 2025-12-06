@@ -321,6 +321,15 @@ function Map:draw()
         return self.tiles[ty][tx] == Map.TILE_TREE
     end
     
+    -- Seeded random helper for fallback
+    local function sRand(s, i)
+        local v = math.sin(s * 12.9898 + i * 78.233) * 43758.5453
+        return v - math.floor(v)
+    end
+    
+    --===========================================
+    -- PASS 1: Draw all terrain/ground tiles
+    --===========================================
     for y = startY, endY do
         for x = startX, endX do
             local worldX, worldY = self:gridToWorld(x, y)
@@ -329,33 +338,55 @@ function Map:draw()
             
             if tile == Map.TILE_GRASS then
                 self:drawHoundstoothTile(screenX, screenY, x, y)
+                
             elseif tile == Map.TILE_TREE then
-                -- Dark forest floor instead of grass (no houndstooth)
-                love.graphics.setColor(0.08, 0.15, 0.06, 1)
+                -- Draw dark forest floor only (canopy in pass 2)
+                if DrawUtils then
+                    DrawUtils.drawForestFloor(screenX, screenY, self.tileSize, x, y)
+                else
+                    -- Fallback forest floor
+                    local seed = x * 7919 + y * 4637
+                    love.graphics.setColor(0.08, 0.15, 0.06, 1)
+                    love.graphics.rectangle("fill", screenX, screenY, self.tileSize, self.tileSize)
+                    love.graphics.setColor(0.05, 0.11, 0.04, 1)
+                    for i = 1, 3 do
+                        local lx = screenX + sRand(seed, 600 + i) * self.tileSize
+                        local ly = screenY + sRand(seed, 610 + i) * self.tileSize
+                        love.graphics.ellipse("fill", lx, ly, 5, 3)
+                    end
+                end
+                
+            elseif tile == Map.TILE_STUMP then
+                -- Brown stump tile with low contrast to grass
+                love.graphics.setColor(0.28, 0.38, 0.22, 1)
                 love.graphics.rectangle("fill", screenX, screenY, self.tileSize, self.tileSize)
-                
-                -- Add some dark undergrowth texture
+                love.graphics.setColor(0.25, 0.35, 0.20, 1)
+                love.graphics.rectangle("fill", screenX + 4, screenY + 4, 10, 8)
+                love.graphics.rectangle("fill", screenX + 18, screenY + 20, 8, 6)
+                love.graphics.setColor(0.35, 0.25, 0.15, 1)
+                love.graphics.circle("fill", screenX + 16, screenY + 16, 5)
+                love.graphics.setColor(0.30, 0.22, 0.12, 1)
+                love.graphics.circle("fill", screenX + 16, screenY + 16, 3)
+            end
+        end
+    end
+    
+    --===========================================
+    -- PASS 2: Draw tree canopy (foliage layer)
+    -- Drawn in Y order so lower trees overlap higher ones
+    --===========================================
+    for y = startY, endY do
+        for x = startX, endX do
+            local tile = self.tiles[y][x]
+            
+            if tile == Map.TILE_TREE then
+                local worldX, worldY = self:gridToWorld(x, y)
+                local screenX, screenY = self:worldToScreen(worldX, worldY)
                 local seed = x * 7919 + y * 4637
-                local function sRand(s, i)
-                    local v = math.sin(s * 12.9898 + i * 78.233) * 43758.5453
-                    return v - math.floor(v)
-                end
                 
-                -- Dark leaf litter / shadows
-                love.graphics.setColor(0.05, 0.11, 0.04, 1)
-                for i = 1, 4 do
-                    local lx = screenX + sRand(seed, 600 + i) * self.tileSize
-                    local ly = screenY + sRand(seed, 610 + i) * self.tileSize
-                    love.graphics.ellipse("fill", lx, ly, 4 + sRand(seed, 620 + i) * 6, 3 + sRand(seed, 630 + i) * 4)
-                end
-                
-                -- Detect edges for bush placement
-                local edgeCount = 0
-                if not isTree(x-1, y) then edgeCount = edgeCount + 1 end
-                if not isTree(x+1, y) then edgeCount = edgeCount + 1 end
-                if not isTree(x, y-1) then edgeCount = edgeCount + 1 end
-                if not isTree(x, y+1) then edgeCount = edgeCount + 1 end
-                local isEdge = edgeCount > 0
+                -- Detect edges
+                local isEdge = not isTree(x-1, y) or not isTree(x+1, y) or 
+                               not isTree(x, y-1) or not isTree(x, y+1)
                 local edgeSides = {
                     left = not isTree(x-1, y),
                     right = not isTree(x+1, y),
@@ -363,62 +394,80 @@ function Map:draw()
                     bottom = not isTree(x, y+1)
                 }
                 
-                -- Enhanced tree with DrawUtils or fallback
                 if DrawUtils then
-                    DrawUtils.drawTree(screenX, screenY, x, y, self.tileSize, isEdge, edgeSides)
+                    DrawUtils.drawTreeCanopy(screenX, screenY, x, y, self.tileSize, isEdge, edgeSides)
                 else
-                    -- Dense fallback
-                    local treeCount = 2 + math.floor(sRand(seed, 0) * 2)
+                    -- Fallback canopy with chunky shapes
                     local sway = math.sin(Map.animTime * 1.2 + x * 0.1 + y * 0.13) * 2
+                    local colorVar = (sRand(seed, 1) - 0.5) * 0.05
                     
-                    -- Draw dense overlapping foliage
-                    for i = 1, treeCount do
-                        local ox = self.tileSize * (0.2 + sRand(seed, 100+i) * 0.6)
-                        local oy = self.tileSize * (0.3 + sRand(seed, 110+i) * 0.5)
-                        local scale = 0.9 + sRand(seed, 200+i) * 0.4
-                        local colorVar = (sRand(seed, 200+i) - 0.5) * 0.06
+                    -- Draw chunky foliage blobs
+                    for i = 1, 3 do
+                        local cx = screenX + self.tileSize * (0.2 + sRand(seed, 50 + i) * 0.6)
+                        local cy = screenY + self.tileSize * (0.2 + sRand(seed, 60 + i) * 0.5)
+                        local chunkSway = sway * (0.5 + sRand(seed, 80 + i) * 0.5)
                         
-                        local cx = screenX + ox
-                        local cy = screenY + oy
-                        local treeSway = sway * scale * 0.5
+                        -- Back layer
+                        love.graphics.setColor(0.05 + colorVar, 0.25 + colorVar, 0.07, 1)
+                        love.graphics.circle("fill", cx + chunkSway * 0.3 - 4, cy + 3, 10)
+                        love.graphics.circle("fill", cx + chunkSway * 0.3 + 5, cy + 2, 9)
                         
-                        -- Large overlapping foliage (no trunks visible in dense forest)
-                        love.graphics.setColor(0.06 + colorVar, 0.28 + colorVar, 0.08, 1)
-                        love.graphics.circle("fill", cx + treeSway * 0.5 - 4, cy + 4, 14 * scale)
-                        love.graphics.circle("fill", cx + treeSway * 0.5 + 6, cy + 2, 12 * scale)
+                        -- Mid layer  
                         love.graphics.setColor(0.08 + colorVar, 0.34 + colorVar, 0.1, 1)
-                        love.graphics.circle("fill", cx + treeSway * 0.7, cy - 2, 15 * scale)
-                        love.graphics.circle("fill", cx + treeSway * 0.6 + 8, cy + 6, 11 * scale)
-                        love.graphics.setColor(0.12 + colorVar, 0.42 + colorVar, 0.14, 1)
-                        love.graphics.circle("fill", cx + treeSway - 2, cy - 6, 10 * scale)
+                        love.graphics.circle("fill", cx + chunkSway * 0.5, cy, 12)
+                        love.graphics.circle("fill", cx + chunkSway * 0.5 + 6, cy + 4, 8)
+                        
+                        -- Light layer
+                        love.graphics.setColor(0.12 + colorVar, 0.44 + colorVar, 0.14, 1)
+                        love.graphics.circle("fill", cx + chunkSway * 0.7 - 2, cy - 3, 8)
                     end
                     
-                    -- Edge bushes
-                    if isEdge and sRand(seed, 500) < 0.7 then
-                        local bx = screenX + 16
-                        local by = screenY + self.tileSize - 4
-                        if edgeSides.left then bx = screenX + 6 end
-                        if edgeSides.right then bx = screenX + self.tileSize - 6 end
-                        
-                        love.graphics.setColor(0.08, 0.32, 0.1, 1)
-                        love.graphics.ellipse("fill", bx, by - 2, 6, 4)
-                        love.graphics.setColor(0.12, 0.4, 0.14, 1)
-                        love.graphics.ellipse("fill", bx, by - 4, 5, 3)
+                    -- Highlights
+                    love.graphics.setColor(0.14 + colorVar, 0.48 + colorVar, 0.16, 0.85)
+                    for i = 1, 2 do
+                        local hx = screenX + sRand(seed, 550 + i) * self.tileSize
+                        local hy = screenY + sRand(seed, 560 + i) * self.tileSize * 0.6
+                        love.graphics.circle("fill", hx + sway * 0.7, hy, 5)
+                    end
+                    
+                    -- Edge foliage
+                    if isEdge then
+                        for i = 1, 3 do
+                            local ex, ey, angle
+                            if edgeSides.left then
+                                ex = screenX - 2 + sRand(seed, 900 + i) * 10
+                                ey = screenY + sRand(seed, 910 + i) * self.tileSize
+                                angle = -math.pi * 0.5
+                            elseif edgeSides.right then
+                                ex = screenX + self.tileSize - 8 + sRand(seed, 901 + i) * 10
+                                ey = screenY + sRand(seed, 911 + i) * self.tileSize
+                                angle = math.pi * 0.5
+                            elseif edgeSides.bottom then
+                                ex = screenX + sRand(seed, 902 + i) * self.tileSize
+                                ey = screenY + self.tileSize - 8 + sRand(seed, 912 + i) * 10
+                                angle = math.pi
+                            else
+                                ex = screenX + sRand(seed, 903 + i) * self.tileSize
+                                ey = screenY - 2 + sRand(seed, 913 + i) * 10
+                                angle = 0
+                            end
+                            
+                            local es = 6 + sRand(seed, 940 + i) * 5
+                            love.graphics.setColor(0.07 + colorVar, 0.3 + colorVar, 0.09, 1)
+                            love.graphics.polygon("fill",
+                                ex + math.cos(angle) * es + sway * 0.3, ey + math.sin(angle) * es,
+                                ex + math.cos(angle + 2.2) * es * 0.6, ey + math.sin(angle + 2.2) * es * 0.5,
+                                ex + math.cos(angle - 2.2) * es * 0.6, ey + math.sin(angle - 2.2) * es * 0.5
+                            )
+                            love.graphics.setColor(0.1 + colorVar, 0.38 + colorVar, 0.12, 1)
+                            love.graphics.polygon("fill",
+                                ex + math.cos(angle) * es * 0.7 + sway * 0.4, ey + math.sin(angle) * es * 0.6,
+                                ex + math.cos(angle + 1.8) * es * 0.4, ey + math.sin(angle + 1.8) * es * 0.3,
+                                ex + math.cos(angle - 1.8) * es * 0.4, ey + math.sin(angle - 1.8) * es * 0.3
+                            )
+                        end
                     end
                 end
-            elseif tile == Map.TILE_STUMP then
-                -- Brown stump tile with low contrast to grass
-                love.graphics.setColor(0.28, 0.38, 0.22, 1)  -- Brownish-green base
-                love.graphics.rectangle("fill", screenX, screenY, self.tileSize, self.tileSize)
-                -- Subtle darker patches
-                love.graphics.setColor(0.25, 0.35, 0.20, 1)
-                love.graphics.rectangle("fill", screenX + 4, screenY + 4, 10, 8)
-                love.graphics.rectangle("fill", screenX + 18, screenY + 20, 8, 6)
-                -- Small stump remnant in center
-                love.graphics.setColor(0.35, 0.25, 0.15, 1)
-                love.graphics.circle("fill", screenX + 16, screenY + 16, 5)
-                love.graphics.setColor(0.30, 0.22, 0.12, 1)
-                love.graphics.circle("fill", screenX + 16, screenY + 16, 3)
             end
         end
     end

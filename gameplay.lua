@@ -32,6 +32,12 @@ local Ballista = require("ballista")
 local Kamikaze = require("kamikaze")
 local UIDraw = require("ui_draw")
 
+-- Team system
+local Teams
+local Player
+pcall(function() Teams = require("teams") end)
+pcall(function() Player = require("player") end)
+
 -- Visual effects (optional - graceful fallback)
 local Effects, DrawUtils
 pcall(function() Effects = require("effects") end)
@@ -467,32 +473,34 @@ local function cancelBuildingPlacement()
 end
 
 local function createBuilding(gridX, gridY, buildingType, peon)
+    local team = peon and peon.team or (Teams and Teams.PLAYER or 1)
+    
     if buildingType == "farm" then
-        local building = Farm.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        local building = Farm.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(farms, building)
     elseif buildingType == "barracks" then
-        local building = Barracks.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        local building = Barracks.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(barracks, building)
     elseif buildingType == "lumbermill" then
-        local building = LumberMill.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        local building = LumberMill.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(lumberMills, building)
     elseif buildingType == "blacksmith" then
-        local building = Blacksmith.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        local building = Blacksmith.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(blacksmiths, building)
     elseif buildingType == "scouttower" then
-        local building = ScoutTower.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        local building = ScoutTower.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(scoutTowers, building)
     elseif buildingType == "archeryrange" then
-        local building = ArcheryRange.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        local building = ArcheryRange.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(archeryRanges, building)
     elseif buildingType == "stable" then
-        local building = Stable.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        local building = Stable.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         -- Set callback for Paladin upgrade
         building.onPaladinUpgrade = function()
@@ -502,11 +510,11 @@ local function createBuilding(gridX, gridY, buildingType, peon)
         end
         table.insert(stables, building)
     elseif buildingType == "siegeworkshop" then
-        local building = SiegeWorkshop.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        local building = SiegeWorkshop.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(siegeWorkshops, building)
     elseif buildingType == "townhall" then
-        local building = TownHall.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        local building = TownHall.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(townHalls, building)
     end
@@ -734,9 +742,12 @@ function Gameplay.load()
     map = Map.new()
     map:setViewport(0, UI.topBarHeight, screenW, screenH - UI.topBarHeight)
     
+    -- Human player team
+    local playerTeam = Teams and Teams.PLAYER or 1
+    
     local buildingSize = 3
     local thGridX, thGridY = map:findClearArea(buildingSize, buildingSize, 10, 30, 15)
-    townHall = TownHall.new({gridX = thGridX, gridY = thGridY, map = map})
+    townHall = TownHall.new({gridX = thGridX, gridY = thGridY, map = map, team = playerTeam})
     
     local m1X, m1Y = map:findClearArea(buildingSize, buildingSize, thGridX + 8, thGridY + 5, 10)
     table.insert(goldMines, GoldMine.new({gridX = m1X, gridY = m1Y, gold = 50000, map = map}))
@@ -752,7 +763,8 @@ function Gameplay.load()
         local newPeon = Peon.new({
             worldX = spawnX + (i - 1) * 35,
             worldY = spawnY + (i - 2) * 30,
-            map = map
+            map = map,
+            team = playerTeam
         })
         setupPeonCallbacks(newPeon)
         pushUnitOutOfBuildings(newPeon)
@@ -787,7 +799,7 @@ function Gameplay.update(dt)
     local peonReady, upgradeComplete, _ = townHall:update(gameDt)
     if peonReady and currentPop < maxPop then
         local spawnX, spawnY = townHall:getSpawnPos()
-        local newPeon = Peon.new({worldX = spawnX, worldY = spawnY, map = map})
+        local newPeon = Peon.new({worldX = spawnX, worldY = spawnY, map = map, team = townHall.team})
         setupPeonCallbacks(newPeon)
         pushUnitOutOfBuildings(newPeon)
         table.insert(peons, newPeon)
@@ -820,11 +832,11 @@ function Gameplay.update(dt)
         if unitType and currentPop < maxPop then
             local spawnX, spawnY = barrack:getSpawnPos()
             if unitType == "footman" then
-                local newUnit = Footman.new({worldX = spawnX, worldY = spawnY, map = map})
+                local newUnit = Footman.new({worldX = spawnX, worldY = spawnY, map = map, team = barrack.team})
                 pushUnitOutOfBuildings(newUnit)
                 table.insert(footmen, newUnit)
             elseif unitType == "knight" then
-                local newUnit = Knight.new({worldX = spawnX, worldY = spawnY, map = map})
+                local newUnit = Knight.new({worldX = spawnX, worldY = spawnY, map = map, team = barrack.team})
                 -- Check if Paladin upgrade is active
                 for _, stable in ipairs(stables) do
                     if stable.completed and stable.hasPaladinUpgrade then
@@ -880,7 +892,7 @@ function Gameplay.update(dt)
         end
         if archerReady and currentPop < maxPop then
             local spawnX, spawnY = building:getSpawnPos()
-            local newUnit = Archer.new({worldX = spawnX, worldY = spawnY, map = map})
+            local newUnit = Archer.new({worldX = spawnX, worldY = spawnY, map = map, team = building.team})
             pushUnitOutOfBuildings(newUnit)
             table.insert(archers, newUnit)
             calculatePopulation()
@@ -909,15 +921,15 @@ function Gameplay.update(dt)
         if unitType and currentPop < maxPop then
             local spawnX, spawnY = building:getSpawnPos()
             if unitType == "flyingscout" then
-                local newUnit = FlyingScout.new({worldX = spawnX, worldY = spawnY, map = map})
+                local newUnit = FlyingScout.new({worldX = spawnX, worldY = spawnY, map = map, team = building.team})
                 pushUnitOutOfBuildings(newUnit)
                 table.insert(flyingScouts, newUnit)
             elseif unitType == "ballista" then
-                local newUnit = Ballista.new({worldX = spawnX, worldY = spawnY, map = map})
+                local newUnit = Ballista.new({worldX = spawnX, worldY = spawnY, map = map, team = building.team})
                 pushUnitOutOfBuildings(newUnit)
                 table.insert(ballistas, newUnit)
             elseif unitType == "kamikaze" then
-                local newUnit = Kamikaze.new({worldX = spawnX, worldY = spawnY, map = map})
+                local newUnit = Kamikaze.new({worldX = spawnX, worldY = spawnY, map = map, team = building.team})
                 pushUnitOutOfBuildings(newUnit)
                 table.insert(kamikazes, newUnit)
             end
@@ -936,7 +948,7 @@ function Gameplay.update(dt)
         end
         if peonReady and currentPop < maxPop then
             local spawnX, spawnY = building:getSpawnPos()
-            local newPeon = Peon.new({worldX = spawnX, worldY = spawnY, map = map})
+            local newPeon = Peon.new({worldX = spawnX, worldY = spawnY, map = map, team = building.team})
             setupPeonCallbacks(newPeon)
             pushUnitOutOfBuildings(newPeon)
             table.insert(peons, newPeon)

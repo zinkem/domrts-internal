@@ -10,6 +10,10 @@ local Button = require("button")
 local Pathfinding = require("pathfinding")
 local Requirements = require("requirements")
 
+-- Team colors module
+local Teams
+pcall(function() Teams = require("teams") end)
+
 -- Visual enhancement modules (optional - graceful fallback if missing)
 local Effects, DrawUtils
 pcall(function() Effects = require("effects") end)
@@ -40,6 +44,10 @@ function Peon.new(params)
     self.type = "peon"
     self.name = "Peon"
     self.state = Peon.STATE_IDLE
+    
+    -- Team ownership
+    self.team = params.team or (Teams and Teams.PLAYER or 1)
+    self.owner = params.owner or nil  -- Reference to Player object
     
     self.targetX = nil
     self.targetY = nil
@@ -729,6 +737,12 @@ function Peon:draw()
     
     -- Draw the peon body with outline
     local function drawBody()
+        -- Get team colors (fallback to neutral brown if no Teams module)
+        local teamColors = Teams and Teams.getColors(self.team) or nil
+        local shirtColor = teamColors and teamColors.primary or {0.55, 0.45, 0.35, 1}
+        local hoodColor = teamColors and teamColors.dark or {0.5, 0.4, 0.3, 1}
+        local beltColor = {0.35, 0.25, 0.15, 1}  -- Belt stays neutral brown
+        
         -- Feet
         love.graphics.setColor(0.4, 0.3, 0.2, 1)
         love.graphics.ellipse("fill", x - 5, y + 7, 5, 3)
@@ -739,22 +753,22 @@ function Peon:draw()
         love.graphics.rectangle("fill", x - 6, y + 2, 5, 7, 1)
         love.graphics.rectangle("fill", x + 1, y + 2, 5, 7, 1)
         
-        -- Body (work shirt) - with breathing
-        love.graphics.setColor(0.55, 0.45, 0.35, 1)
+        -- Body (work shirt) - TEAM COLOR - with breathing
+        love.graphics.setColor(shirtColor)
         love.graphics.rectangle("fill", x - 8 - breathe * 0.5, y - 6, 16 + breathe, 12, 2)
         
         -- Belt
-        love.graphics.setColor(0.35, 0.25, 0.15, 1)
+        love.graphics.setColor(beltColor)
         love.graphics.rectangle("fill", x - 8, y + 1, 16, 3)
         love.graphics.setColor(0.6, 0.5, 0.2, 1)
         love.graphics.rectangle("fill", x - 2, y + 1, 4, 3)  -- Buckle
         
-        -- Arms - with slight swing when walking
+        -- Arms - TEAM COLOR - with slight swing when walking
         local armSwing = 0
         if self.state == Peon.STATE_MOVING or self.state == Peon.STATE_RETURNING then
             armSwing = math.sin(self.animTimer * 10) * 2
         end
-        love.graphics.setColor(0.55, 0.45, 0.35, 1)
+        love.graphics.setColor(shirtColor)
         love.graphics.rectangle("fill", x - 11, y - 4 + armSwing, 5, 10, 1)
         love.graphics.rectangle("fill", x + 6, y - 4 - armSwing, 5, 10, 1)
         
@@ -767,8 +781,8 @@ function Peon:draw()
         love.graphics.setColor(0.85, 0.7, 0.55, 1)
         love.graphics.ellipse("fill", x, y - 10, 6, 7)
         
-        -- Hood/cap
-        love.graphics.setColor(0.5, 0.4, 0.3, 1)
+        -- Hood/cap - TEAM COLOR (darker shade)
+        love.graphics.setColor(hoodColor)
         love.graphics.arc("fill", x, y - 10, 7, math.pi, 2 * math.pi)
         love.graphics.rectangle("fill", x - 7, y - 12, 14, 4, 1)
         
@@ -1253,7 +1267,14 @@ end
 
 function Peon:drawOnMinimap(mapX, mapY, scale)
     if not self.visible then return end
-    love.graphics.setColor(0.3, 0.8, 0.3, 1)
+    
+    -- Use team color for minimap
+    if Teams then
+        Teams.setColor(self.team, "minimapUnit")
+    else
+        love.graphics.setColor(0.3, 0.8, 0.3, 1)  -- Fallback green
+    end
+    
     local gridX, gridY = 1, 1
     if self.map then
         gridX, gridY = self.map:worldToGrid(self.worldX, self.worldY)

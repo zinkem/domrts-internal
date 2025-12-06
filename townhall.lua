@@ -8,6 +8,10 @@
 local Button = require("button")
 local Requirements = require("requirements")
 
+-- Team colors module
+local Teams
+pcall(function() Teams = require("teams") end)
+
 local TownHall = {}
 TownHall.__index = TownHall
 
@@ -39,6 +43,10 @@ function TownHall.new(params)
     self.selected = false
     self.type = "townhall"
     self.name = "Town Hall"
+    
+    -- Team ownership
+    self.team = params.team or (Teams and Teams.PLAYER or 1)
+    self.owner = params.owner or nil  -- Reference to Player object
     
     -- Tier system: 1 = Town Hall, 2 = Hold, 3 = Keep
     self.tier = 1
@@ -305,16 +313,19 @@ function TownHall:drawTownHall(x, y, size)
     love.graphics.circle("fill", x + size/2 - 8, y + size - 15, 2)
     love.graphics.circle("fill", x + size/2 + 8, y + size - 15, 2)
     
-    -- Banner/flag on center
+    -- Banner/flag on center - TEAM COLORED
+    local bannerColor = Teams and Teams.getColor(self.team, "banner") or {0.8, 0.2, 0.2, 1}
+    local emblemColor = Teams and Teams.getColor(self.team, "emblem") or {0.9, 0.8, 0.2, 1}
+    
     love.graphics.setColor(0.5, 0.35, 0.2, 1)
     love.graphics.rectangle("fill", x + size/2 - 1, y - 15, 2, 25)
-    love.graphics.setColor(0.8, 0.2, 0.2, 1)
+    love.graphics.setColor(bannerColor)
     love.graphics.polygon("fill", 
         x + size/2 + 1, y - 15,
         x + size/2 + 16, y - 8,
         x + size/2 + 1, y
     )
-    love.graphics.setColor(0.9, 0.8, 0.2, 1)
+    love.graphics.setColor(emblemColor)
     love.graphics.circle("fill", x + size/2 + 8, y - 8, 3)
     
     -- Torch lights
@@ -381,11 +392,12 @@ function TownHall:drawHold(x, y, size)
     love.graphics.rectangle("fill", x + 8, y + 28, 10, 14, 1)
     love.graphics.rectangle("fill", x + size - 18, y + 28, 10, 14, 1)
     
-    -- Banners (two flags)
+    -- Banners (two flags) - TEAM COLORED
+    local bannerColor = Teams and Teams.getColor(self.team, "banner") or {0.7, 0.2, 0.2, 1}
     love.graphics.setColor(0.5, 0.35, 0.2, 1)
     love.graphics.rectangle("fill", x + 10, y - 28, 2, 15)
     love.graphics.rectangle("fill", x + size - 12, y - 28, 2, 15)
-    love.graphics.setColor(0.7, 0.2, 0.2, 1)
+    love.graphics.setColor(bannerColor)
     love.graphics.polygon("fill", x + 12, y - 28, x + 25, y - 23, x + 12, y - 16)
     love.graphics.polygon("fill", x + size - 10, y - 28, x + size - 23, y - 23, x + size - 10, y - 16)
     
@@ -457,17 +469,20 @@ function TownHall:drawKeep(x, y, size)
     love.graphics.line(x + size/2 - 10, y + 30, x + size/2 + 10, y + 30)
     love.graphics.line(x + size/2, y + 20, x + size/2, y + 40)
     
-    -- Royal banner (center, large)
+    -- Royal banner (center, large) - TEAM COLORED
+    local bannerColor = Teams and Teams.getColor(self.team, "banner") or {0.6, 0.15, 0.15, 1}
+    local emblemColor = Teams and Teams.getColor(self.team, "emblem") or {0.9, 0.8, 0.2, 1}
+    
     love.graphics.setColor(0.5, 0.35, 0.2, 1)
     love.graphics.rectangle("fill", x + size/2 - 1, y - 45, 3, 35)
-    love.graphics.setColor(0.6, 0.15, 0.15, 1)
+    love.graphics.setColor(bannerColor)
     love.graphics.polygon("fill", 
         x + size/2 + 2, y - 45,
         x + size/2 + 25, y - 35,
         x + size/2 + 2, y - 15
     )
     -- Crown emblem
-    love.graphics.setColor(0.9, 0.8, 0.2, 1)
+    love.graphics.setColor(emblemColor)
     love.graphics.polygon("fill", 
         x + size/2 + 8, y - 38,
         x + size/2 + 10, y - 32,
@@ -683,13 +698,26 @@ function TownHall:mousereleased(x, y, button)
 end
 
 function TownHall:drawOnMinimap(mapX, mapY, scale)
-    -- Color based on tier
-    if self.tier == 3 then
-        love.graphics.setColor(0.8, 0.6, 0.2, 1)  -- Gold for Keep
-    elseif self.tier == 2 then
-        love.graphics.setColor(0.7, 0.5, 0.25, 1)  -- Bronze for Hold
+    -- Use team color for minimap, with tier-based brightness
+    if Teams then
+        local teamColor = Teams.getColor(self.team, "minimapBuilding")
+        -- Brighten based on tier
+        local tierMult = 0.8 + self.tier * 0.1
+        love.graphics.setColor(
+            math.min(1, teamColor[1] * tierMult),
+            math.min(1, teamColor[2] * tierMult),
+            math.min(1, teamColor[3] * tierMult),
+            1
+        )
     else
-        love.graphics.setColor(0.6, 0.4, 0.2, 1)  -- Brown for Town Hall
+        -- Fallback: Color based on tier
+        if self.tier == 3 then
+            love.graphics.setColor(0.8, 0.6, 0.2, 1)  -- Gold for Keep
+        elseif self.tier == 2 then
+            love.graphics.setColor(0.7, 0.5, 0.25, 1)  -- Bronze for Hold
+        else
+            love.graphics.setColor(0.6, 0.4, 0.2, 1)  -- Brown for Town Hall
+        end
     end
     local x = mapX + (self.gridX - 1) * scale
     local y = mapY + (self.gridY - 1) * scale
