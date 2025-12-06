@@ -1,17 +1,18 @@
 --[[
     Button Component
-    Reusable button with hover/click states
+    Reusable button with hover/click states - Metal theme
 ]]
 
 local Button = {}
 Button.__index = Button
 
+-- Metal themed default colors
 local colors = {
-    normal = {0.3, 0.5, 0.8, 1},
-    hover = {0.4, 0.6, 0.9, 1},
-    pressed = {0.2, 0.4, 0.7, 1},
-    text = {1, 1, 1, 1},
-    border = {0.2, 0.3, 0.5, 1}
+    normal = {0.4, 0.38, 0.35, 1},    -- Bronze metal
+    hover = {0.5, 0.48, 0.42, 1},      -- Lighter bronze
+    pressed = {0.3, 0.28, 0.25, 1},    -- Darker bronze
+    text = {0.95, 0.92, 0.85, 1},      -- Light cream
+    border = {0.6, 0.5, 0.35, 1}       -- Gold accent
 }
 
 function Button.new(params)

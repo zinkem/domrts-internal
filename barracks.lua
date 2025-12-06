@@ -287,25 +287,29 @@ function Barracks:updateUI(resources, screenW, screenH, font, currentPop, maxPop
     self.maxPop = maxPop
     
     if self.selected and self.completed then
-        local panelX = screenW - 180
-        local buttonY = 70 + 145
+        -- New bottom panel positioning
+        local panelX = screenW - 288
+        local panelY = screenH - 188
+        local buttonY = panelY + 55
+        local buttonW = 125
+        local buttonH = 36
         
         -- Train Footman button
         if not self.actionButton then
             local selfRef = self
             self.actionButton = Button.new({
-                x = panelX + 10,
+                x = panelX + 12,
                 y = buttonY,
-                width = 150,
-                height = 40,
-                text = "Train Footman (135/0)",
+                width = buttonW,
+                height = buttonH,
+                text = "Footman (135/0)",
                 font = font,
                 colors = {
-                    normal = {0.5, 0.3, 0.3, 1},
-                    hover = {0.6, 0.4, 0.4, 1},
-                    pressed = {0.4, 0.2, 0.2, 1},
-                    text = {1, 1, 1, 1},
-                    border = {0.4, 0.2, 0.2, 1}
+                    normal = {0.5, 0.35, 0.35, 1},
+                    hover = {0.6, 0.45, 0.45, 1},
+                    pressed = {0.4, 0.25, 0.25, 1},
+                    text = {0.95, 0.92, 0.85, 1},
+                    border = {0.6, 0.35, 0.35, 1}
                 },
                 onClick = function()
                     if resources.gold >= Barracks.FOOTMAN_COST and 
@@ -317,6 +321,9 @@ function Barracks:updateUI(resources, screenW, screenH, font, currentPop, maxPop
                     end
                 end
             })
+        else
+            self.actionButton.x = panelX + 12
+            self.actionButton.y = buttonY
         end
         
         self.actionButton:setEnabled(resources.gold >= Barracks.FOOTMAN_COST and currentPop < maxPop and self:canProduce())
@@ -339,18 +346,18 @@ function Barracks:updateUI(resources, screenW, screenH, font, currentPop, maxPop
             if not self.knightButton then
                 local selfRef = self
                 self.knightButton = Button.new({
-                    x = panelX + 10,
-                    y = buttonY + 45,
-                    width = 150,
-                    height = 40,
-                    text = "Train Knight (300/100)",
+                    x = panelX + 12 + buttonW + 8,
+                    y = buttonY,
+                    width = buttonW,
+                    height = buttonH,
+                    text = "Knight (300/100)",
                     font = font,
                     colors = {
-                        normal = {0.5, 0.45, 0.25, 1},
-                        hover = {0.6, 0.55, 0.35, 1},
-                        pressed = {0.4, 0.35, 0.15, 1},
-                        text = {1, 1, 1, 1},
-                        border = {0.4, 0.35, 0.15, 1}
+                        normal = {0.55, 0.45, 0.25, 1},
+                        hover = {0.65, 0.55, 0.35, 1},
+                        pressed = {0.45, 0.35, 0.15, 1},
+                        text = {0.95, 0.92, 0.85, 1},
+                        border = {0.7, 0.55, 0.25, 1}
                     },
                     onClick = function()
                         if resources.gold >= Barracks.KNIGHT_COST_GOLD and 
@@ -364,6 +371,9 @@ function Barracks:updateUI(resources, screenW, screenH, font, currentPop, maxPop
                         end
                     end
                 })
+            else
+                self.knightButton.x = panelX + 12 + buttonW + 8
+                self.knightButton.y = buttonY
             end
             
             local canAffordKnight = resources.gold >= Barracks.KNIGHT_COST_GOLD and resources.lumber >= Barracks.KNIGHT_COST_LUMBER
@@ -404,13 +414,6 @@ function Barracks:drawUI()
         
         if self.knightButton then
             self.knightButton:draw()
-        elseif not Requirements.canProduceKnight() then
-            -- Show hint about needing Stable
-            local screenW = love.graphics.getWidth()
-            love.graphics.setColor(0.6, 0.6, 0.6, 1)
-            love.graphics.setFont(Game.fonts.small)
-            love.graphics.print("Build Stable for Knights", screenW - 170, 70 + 190)
-            love.graphics.setColor(1, 1, 1, 1)
         end
     end
 end

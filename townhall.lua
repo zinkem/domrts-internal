@@ -539,18 +539,22 @@ function TownHall:updateUI(resources, screenW, screenH, font, currentPop, maxPop
     self.maxPop = maxPop
     
     if self.selected and self.completed then
-        local panelX = screenW - 180
-        local buttonY = 70 + 145
+        -- New bottom panel positioning
+        local panelX = screenW - 288
+        local panelY = screenH - 188
+        local buttonY = panelY + 55
+        local buttonW = 125
+        local buttonH = 36
         
         -- Train Peon button
         if not self.actionButton then
             local selfRef = self
             self.actionButton = Button.new({
-                x = panelX + 10,
+                x = panelX + 12,
                 y = buttonY,
-                width = 150,
-                height = 40,
-                text = "Train Peon (400/0)",
+                width = buttonW,
+                height = buttonH,
+                text = "Peon (400/0)",
                 font = font,
                 onClick = function()
                     if resources.gold >= selfRef.productionCost and 
@@ -562,6 +566,10 @@ function TownHall:updateUI(resources, screenW, screenH, font, currentPop, maxPop
                     end
                 end
             })
+        else
+            -- Update button position
+            self.actionButton.x = panelX + 12
+            self.actionButton.y = buttonY
         end
         
         local canAfford = resources.gold >= self.productionCost
@@ -591,18 +599,18 @@ function TownHall:updateUI(resources, screenW, screenH, font, currentPop, maxPop
             if not self.upgradeButton then
                 local selfRef = self
                 self.upgradeButton = Button.new({
-                    x = panelX + 10,
-                    y = buttonY + 45,
-                    width = 150,
-                    height = 40,
+                    x = panelX + 12 + buttonW + 8,
+                    y = buttonY,
+                    width = buttonW,
+                    height = buttonH,
                     text = upgradeName,
                     font = font,
                     colors = {
-                        normal = {0.5, 0.45, 0.25, 1},
-                        hover = {0.6, 0.55, 0.35, 1},
-                        pressed = {0.4, 0.35, 0.15, 1},
-                        text = {1, 1, 1, 1},
-                        border = {0.4, 0.35, 0.15, 1}
+                        normal = {0.55, 0.45, 0.25, 1},
+                        hover = {0.65, 0.55, 0.35, 1},
+                        pressed = {0.45, 0.35, 0.15, 1},
+                        text = {0.95, 0.92, 0.85, 1},
+                        border = {0.7, 0.55, 0.25, 1}
                     },
                     onClick = function()
                         local costG, costL = selfRef:getUpgradeCost()
@@ -613,6 +621,10 @@ function TownHall:updateUI(resources, screenW, screenH, font, currentPop, maxPop
                         end
                     end
                 })
+            else
+                -- Update button position if panel moved
+                self.upgradeButton.x = panelX + 12 + buttonW + 8
+                self.upgradeButton.y = buttonY
             end
             
             local costText = string.format("%s (%d/%d)", upgradeName, upgradeCostGold, upgradeCostLumber)
@@ -649,25 +661,13 @@ function TownHall:updateUI(resources, screenW, screenH, font, currentPop, maxPop
 end
 
 function TownHall:drawUI()
-    if self.selected then
+    if self.selected and self.completed then
         if self.actionButton then
             self.actionButton:draw()
         end
         
         if self.upgradeButton and self.tier < 3 and not self.isUpgrading then
             self.upgradeButton:draw()
-        elseif self.isUpgrading then
-            local screenW = love.graphics.getWidth()
-            love.graphics.setColor(0.8, 0.7, 0.2, 1)
-            love.graphics.setFont(Game.fonts.small)
-            love.graphics.print("Upgrading: " .. self:getUpgradeProgress() .. "%", screenW - 170, 70 + 190)
-            love.graphics.setColor(1, 1, 1, 1)
-        elseif self.tier == 3 then
-            local screenW = love.graphics.getWidth()
-            love.graphics.setColor(0.8, 0.7, 0.2, 1)
-            love.graphics.setFont(Game.fonts.small)
-            love.graphics.print("Max Tier Reached", screenW - 170, 70 + 190)
-            love.graphics.setColor(1, 1, 1, 1)
         end
     end
 end

@@ -942,10 +942,13 @@ end
 
 function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
     if self.selected and self.state ~= Peon.STATE_BUILDING then
-        local panelX = screenW - 180
-        local buttonY = 70 + 145
-        local buttonHeight = 32
-        local buttonSpacing = 35
+        -- New bottom panel positioning
+        local panelX = screenW - 288
+        local panelY = screenH - 188
+        local buttonY = panelY + 55
+        local buttonW = 125
+        local buttonH = 32
+        local buttonSpacing = 36
         local maxButtonsPerPage = 4
         
         local buildingDefs = getBuildingDefs()
@@ -973,19 +976,23 @@ function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
                 local def = buildingDefs[i]
                 local costText = string.format("%s (%d/%d)", def.name, def.costGold, def.costLumber)
                 
+                -- Two columns layout
+                local col = buttonIdx % 2
+                local row = math.floor(buttonIdx / 2)
+                
                 local btn = Button.new({
-                    x = panelX + 10, 
-                    y = buttonY + buttonIdx * buttonSpacing, 
-                    width = 150, 
-                    height = buttonHeight,
+                    x = panelX + 12 + col * (buttonW + 8), 
+                    y = buttonY + row * buttonSpacing, 
+                    width = buttonW, 
+                    height = buttonH,
                     text = costText, 
                     font = font,
                     colors = {
                         normal = def.colors.normal, 
                         hover = def.colors.hover,
                         pressed = def.colors.pressed, 
-                        text = {1, 1, 1, 1}, 
-                        border = def.colors.pressed
+                        text = {0.95, 0.92, 0.85, 1}, 
+                        border = {def.colors.normal[1] + 0.1, def.colors.normal[2] + 0.1, def.colors.normal[3] + 0.1, 1}
                     },
                     onClick = function()
                         if startBuildCallback then startBuildCallback(self, def.type) end
@@ -1008,20 +1015,42 @@ function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
             local meetsReqs = def.canBuild()
             
             btn:setEnabled(canAfford and canGiveOrders and meetsReqs)
-            btn:setPosition(panelX + 10, buttonY + buttonIdx * buttonSpacing)
+            
+            -- Set disabled reason
+            local reason = nil
+            if not meetsReqs and def.requirement then
+                reason = "Need " .. def.requirement
+            elseif not canGiveOrders then
+                reason = "Peon busy"
+            elseif not canAfford then
+                if resources.gold < def.costGold and resources.lumber < def.costLumber then
+                    reason = "Need gold & lumber"
+                elseif resources.gold < def.costGold then
+                    reason = "Need gold"
+                else
+                    reason = "Need lumber"
+                end
+            end
+            btn:setDisabledReason(reason)
+            
+            -- Two columns layout
+            local col = buttonIdx % 2
+            local row = math.floor(buttonIdx / 2)
+            btn:setPosition(panelX + 12 + col * (buttonW + 8), buttonY + row * buttonSpacing)
             btn:update(0)
             buttonIdx = buttonIdx + 1
         end
         
         -- Page navigation buttons
         if totalPages > 1 then
-            local navY = buttonY + maxButtonsPerPage * buttonSpacing + 5
+            -- With 2 columns, 4 buttons = 2 rows
+            local navY = buttonY + 2 * buttonSpacing + 5
             
             if not self.prevPageButton then
                 self.prevPageButton = Button.new({
-                    x = panelX + 10, y = navY, width = 70, height = 25,
+                    x = panelX + 12, y = navY, width = 60, height = 24,
                     text = "< Prev", font = font,
-                    colors = {normal = {0.35, 0.35, 0.4, 1}, hover = {0.45, 0.45, 0.5, 1}, pressed = {0.25, 0.25, 0.3, 1}, text = {1,1,1,1}, border = {0.25,0.25,0.3,1}},
+                    colors = {normal = {0.35, 0.32, 0.3, 1}, hover = {0.45, 0.42, 0.4, 1}, pressed = {0.25, 0.22, 0.2, 1}, text = {0.95,0.92,0.85,1}, border = {0.5,0.45,0.4,1}},
                     onClick = function()
                         self.buildMenuPage = self.buildMenuPage - 1
                         if self.buildMenuPage < 1 then self.buildMenuPage = totalPages end
@@ -1032,9 +1061,9 @@ function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
             
             if not self.nextPageButton then
                 self.nextPageButton = Button.new({
-                    x = panelX + 90, y = navY, width = 70, height = 25,
+                    x = panelX + 12 + 68, y = navY, width = 60, height = 24,
                     text = "Next >", font = font,
-                    colors = {normal = {0.35, 0.35, 0.4, 1}, hover = {0.45, 0.45, 0.5, 1}, pressed = {0.25, 0.25, 0.3, 1}, text = {1,1,1,1}, border = {0.25,0.25,0.3,1}},
+                    colors = {normal = {0.35, 0.32, 0.3, 1}, hover = {0.45, 0.42, 0.4, 1}, pressed = {0.25, 0.22, 0.2, 1}, text = {0.95,0.92,0.85,1}, border = {0.5,0.45,0.4,1}},
                     onClick = function()
                         self.buildMenuPage = self.buildMenuPage + 1
                         if self.buildMenuPage > totalPages then self.buildMenuPage = 1 end
@@ -1043,6 +1072,9 @@ function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
                 })
             end
             
+            -- Update positions
+            self.prevPageButton:setPosition(panelX + 12, navY)
+            self.nextPageButton:setPosition(panelX + 12 + 68, navY)
             self.prevPageButton:setEnabled(true)
             self.nextPageButton:setEnabled(true)
             self.prevPageButton:update(0)
@@ -1063,16 +1095,6 @@ function Peon:drawUI()
     if self.selected and self.state ~= Peon.STATE_BUILDING then
         for _, btnData in ipairs(self.buildButtons) do
             btnData.button:draw()
-            
-            -- Show requirement text if can't build
-            if not btnData.def.canBuild() and btnData.def.requirement then
-                local bx = btnData.button.x
-                local by = btnData.button.y
-                love.graphics.setColor(1, 0.5, 0.3, 0.8)
-                love.graphics.setFont(Game.fonts.small)
-                love.graphics.print("Needs " .. btnData.def.requirement, bx + 2, by + 34)
-                love.graphics.setColor(1, 1, 1, 1)
-            end
         end
         
         if self.prevPageButton then self.prevPageButton:draw() end
@@ -1083,9 +1105,12 @@ function Peon:drawUI()
             local buildingDefs = getBuildingDefs()
             local totalPages = math.ceil(#buildingDefs / 4)
             local screenW = love.graphics.getWidth()
-            love.graphics.setColor(0.8, 0.8, 0.8, 1)
+            local screenH = love.graphics.getHeight()
+            local panelX = screenW - 288
+            local panelY = screenH - 188
+            love.graphics.setColor(0.7, 0.65, 0.55, 1)
             love.graphics.setFont(Game.fonts.small)
-            love.graphics.print(string.format("Page %d/%d", self.buildMenuPage, totalPages), screenW - 120, 70 + 145 + 4 * 35 + 32)
+            love.graphics.print(string.format("%d/%d", self.buildMenuPage, totalPages), panelX + 150, panelY + 55 + 2 * 36 + 8)
             love.graphics.setColor(1, 1, 1, 1)
         end
     end
