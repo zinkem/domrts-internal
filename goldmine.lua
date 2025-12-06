@@ -195,6 +195,10 @@ function GoldMine:extractGold(amount)
     self.goldReserves = self.goldReserves - extracted
     if self.goldReserves <= 0 then
         self.depleted = true
+        -- Notify callback if set (used by gameplay to update navGrid)
+        if self.onDepleted then
+            self.onDepleted(self)
+        end
     end
     return extracted
 end

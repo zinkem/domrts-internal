@@ -162,92 +162,49 @@ function Peon:isTouchingBuilding(building, contactBuffer)
     return dist <= self.radius + contactBuffer
 end
 
-function Peon:canMoveTo(newX, newY, buildings)
-    -- Check tree collision
-    if self.map then
-        local targetGridX, targetGridY = self.map:worldToGrid(newX, newY)
-        local isTargetTree = self.targetTreeX and targetGridX == self.targetTreeX and targetGridY == self.targetTreeY
-        if not isTargetTree and not self.map:isWorldPosPassable(newX, newY) then
-            return false
-        end
+-- Get separation force from nearby units (pushes units apart when overlapping)
+-- Peons carrying gold or heading to a mine skip this to allow phasing through other units
+function Peon:getUnitSeparation(allUnits)
+    -- Skip separation if carrying gold (allows phasing through other units)
+    if self.carryingGold and self.carryingGold > 0 then
+        return 0, 0
     end
     
-    if not buildings then return true end
-    
-    for _, b in ipairs(buildings) do
-        -- Skip collision check for target mine (peon needs to walk into it)
-        if self.targetMine and b == self.targetMine then
-            goto continue
-        end
-        
-        local currentPen = self:getBuildingPenetration(self.worldX, self.worldY, b)
-        local newPen = self:getBuildingPenetration(newX, newY, b)
-        
-        if newPen > 0 then
-            -- Would be inside building
-            if currentPen > 0 then
-                -- Already inside - only allow if reducing penetration (escaping)
-                if newPen >= currentPen then
-                    return false
-                end
-            else
-                -- Not inside currently, don't allow entering
-                return false
-            end
-        end
-        
-        ::continue::
+    -- Skip separation if heading to a mine (prevents congestion at entrance)
+    if self.targetMine then
+        return 0, 0
     end
     
-    return true
-end
-
--- Get separation force from nearby buildings (pushes peon away from buildings it's too close to)
-function Peon:getBuildingSeparation(buildings)
     local sepX, sepY = 0, 0
-    local separationDist = self.radius + 4  -- Start separating when within radius + 4 pixels
+    local separationDist = self.radius * 2.5
     
-    if not buildings then return 0, 0 end
+    if not allUnits then return 0, 0 end
     
-    for _, b in ipairs(buildings) do
-        -- Skip target mine - peon needs to get close to it
-        if self.targetMine and b == self.targetMine then
-            goto continue
-        end
-        
-        if b.getWorldBounds then
-            local bx1, by1, bx2, by2 = b:getWorldBounds()
-            local closestX = math.max(bx1, math.min(self.worldX, bx2))
-            local closestY = math.max(by1, math.min(self.worldY, by2))
-            local dx = self.worldX - closestX
-            local dy = self.worldY - closestY
+    for _, other in ipairs(allUnits) do
+        if other ~= self and other.worldX and other.worldY then
+            -- Skip separation with other gold carriers or mine-bound peons
+            if (other.carryingGold and other.carryingGold > 0) or other.targetMine then
+                goto continue
+            end
+            
+            local dx = self.worldX - other.worldX
+            local dy = self.worldY - other.worldY
             local dist = math.sqrt(dx * dx + dy * dy)
             
             if dist < separationDist and dist > 0.1 then
-                -- Push away from building proportional to how close we are
                 local force = (separationDist - dist) / separationDist
                 sepX = sepX + (dx / dist) * force
                 sepY = sepY + (dy / dist) * force
             elseif dist < 0.1 then
-                -- Inside building, push toward nearest edge
-                local bcx = (bx1 + bx2) / 2
-                local bcy = (by1 + by2) / 2
-                dx = self.worldX - bcx
-                dy = self.worldY - bcy
-                local len = math.sqrt(dx * dx + dy * dy)
-                if len > 0.1 then
-                    sepX = sepX + (dx / len)
-                    sepY = sepY + (dy / len)
-                else
-                    sepX = sepX + 1  -- Default push right
-                end
+                local angle = math.random() * math.pi * 2
+                sepX = sepX + math.cos(angle)
+                sepY = sepY + math.sin(angle)
             end
+            
+            ::continue::
         end
-        
-        ::continue::
     end
     
-    -- Normalize if too strong
     local len = math.sqrt(sepX * sepX + sepY * sepY)
     if len > 1 then
         sepX = sepX / len
@@ -257,147 +214,67 @@ function Peon:getBuildingSeparation(buildings)
     return sepX, sepY
 end
 
--- Compute path to target using line-of-sight pathfinding
-function Peon:computePath(targetX, targetY, buildings)
-    -- Filter out target mine so pathfinding goes TO it, not around it
-    local filteredBuildings = buildings
-    if self.targetMine and buildings then
-        filteredBuildings = {}
-        for _, b in ipairs(buildings) do
-            if b ~= self.targetMine then
-                table.insert(filteredBuildings, b)
-            end
-        end
-    end
-    return Pathfinding.findPath(self.worldX, self.worldY, targetX, targetY, filteredBuildings, self.map, self.radius)
+-- Compute path to target using A* pathfinding
+function Peon:computePath(targetX, targetY)
+    return Pathfinding.findPath(self.worldX, self.worldY, targetX, targetY, self.radius)
 end
 
--- Advance to next waypoint if we've reached current one AND can see the next one
-function Peon:updateWaypoint(buildings)
-    if Pathfinding.reachedWaypoint(self.worldX, self.worldY, self.path, self.currentWaypoint, 12) then
-        local nextWp = self.currentWaypoint + 1
-        if nextWp <= #self.path then
-            local nextTarget = self.path[nextWp]
-            -- Filter out target mine for line-of-sight check
-            local filteredBuildings = buildings
-            if self.targetMine and buildings then
-                filteredBuildings = {}
-                for _, b in ipairs(buildings) do
-                    if b ~= self.targetMine then
-                        table.insert(filteredBuildings, b)
-                    end
-                end
-            end
-            -- Only advance if we have clear line of sight to next waypoint
-            if Pathfinding.canSee(self.worldX, self.worldY, nextTarget.x, nextTarget.y, filteredBuildings, self.map, self.radius) then
-                self.currentWaypoint = nextWp
-            end
-        else
-            self.currentWaypoint = nextWp
-        end
-    end
-end
-
--- Try to move at full speed in the given direction
--- If blocked, find alternative directions that maintain full speed
--- Also applies gentle separation from buildings to prevent sticking
-function Peon:tryMove(dirX, dirY, moveSpeed, buildings)
-    -- Apply building separation force to prevent sticking
-    local sepX, sepY = self:getBuildingSeparation(buildings)
-    local sepStrength = 0.3  -- How much separation affects movement
+-- Simple movement along path - paths are pre-validated by A*
+function Peon:moveToward(targetX, targetY, dt, allUnits)
+    local dx = targetX - self.worldX
+    local dy = targetY - self.worldY
+    local dist = math.sqrt(dx * dx + dy * dy)
     
-    -- Blend intended direction with separation
-    local finalDirX = dirX + sepX * sepStrength
-    local finalDirY = dirY + sepY * sepStrength
+    if dist < 1 then return end
     
-    -- Normalize
-    local len = math.sqrt(finalDirX * finalDirX + finalDirY * finalDirY)
+    local dirX = dx / dist
+    local dirY = dy / dist
+    
+    -- Apply unit-unit separation (unless carrying gold)
+    local sepX, sepY = self:getUnitSeparation(allUnits)
+    local sepStrength = 0.3
+    
+    dirX = dirX + sepX * sepStrength
+    dirY = dirY + sepY * sepStrength
+    
+    -- Re-normalize
+    local len = math.sqrt(dirX * dirX + dirY * dirY)
     if len > 0.1 then
-        finalDirX = finalDirX / len
-        finalDirY = finalDirY / len
-    else
-        finalDirX = dirX
-        finalDirY = dirY
+        dirX = dirX / len
+        dirY = dirY / len
     end
     
-    local moveX = finalDirX * moveSpeed
-    local moveY = finalDirY * moveSpeed
-    local newX = self.worldX + moveX
-    local newY = self.worldY + moveY
+    local moveSpeed = self.speed * dt
+    local newX = self.worldX + dirX * moveSpeed
+    local newY = self.worldY + dirY * moveSpeed
     
-    -- First try direct movement
-    if self:canMoveTo(newX, newY, buildings) then
+    -- Safety check - don't walk into trees (unless targeting that tree)
+    local canMove = true
+    if self.map then
+        local targetGridX, targetGridY = self.map:worldToGrid(newX, newY)
+        local isTargetTree = self.targetTreeX and targetGridX == self.targetTreeX and targetGridY == self.targetTreeY
+        if not isTargetTree and not self.map:isWorldPosPassable(newX, newY) then
+            canMove = false
+        end
+    end
+    
+    if canMove then
         self.worldX = newX
         self.worldY = newY
-        return true
-    end
-    
-    -- Blocked - try sliding along walls at FULL SPEED
-    -- Test 8 alternative directions, pick best one that's closest to intended direction
-    local alternatives = {
-        {dx = 1, dy = 0},
-        {dx = -1, dy = 0},
-        {dx = 0, dy = 1},
-        {dx = 0, dy = -1},
-        {dx = 0.707, dy = 0.707},
-        {dx = -0.707, dy = 0.707},
-        {dx = 0.707, dy = -0.707},
-        {dx = -0.707, dy = -0.707},
-    }
-    
-    -- Sort by how aligned they are with intended direction (dot product)
-    -- Also factor in separation direction
-    table.sort(alternatives, function(a, b)
-        local dotA = a.dx * dirX + a.dy * dirY + (a.dx * sepX + a.dy * sepY) * 0.5
-        local dotB = b.dx * dirX + b.dy * dirY + (b.dx * sepX + b.dy * sepY) * 0.5
-        return dotA > dotB
-    end)
-    
-    -- Try each alternative at full speed
-    for _, alt in ipairs(alternatives) do
-        local dot = alt.dx * dirX + alt.dy * dirY
-        -- Only use alternatives that are at least somewhat aligned (dot > 0) or help with separation
-        local sepDot = alt.dx * sepX + alt.dy * sepY
-        if dot > 0.1 or sepDot > 0.3 then
-            local altX = self.worldX + alt.dx * moveSpeed
-            local altY = self.worldY + alt.dy * moveSpeed
-            if self:canMoveTo(altX, altY, buildings) then
-                self.worldX = altX
-                self.worldY = altY
-                return true
-            end
+    elseif self.map then
+        -- Try axis-aligned movement as fallback
+        local canMoveX = self.map:isWorldPosPassable(newX, self.worldY)
+        local canMoveY = self.map:isWorldPosPassable(self.worldX, newY)
+        if canMoveX then
+            self.worldX = newX
+        elseif canMoveY then
+            self.worldY = newY
         end
     end
-    
-    -- Still stuck - try smaller movements in the intended direction
-    for fraction = 0.75, 0.25, -0.25 do
-        local smallX = self.worldX + moveX * fraction
-        local smallY = self.worldY + moveY * fraction
-        if self:canMoveTo(smallX, smallY, buildings) then
-            self.worldX = smallX
-            self.worldY = smallY
-            return true
-        end
-    end
-    
-    -- Last resort - just apply separation if possible
-    if sepX ~= 0 or sepY ~= 0 then
-        local sepMoveX = self.worldX + sepX * moveSpeed
-        local sepMoveY = self.worldY + sepY * moveSpeed
-        if self:canMoveTo(sepMoveX, sepMoveY, buildings) then
-            self.worldX = sepMoveX
-            self.worldY = sepMoveY
-            return true
-        end
-    end
-    
-    return false  -- Completely stuck
 end
 
 -- Get direction to move towards current waypoint
-function Peon:getMoveDirection(targetX, targetY, buildings)
-    -- Update waypoint progression
-    self:updateWaypoint(buildings)
+function Peon:getMoveDirection(targetX, targetY)
     
     -- Get direction from pathfinding
     local dirX, dirY = Pathfinding.getDirection(self.worldX, self.worldY, self.path, self.currentWaypoint)
@@ -461,11 +338,11 @@ function Peon:update(dt, buildings, townHall, goldMine, resources, allUnits, all
     end
     
     if self.state == Peon.STATE_MOVING then
-        self:updateMoving(dt, buildings, goldMine)
+        self:updateMoving(dt, buildings, goldMine, allUnits)
     elseif self.state == Peon.STATE_HARVESTING then
         self:updateHarvesting(dt, resources)
     elseif self.state == Peon.STATE_RETURNING then
-        self:updateReturning(dt, buildings, townHall, resources)
+        self:updateReturning(dt, buildings, townHall, resources, allUnits)
     elseif self.state == Peon.STATE_CHOPPING then
         self:updateChopping(dt, resources)
     elseif self.state == Peon.STATE_BUILDING then
@@ -475,7 +352,7 @@ function Peon:update(dt, buildings, townHall, goldMine, resources, allUnits, all
     end
 end
 
-function Peon:updateMoving(dt, buildings, goldMine)
+function Peon:updateMoving(dt, buildings, goldMine, allUnits)
     if not self.targetX or not self.targetY then
         self.state = Peon.STATE_IDLE
         return
@@ -566,18 +443,26 @@ function Peon:updateMoving(dt, buildings, goldMine)
     
     -- Make sure we have a path
     if not self.path then
-        self.path = self:computePath(self.targetX, self.targetY, buildings)
+        self.path = self:computePath(self.targetX, self.targetY)
         self.currentWaypoint = 1
     end
     
-    local moveDirX, moveDirY = self:getMoveDirection(self.targetX, self.targetY, buildings)
-    
-    if not moveDirX or not moveDirY then
-        return
+    -- Move along path
+    if self.path and self.currentWaypoint <= #self.path then
+        local wp = self.path[self.currentWaypoint]
+        
+        if Pathfinding.reachedWaypoint(self.worldX, self.worldY, self.path, self.currentWaypoint, 8) then
+            self.currentWaypoint = self.currentWaypoint + 1
+        end
+        
+        if self.currentWaypoint <= #self.path then
+            wp = self.path[self.currentWaypoint]
+            self:moveToward(wp.x, wp.y, dt, allUnits)
+        end
+    else
+        -- No path or reached end - move directly toward target
+        self:moveToward(self.targetX, self.targetY, dt, allUnits)
     end
-    
-    local moveSpeed = self.speed * dt
-    self:tryMove(moveDirX, moveDirY, moveSpeed, buildings)
 end
 
 function Peon:updateHarvesting(dt, resources)
@@ -601,7 +486,7 @@ function Peon:updateHarvesting(dt, resources)
     end
 end
 
-function Peon:updateReturning(dt, buildings, townHall, resources)
+function Peon:updateReturning(dt, buildings, townHall, resources, allUnits)
     -- If no town hall, drop gold and go idle
     if not townHall or (townHall.isDead and townHall:isDead()) then
         self.carryingGold = 0
@@ -674,16 +559,9 @@ function Peon:updateReturning(dt, buildings, townHall, resources)
     end
     
     local targetX, targetY = townHall:getWorldCenter()
-    local dx = targetX - self.worldX
-    local dy = targetY - self.worldY
-    local dist = math.sqrt(dx * dx + dy * dy)
     
-    if dist > 0.1 then
-        local moveDirX = dx / dist
-        local moveDirY = dy / dist
-        local moveSpeed = self.speed * dt
-        self:tryMove(moveDirX, moveDirY, moveSpeed, buildings)
-    end
+    -- Move toward town hall
+    self:moveToward(targetX, targetY, dt, allUnits)
 end
 
 -- Find an adjacent tree that is accessible (has a passable tile next to it)
@@ -897,6 +775,7 @@ function Peon:updateAttacking(dt, buildings, allUnits, allBuildings)
     
     if dist <= attackRange then
         -- In range - attack if cooldown ready
+        self.path = nil  -- Clear path when in attack range
         if self.attackCooldown <= 0 then
             -- Perform attack
             if target.takeDamage then
@@ -914,20 +793,7 @@ function Peon:updateAttacking(dt, buildings, allUnits, allBuildings)
     else
         -- Move toward target
         local tx, ty
-        if target.getWorldBounds then
-            -- For buildings, move toward nearest edge
-            local bx1, by1, bx2, by2 = target:getWorldBounds()
-            tx = math.max(bx1, math.min(self.worldX, bx2))
-            ty = math.max(by1, math.min(self.worldY, by2))
-            -- Add small offset to be just outside the building
-            local dx = self.worldX - tx
-            local dy = self.worldY - ty
-            local len = math.sqrt(dx * dx + dy * dy)
-            if len > 0 then
-                tx = tx + (dx / len) * 5
-                ty = ty + (dy / len) * 5
-            end
-        elseif target.getWorldCenter then
+        if target.getWorldCenter then
             tx, ty = target:getWorldCenter()
         else
             tx, ty = target.worldX, target.worldY
@@ -937,17 +803,25 @@ function Peon:updateAttacking(dt, buildings, allUnits, allBuildings)
         if not self.path then
             self.targetX = tx
             self.targetY = ty
-            self.path = self:computePath(tx, ty, buildings)
+            self.path = self:computePath(tx, ty)
             self.currentWaypoint = 1
         end
         
         -- Move along path
-        if self.path then
-            local dirX, dirY = self:getMoveDirection(tx, ty, buildings)
-            if dirX then
-                local moveSpeed = self.speed * dt
-                self:tryMove(dirX, dirY, moveSpeed, buildings)
+        if self.path and self.currentWaypoint <= #self.path then
+            local wp = self.path[self.currentWaypoint]
+            
+            if Pathfinding.reachedWaypoint(self.worldX, self.worldY, self.path, self.currentWaypoint, 8) then
+                self.currentWaypoint = self.currentWaypoint + 1
             end
+            
+            if self.currentWaypoint <= #self.path then
+                wp = self.path[self.currentWaypoint]
+                self:moveToward(wp.x, wp.y, dt, allUnits)
+            end
+        else
+            -- No path - move directly toward target
+            self:moveToward(tx, ty, dt, allUnits)
         end
     end
 end

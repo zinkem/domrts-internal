@@ -13,7 +13,7 @@ local Peon = require("peon")
 local Farm = require("farm")
 local Barracks = require("barracks")
 local Footman = require("footman")
--- FlowField no longer needed - using pathfinding.lua
+local Pathfinding = require("pathfinding")
 local Requirements = require("requirements")
 
 -- New buildings (optional, may not all be implemented yet)
@@ -323,10 +323,12 @@ local function separateUnits()
             for j = i + 1, #allUnits do
                 local a, b = allUnits[i], allUnits[j]
                 
-                -- Skip collision if either unit is a peon carrying gold
+                -- Skip collision if either unit is a peon carrying gold or heading to mine
                 local aCarryingGold = a.carryingGold and a.carryingGold > 0
                 local bCarryingGold = b.carryingGold and b.carryingGold > 0
-                if aCarryingGold or bCarryingGold then
+                local aTargetingMine = a.targetMine ~= nil
+                local bTargetingMine = b.targetMine ~= nil
+                if aCarryingGold or bCarryingGold or aTargetingMine or bTargetingMine then
                     goto continue
                 end
                 
@@ -1418,33 +1420,34 @@ end
 
 local function createBuilding(gridX, gridY, buildingType, peon)
     local team = peon and peon.team or (Teams and Teams.PLAYER or 1)
+    local building = nil
     
     if buildingType == "farm" then
-        local building = Farm.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = Farm.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(farms, building)
     elseif buildingType == "barracks" then
-        local building = Barracks.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = Barracks.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(barracks, building)
     elseif buildingType == "lumbermill" and LumberMill then
-        local building = LumberMill.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = LumberMill.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(lumberMills, building)
     elseif buildingType == "blacksmith" and Blacksmith then
-        local building = Blacksmith.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = Blacksmith.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(blacksmiths, building)
     elseif buildingType == "scouttower" then
-        local building = ScoutTower.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = ScoutTower.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(scoutTowers, building)
     elseif buildingType == "archeryrange" and ArcheryRange then
-        local building = ArcheryRange.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = ArcheryRange.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(archeryRanges, building)
     elseif buildingType == "stable" and Stable then
-        local building = Stable.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = Stable.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         -- Set callback for Paladin upgrade
         building.onPaladinUpgrade = function()
@@ -1454,16 +1457,19 @@ local function createBuilding(gridX, gridY, buildingType, peon)
         end
         table.insert(stables, building)
     elseif buildingType == "siegeworkshop" and SiegeWorkshop then
-        local building = SiegeWorkshop.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = SiegeWorkshop.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(siegeWorkshops, building)
     elseif buildingType == "townhall" then
-        local building = TownHall.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = TownHall.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(townHalls, building)
     end
-    -- Invalidate all flow fields since map topology changed
-    -- Pathfinding computed on-demand, no need to invalidate
+    
+    -- Mark building as blocked in navigation grid
+    if building then
+        Pathfinding.markBuilding(building, false)
+    end
 end
 
 local function getBuildingCost(buildingType)
@@ -1709,9 +1715,10 @@ local function removeDeadBuildings(buildingList)
                 gameStats.buildingsDestroyed = gameStats.buildingsDestroyed + 1
                 gameStats.aiBuildingsLost = gameStats.aiBuildingsLost + 1
             end
-            -- Clear map area
+            -- Clear map area and update navGrid
             if building.gridX and building.gridSize and map then
-                -- Could restore grass tiles here
+                -- Mark building area as walkable in navGrid
+                Pathfinding.markBuilding(building, true)
             end
             table.remove(buildingList, i)
         end
@@ -1904,6 +1911,11 @@ function Gameplay.load(options)
     map = Map.new(mapOptions)
     map:setViewport(0, UI.topBarHeight, screenW, screenH - UI.topBarHeight - 70)  -- 70 = command bar height
     
+    -- Set up callback for tree depletion (updates navGrid)
+    map.onTreeDepleted = function(gridX, gridY)
+        Pathfinding.markTile(gridX, gridY, true)  -- Mark depleted tree as walkable
+    end
+    
     -- Human player team
     local playerTeam = Teams and Teams.PLAYER or 1
     local enemyTeam = Teams and Teams.ENEMY or 2
@@ -1918,12 +1930,18 @@ function Gameplay.load(options)
     local thGridX, thGridY = map:findClearArea(buildingSize, buildingSize, playerStartX, playerStartY, 15)
     townHall = TownHall.new({gridX = thGridX, gridY = thGridY, map = map, team = playerTeam})
     
+    -- Clear trees around town hall (5 tile radius for peons and nearby buildings)
+    local clearRadius = 5
+    map:clearArea(thGridX - clearRadius, thGridY - clearRadius, 
+                  buildingSize + clearRadius * 2, buildingSize + clearRadius * 2)
+    
     -- Gold mine near player
     local m1X, m1Y = map:findClearArea(buildingSize, buildingSize, thGridX + 8, thGridY + 5, 10)
     table.insert(goldMines, GoldMine.new({gridX = m1X, gridY = m1Y, gold = 50000, map = map}))
     
-    -- Player starting farm (already built)
-    local farmX, farmY = map:findClearArea(2, 2, thGridX + 4, thGridY - 3, 6)
+    -- Player starting farm (already built) - place it further from town hall to avoid overlap
+    -- Town hall is 3x3, so farm at thGridX + 4 ensures no overlap
+    local farmX, farmY = map:findClearArea(2, 2, thGridX + 4, thGridY, 8)
     if farmX then
         local startFarm = Farm.new({gridX = farmX, gridY = farmY, map = map, isBuilding = false, team = playerTeam})
         startFarm.completed = true
@@ -1982,6 +2000,10 @@ function Gameplay.load(options)
     local enemyThGridX, enemyThGridY = map:findClearArea(buildingSize, buildingSize, enemyStartX, enemyStartY, 15)
     enemyTownHall = TownHall.new({gridX = enemyThGridX, gridY = enemyThGridY, map = map, team = enemyTeam})
     table.insert(townHalls, enemyTownHall)  -- Store in additional townhalls list
+    
+    -- Clear trees around enemy town hall (5 tile radius for peons and nearby buildings)
+    map:clearArea(enemyThGridX - clearRadius, enemyThGridY - clearRadius, 
+                  buildingSize + clearRadius * 2, buildingSize + clearRadius * 2)
     
     -- Gold mine near enemy
     local m2X, m2Y = map:findClearArea(buildingSize, buildingSize, enemyThGridX - 8, enemyThGridY + 5, 10)
@@ -2048,8 +2070,8 @@ function Gameplay.load(options)
         end
     end
     
-    -- Enemy starting farm (already built)
-    local enemyFarmX, enemyFarmY = map:findClearArea(2, 2, enemyThGridX - 4, enemyThGridY - 3, 6)
+    -- Enemy starting farm (already built) - place it further from town hall to avoid overlap
+    local enemyFarmX, enemyFarmY = map:findClearArea(2, 2, enemyThGridX - 4, enemyThGridY, 8)
     if enemyFarmX then
         local enemyFarm = Farm.new({gridX = enemyFarmX, gridY = enemyFarmY, map = map, isBuilding = false, team = enemyTeam})
         enemyFarm.completed = true
@@ -2080,6 +2102,16 @@ function Gameplay.load(options)
     -- Disable fog in tutorial mode
     if tutorialOptions.disableFog then
         map.fogEnabled = false
+    end
+    
+    -- Initialize navigation grid for pathfinding (after all buildings are placed)
+    Pathfinding.rebuildNavGrid(map, getAllBuildings())
+    
+    -- Set up gold mine depletion callbacks (to update navGrid when depleted)
+    for _, mine in ipairs(goldMines) do
+        mine.onDepleted = function(m)
+            Pathfinding.markBuilding(m, true)  -- Mark depleted mine as walkable
+        end
     end
     
     calculatePopulation()

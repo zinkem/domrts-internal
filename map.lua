@@ -271,6 +271,10 @@ function Map:harvestTree(gridX, gridY)
     -- Check if depleted
     if self.treeHealth[gridY][gridX] <= 0 then
         self.tiles[gridY][gridX] = Map.TILE_STUMP
+        -- Notify callback if set (used by gameplay to update navGrid)
+        if self.onTreeDepleted then
+            self.onTreeDepleted(gridX, gridY)
+        end
         return false  -- Tree is gone
     end
     
