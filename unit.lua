@@ -97,13 +97,62 @@ function Unit:getSightRangePixels()
     return self.sightRadius * 32  -- Convert tiles to pixels
 end
 
+-- Get separation force from nearby buildings (pushes unit away from buildings it's too close to)
+function Unit:getBuildingSeparation(buildings)
+    local sepX, sepY = 0, 0
+    local separationDist = self.radius + 4  -- Start separating when within radius + 4 pixels
+    
+    if not buildings then return 0, 0 end
+    
+    for _, b in ipairs(buildings) do
+        if b.getWorldBounds then
+            local bx1, by1, bx2, by2 = b:getWorldBounds()
+            local closestX = math.max(bx1, math.min(self.worldX, bx2))
+            local closestY = math.max(by1, math.min(self.worldY, by2))
+            local dx = self.worldX - closestX
+            local dy = self.worldY - closestY
+            local dist = math.sqrt(dx * dx + dy * dy)
+            
+            if dist < separationDist and dist > 0.1 then
+                -- Push away from building proportional to how close we are
+                local force = (separationDist - dist) / separationDist
+                sepX = sepX + (dx / dist) * force
+                sepY = sepY + (dy / dist) * force
+            elseif dist < 0.1 then
+                -- Inside building, push toward nearest edge
+                local bcx = (bx1 + bx2) / 2
+                local bcy = (by1 + by2) / 2
+                dx = self.worldX - bcx
+                dy = self.worldY - bcy
+                local len = math.sqrt(dx * dx + dy * dy)
+                if len > 0.1 then
+                    sepX = sepX + (dx / len)
+                    sepY = sepY + (dy / len)
+                else
+                    sepX = sepX + 1  -- Default push right
+                end
+            end
+        end
+    end
+    
+    -- Normalize if too strong
+    local len = math.sqrt(sepX * sepX + sepY * sepY)
+    if len > 1 then
+        sepX = sepX / len
+        sepY = sepY / len
+    end
+    
+    return sepX, sepY
+end
+
 function Unit:canMoveTo(newX, newY, buildings)
     -- Check terrain passability
     if self.map and not self.map:isWorldPosPassable(newX, newY) then
         return false
     end
     
-    -- Check building collisions
+    -- Check building collisions with a small buffer (2 pixels)
+    local collisionRadius = self.radius + 2
     if buildings then
         for _, b in ipairs(buildings) do
             if b.getWorldBounds then
@@ -114,7 +163,7 @@ function Unit:canMoveTo(newX, newY, buildings)
                 local dx = newX - closestX
                 local dy = newY - closestY
                 local distSq = dx * dx + dy * dy
-                if distSq < self.radius * self.radius then
+                if distSq < collisionRadius * collisionRadius then
                     return false
                 end
             end
@@ -126,9 +175,28 @@ end
 
 -- Try to move at full speed in the given direction
 -- If blocked, find alternative directions that maintain full speed (like Peon)
+-- Also applies gentle separation from buildings to prevent sticking
 function Unit:tryMove(dirX, dirY, moveSpeed, buildings)
-    local moveX = dirX * moveSpeed
-    local moveY = dirY * moveSpeed
+    -- Apply building separation force to prevent sticking
+    local sepX, sepY = self:getBuildingSeparation(buildings)
+    local sepStrength = 0.3  -- How much separation affects movement
+    
+    -- Blend intended direction with separation
+    local finalDirX = dirX + sepX * sepStrength
+    local finalDirY = dirY + sepY * sepStrength
+    
+    -- Normalize
+    local len = math.sqrt(finalDirX * finalDirX + finalDirY * finalDirY)
+    if len > 0.1 then
+        finalDirX = finalDirX / len
+        finalDirY = finalDirY / len
+    else
+        finalDirX = dirX
+        finalDirY = dirY
+    end
+    
+    local moveX = finalDirX * moveSpeed
+    local moveY = finalDirY * moveSpeed
     local newX = self.worldX + moveX
     local newY = self.worldY + moveY
     
@@ -153,17 +221,19 @@ function Unit:tryMove(dirX, dirY, moveSpeed, buildings)
     }
     
     -- Sort by how aligned they are with intended direction (dot product)
+    -- Also factor in separation direction
     table.sort(alternatives, function(a, b)
-        local dotA = a.dx * dirX + a.dy * dirY
-        local dotB = b.dx * dirX + b.dy * dirY
+        local dotA = a.dx * dirX + a.dy * dirY + (a.dx * sepX + a.dy * sepY) * 0.5
+        local dotB = b.dx * dirX + b.dy * dirY + (b.dx * sepX + b.dy * sepY) * 0.5
         return dotA > dotB
     end)
     
     -- Try each alternative at full speed
     for _, alt in ipairs(alternatives) do
         local dot = alt.dx * dirX + alt.dy * dirY
-        -- Only use alternatives that are at least somewhat aligned (dot > 0)
-        if dot > 0.1 then
+        -- Only use alternatives that are at least somewhat aligned (dot > 0) or help with separation
+        local sepDot = alt.dx * sepX + alt.dy * sepY
+        if dot > 0.1 or sepDot > 0.3 then
             local altX = self.worldX + alt.dx * moveSpeed
             local altY = self.worldY + alt.dy * moveSpeed
             if self:canMoveTo(altX, altY, buildings) then
@@ -181,6 +251,17 @@ function Unit:tryMove(dirX, dirY, moveSpeed, buildings)
         if self:canMoveTo(smallX, smallY, buildings) then
             self.worldX = smallX
             self.worldY = smallY
+            return true
+        end
+    end
+    
+    -- Last resort - just apply separation if possible
+    if sepX ~= 0 or sepY ~= 0 then
+        local sepMoveX = self.worldX + sepX * moveSpeed
+        local sepMoveY = self.worldY + sepY * moveSpeed
+        if self:canMoveTo(sepMoveX, sepMoveY, buildings) then
+            self.worldX = sepMoveX
+            self.worldY = sepMoveY
             return true
         end
     end

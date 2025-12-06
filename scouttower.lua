@@ -1,26 +1,21 @@
 --[[
     Scout Tower
-    Defensive building that can be upgraded
+    Defensive structure with extended sight radius
     Size: 2x2 tiles, grid-aligned
-    Can upgrade to Archer Tower (requires Lumber Mill) or Cannon Tower (requires Blacksmith)
+    Special: Provides vision radius of 9 tiles
 ]]
 
-local Button = require("button")
-local Requirements = require("requirements")
+-- Team colors module
+local Teams
+pcall(function() Teams = require("teams") end)
 
 local ScoutTower = {}
 ScoutTower.__index = ScoutTower
 
 ScoutTower.GRID_SIZE = 2
-ScoutTower.COST_GOLD = 250
-ScoutTower.COST_LUMBER = 25
-ScoutTower.BUILD_TIME = 10.0
-ScoutTower.UPGRADE_COST = 100  -- Gold cost to upgrade
-
--- Tower types
-ScoutTower.TYPE_SCOUT = "scout"
-ScoutTower.TYPE_ARCHER = "archer"
-ScoutTower.TYPE_CANNON = "cannon"
+ScoutTower.COST_GOLD = 200
+ScoutTower.COST_LUMBER = 100
+ScoutTower.BUILD_TIME = 12.0
 
 function ScoutTower.new(params)
     local self = setmetatable({}, ScoutTower)
@@ -34,23 +29,24 @@ function ScoutTower.new(params)
     self.selected = false
     self.type = "scouttower"
     self.name = "Scout Tower"
-    self.towerType = ScoutTower.TYPE_SCOUT
     
+    -- Team ownership
+    self.team = params.team or (Teams and Teams.PLAYER or 1)
+    
+    -- Combat stats
+    self.maxHp = 100
+    self.hp = self.maxHp
+    self.sightRadius = 9  -- Extended vision range!
+    
+    -- Building state
     self.isBuilding = params.isBuilding or false
     self.buildProgress = params.buildProgress or 0
     self.buildTime = ScoutTower.BUILD_TIME
     self.completed = not self.isBuilding
     self.builderPeon = nil
     
-    -- Upgrade state
-    self.isUpgrading = false
-    self.upgradeProgress = 0
-    self.upgradeTime = 8.0
-    self.upgradeTarget = nil
-    
-    -- UI buttons
-    self.archerUpgradeButton = nil
-    self.cannonUpgradeButton = nil
+    -- Animation
+    self.torchFlicker = 0
     
     if self.map then
         self.map:clearArea(self.gridX, self.gridY, self.gridSize, self.gridSize)
@@ -85,48 +81,18 @@ function ScoutTower:getWorldBounds()
 end
 
 function ScoutTower:update(dt)
+    -- Update torch animation
+    self.torchFlicker = self.torchFlicker + dt * 8
+    
     if self.isBuilding then
         self.buildProgress = self.buildProgress + dt
         if self.buildProgress >= self.buildTime then
             self.isBuilding = false
             self.completed = true
-            return true, false
+            return true  -- Building complete
         end
-        return false, false
-    end
-    
-    if self.isUpgrading then
-        self.upgradeProgress = self.upgradeProgress + dt
-        if self.upgradeProgress >= self.upgradeTime then
-            self.isUpgrading = false
-            self.upgradeProgress = 0
-            self.towerType = self.upgradeTarget
-            self.upgradeTarget = nil
-            -- Update name based on type
-            if self.towerType == ScoutTower.TYPE_ARCHER then
-                self.name = "Archer Tower"
-            elseif self.towerType == ScoutTower.TYPE_CANNON then
-                self.name = "Cannon Tower"
-            end
-            return false, true  -- upgrade complete
-        end
-    end
-    
-    return false, false
-end
-
-function ScoutTower:startUpgrade(targetType)
-    if self.completed and not self.isUpgrading and self.towerType == ScoutTower.TYPE_SCOUT then
-        self.isUpgrading = true
-        self.upgradeProgress = 0
-        self.upgradeTarget = targetType
-        return true
     end
     return false
-end
-
-function ScoutTower:canUpgrade()
-    return self.completed and not self.isUpgrading and self.towerType == ScoutTower.TYPE_SCOUT
 end
 
 function ScoutTower:draw()
@@ -135,12 +101,17 @@ function ScoutTower:draw()
     
     if self.isBuilding then
         -- Construction site
-        love.graphics.setColor(0.45, 0.42, 0.38, 0.6)
+        love.graphics.setColor(0.5, 0.45, 0.4, 0.6)
         love.graphics.rectangle("fill", x, y, size, size, 4)
-        love.graphics.setColor(0.5, 0.48, 0.44, 0.8)
-        love.graphics.rectangle("fill", x + 10, y + 15, 20, 8)
-        love.graphics.rectangle("fill", x + size - 30, y + 18, 20, 8)
         
+        -- Scaffolding
+        love.graphics.setColor(0.6, 0.45, 0.3, 0.8)
+        love.graphics.rectangle("fill", x + size/2 - 8, y + 10, 16, size - 20)
+        love.graphics.setColor(0.5, 0.4, 0.25, 0.8)
+        love.graphics.line(x + 10, y + 20, x + size - 10, y + 20)
+        love.graphics.line(x + 10, y + 40, x + size - 10, y + 40)
+        
+        -- Progress bar
         local barW = size - 10
         local progress = self.buildProgress / self.buildTime
         love.graphics.setColor(0.2, 0.2, 0.2, 1)
@@ -150,171 +121,106 @@ function ScoutTower:draw()
     else
         -- Shadow
         love.graphics.setColor(0, 0, 0, 0.25)
-        love.graphics.ellipse("fill", x + size/2, y + size + 2, size/2 - 5, 5)
+        love.graphics.ellipse("fill", x + size/2, y + size + 2, size/3, 6)
         
-        if self.towerType == ScoutTower.TYPE_SCOUT then
-            self:drawScoutTower(x, y, size)
-        elseif self.towerType == ScoutTower.TYPE_ARCHER then
-            self:drawArcherTower(x, y, size)
-        elseif self.towerType == ScoutTower.TYPE_CANNON then
-            self:drawCannonTower(x, y, size)
+        -- Tower base (stone)
+        love.graphics.setColor(0.45, 0.42, 0.38, 1)
+        love.graphics.rectangle("fill", x + 10, y + size - 25, size - 20, 25, 3)
+        
+        -- Base details (stone texture)
+        love.graphics.setColor(0.35, 0.32, 0.28, 1)
+        for i = 0, 2 do
+            love.graphics.rectangle("fill", x + 12 + i * 15, y + size - 22, 12, 8)
+            love.graphics.rectangle("fill", x + 18 + i * 15, y + size - 12, 10, 10)
         end
         
-        -- Upgrading progress bar
-        if self.isUpgrading then
-            local barW = size - 10
-            local progress = self.upgradeProgress / self.upgradeTime
-            love.graphics.setColor(0.2, 0.2, 0.2, 1)
-            love.graphics.rectangle("fill", x + 5, y + size + 5, barW, 8, 2)
-            love.graphics.setColor(0.8, 0.6, 0.2, 1)
-            love.graphics.rectangle("fill", x + 5, y + size + 5, barW * progress, 8, 2)
+        -- Main tower body (taller, narrower)
+        love.graphics.setColor(0.5, 0.47, 0.42, 1)
+        love.graphics.rectangle("fill", x + size/2 - 12, y + 15, 24, size - 40, 2)
+        
+        -- Tower body shading
+        love.graphics.setColor(0.4, 0.37, 0.32, 1)
+        love.graphics.rectangle("fill", x + size/2 - 12, y + 15, 6, size - 40, 2)
+        love.graphics.setColor(0.55, 0.52, 0.47, 1)
+        love.graphics.rectangle("fill", x + size/2 + 6, y + 15, 6, size - 40, 2)
+        
+        -- Tower top platform (crenellations)
+        love.graphics.setColor(0.5, 0.47, 0.42, 1)
+        love.graphics.rectangle("fill", x + size/2 - 16, y + 8, 32, 12)
+        
+        -- Crenellations (battlements)
+        love.graphics.setColor(0.55, 0.52, 0.47, 1)
+        for i = 0, 3 do
+            love.graphics.rectangle("fill", x + size/2 - 14 + i * 9, y + 2, 6, 8)
         end
+        
+        -- Pointed roof
+        love.graphics.setColor(0.4, 0.3, 0.25, 1)
+        love.graphics.polygon("fill", 
+            x + size/2, y - 8,
+            x + size/2 - 18, y + 10,
+            x + size/2 + 18, y + 10
+        )
+        
+        -- Roof highlight
+        love.graphics.setColor(0.5, 0.4, 0.35, 1)
+        love.graphics.polygon("fill", 
+            x + size/2, y - 8,
+            x + size/2 - 8, y + 4,
+            x + size/2 + 2, y + 4
+        )
+        
+        -- Window (glowing)
+        local flicker = math.sin(self.torchFlicker) * 0.1 + 0.9
+        love.graphics.setColor(0.9 * flicker, 0.7 * flicker, 0.3 * flicker, 1)
+        love.graphics.rectangle("fill", x + size/2 - 4, y + 28, 8, 12, 1)
+        
+        -- Window glow
+        love.graphics.setColor(1, 0.85, 0.4, 0.3 * flicker)
+        love.graphics.circle("fill", x + size/2, y + 34, 10)
+        
+        -- Second window (smaller)
+        love.graphics.setColor(0.85 * flicker, 0.65 * flicker, 0.25 * flicker, 1)
+        love.graphics.rectangle("fill", x + size/2 - 3, y + 45, 6, 8, 1)
+        
+        -- Door at base
+        love.graphics.setColor(0.35, 0.25, 0.18, 1)
+        love.graphics.rectangle("fill", x + size/2 - 5, y + size - 20, 10, 18, 2)
+        
+        -- Door detail
+        love.graphics.setColor(0.25, 0.18, 0.12, 1)
+        love.graphics.line(x + size/2, y + size - 18, x + size/2, y + size - 4)
+        
+        -- Team color banner
+        if Teams then
+            Teams.setColor(self.team, "banner")
+        else
+            love.graphics.setColor(0.8, 0.2, 0.2, 1)
+        end
+        -- Banner pole
+        love.graphics.setColor(0.4, 0.3, 0.2, 1)
+        love.graphics.rectangle("fill", x + size/2 + 14, y - 5, 2, 20)
+        -- Banner
+        if Teams then
+            Teams.setColor(self.team, "banner")
+        else
+            love.graphics.setColor(0.8, 0.2, 0.2, 1)
+        end
+        love.graphics.polygon("fill",
+            x + size/2 + 16, y - 3,
+            x + size/2 + 28, y + 2,
+            x + size/2 + 16, y + 10
+        )
     end
     
-    -- Selection
+    -- Selection indicator
     if self.selected then
-        love.graphics.setColor(0, 1, 0, 0.8)
-        love.graphics.setLineWidth(3)
+        love.graphics.setColor(0, 1, 0, 0.6)
+        love.graphics.setLineWidth(2)
         love.graphics.rectangle("line", x - 2, y - 2, size + 4, size + 4, 4)
     end
     
     love.graphics.setColor(1, 1, 1, 1)
-end
-
-function ScoutTower:drawScoutTower(x, y, size)
-    -- Basic wooden tower
-    -- Base
-    love.graphics.setColor(0.45, 0.38, 0.28, 1)
-    love.graphics.rectangle("fill", x + 8, y + 35, size - 16, size - 35, 2)
-    
-    -- Tower body (tapers up)
-    love.graphics.setColor(0.5, 0.42, 0.3, 1)
-    love.graphics.polygon("fill",
-        x + 12, y + 35,
-        x + size - 12, y + 35,
-        x + size - 8, y + 10,
-        x + 8, y + 10
-    )
-    
-    -- Wood plank texture
-    love.graphics.setColor(0.42, 0.36, 0.26, 1)
-    love.graphics.line(x + 12, y + 20, x + size - 12, y + 20)
-    love.graphics.line(x + 11, y + 28, x + size - 11, y + 28)
-    
-    -- Lookout platform
-    love.graphics.setColor(0.48, 0.4, 0.28, 1)
-    love.graphics.rectangle("fill", x + 2, y + 5, size - 4, 8, 2)
-    
-    -- Roof (pointed)
-    love.graphics.setColor(0.4, 0.32, 0.22, 1)
-    love.graphics.polygon("fill",
-        x + size/2, y - 12,
-        x, y + 8,
-        x + size, y + 8
-    )
-    
-    -- Window/opening
-    love.graphics.setColor(0.15, 0.12, 0.1, 1)
-    love.graphics.rectangle("fill", x + size/2 - 6, y + 15, 12, 15, 1)
-    
-    -- Door
-    love.graphics.setColor(0.35, 0.28, 0.18, 1)
-    love.graphics.rectangle("fill", x + size/2 - 8, y + size - 22, 16, 22)
-end
-
-function ScoutTower:drawArcherTower(x, y, size)
-    -- Stone tower with archer battlements
-    -- Base
-    love.graphics.setColor(0.42, 0.4, 0.38, 1)
-    love.graphics.rectangle("fill", x + 6, y + 30, size - 12, size - 30, 2)
-    
-    -- Tower body
-    love.graphics.setColor(0.48, 0.45, 0.42, 1)
-    love.graphics.polygon("fill",
-        x + 10, y + 30,
-        x + size - 10, y + 30,
-        x + size - 6, y + 8,
-        x + 6, y + 8
-    )
-    
-    -- Stone texture
-    love.graphics.setColor(0.4, 0.38, 0.35, 1)
-    for row = 0, 2 do
-        for col = 0, 1 do
-            local offsetX = (row % 2) * 8
-            love.graphics.rectangle("fill", x + 12 + col * 20 + offsetX, y + 12 + row * 12, 15, 8, 1)
-        end
-    end
-    
-    -- Battlements (crenellations)
-    love.graphics.setColor(0.5, 0.47, 0.44, 1)
-    love.graphics.rectangle("fill", x + 2, y + 2, size - 4, 10)
-    love.graphics.setColor(0.48, 0.45, 0.42, 1)
-    -- Gaps in battlements
-    love.graphics.rectangle("fill", x + 8, y - 2, 8, 8)
-    love.graphics.rectangle("fill", x + 24, y - 2, 8, 8)
-    love.graphics.rectangle("fill", x + 40, y - 2, 8, 8)
-    
-    -- Arrow slit
-    love.graphics.setColor(0.1, 0.08, 0.06, 1)
-    love.graphics.rectangle("fill", x + size/2 - 2, y + 18, 4, 14)
-    
-    -- Bow icon
-    love.graphics.setColor(0.6, 0.45, 0.25, 1)
-    love.graphics.arc("line", x + size/2, y + 6, 6, math.pi * 0.7, math.pi * 1.3, 8)
-    love.graphics.line(x + size/2 - 5, y + 9, x + size/2 + 5, y + 3)
-    
-    -- Door
-    love.graphics.setColor(0.35, 0.28, 0.2, 1)
-    love.graphics.rectangle("fill", x + size/2 - 8, y + size - 24, 16, 24)
-    love.graphics.arc("fill", x + size/2, y + size - 24, 8, math.pi, 2 * math.pi)
-end
-
-function ScoutTower:drawCannonTower(x, y, size)
-    -- Heavy stone tower with cannon
-    -- Base (thicker)
-    love.graphics.setColor(0.38, 0.36, 0.34, 1)
-    love.graphics.rectangle("fill", x + 4, y + 25, size - 8, size - 25, 3)
-    
-    -- Tower body
-    love.graphics.setColor(0.45, 0.42, 0.4, 1)
-    love.graphics.rectangle("fill", x + 6, y + 8, size - 12, 25, 2)
-    
-    -- Heavy stone texture
-    love.graphics.setColor(0.38, 0.35, 0.33, 1)
-    for row = 0, 2 do
-        for col = 0, 1 do
-            local offsetX = (row % 2) * 10
-            love.graphics.rectangle("fill", x + 10 + col * 22 + offsetX, y + 28 + row * 12, 18, 8, 1)
-        end
-    end
-    
-    -- Platform top
-    love.graphics.setColor(0.5, 0.47, 0.45, 1)
-    love.graphics.rectangle("fill", x, y + 2, size, 10, 2)
-    
-    -- Cannon barrel
-    love.graphics.setColor(0.3, 0.28, 0.26, 1)
-    love.graphics.rectangle("fill", x + size/2 - 5, y - 8, 10, 20, 2)
-    -- Cannon muzzle
-    love.graphics.setColor(0.25, 0.23, 0.2, 1)
-    love.graphics.ellipse("fill", x + size/2, y - 8, 6, 4)
-    -- Cannon base
-    love.graphics.setColor(0.35, 0.32, 0.3, 1)
-    love.graphics.rectangle("fill", x + size/2 - 8, y + 8, 16, 6, 1)
-    
-    -- Metal reinforcement bands
-    love.graphics.setColor(0.4, 0.38, 0.4, 1)
-    love.graphics.rectangle("fill", x + 4, y + 20, size - 8, 3)
-    love.graphics.rectangle("fill", x + 4, y + 38, size - 8, 3)
-    
-    -- Door (reinforced)
-    love.graphics.setColor(0.3, 0.25, 0.18, 1)
-    love.graphics.rectangle("fill", x + size/2 - 8, y + size - 22, 16, 22)
-    -- Metal bands on door
-    love.graphics.setColor(0.35, 0.33, 0.35, 1)
-    love.graphics.rectangle("fill", x + size/2 - 8, y + size - 18, 16, 2)
-    love.graphics.rectangle("fill", x + size/2 - 8, y + size - 10, 16, 2)
 end
 
 function ScoutTower:containsPoint(screenX, screenY)
@@ -330,109 +236,55 @@ function ScoutTower:getBuildProgress()
     return 100
 end
 
-function ScoutTower:getUpgradeProgress()
-    if self.isUpgrading then
-        return math.floor((self.upgradeProgress / self.upgradeTime) * 100)
-    end
-    return 0
+function ScoutTower:updateUI(resources, screenW, screenH, font) end
+function ScoutTower:drawUI() end
+function ScoutTower:mousepressed(x, y, button) end
+function ScoutTower:mousereleased(x, y, button) end
+
+-- Combat Methods --
+
+function ScoutTower:takeDamage(amount)
+    self.hp = self.hp - amount
 end
 
-function ScoutTower:updateUI(resources, screenW, screenH, font)
-    if self.selected and self.completed and self.towerType == ScoutTower.TYPE_SCOUT and not self.isUpgrading then
-        local panelX = screenW - 180
-        local buttonY = 70 + 145
-        
-        local selfRef = self
-        local canArcher = Requirements.canUpgradeToArcherTower()
-        local canCannon = Requirements.canUpgradeToCannonTower()
-        
-        -- Archer Tower upgrade button
-        if not self.archerUpgradeButton then
-            self.archerUpgradeButton = Button.new({
-                x = panelX + 10, y = buttonY, width = 150, height = 35,
-                text = "Archer Tower (100g)", font = font,
-                colors = {
-                    normal = {0.4, 0.5, 0.35, 1}, hover = {0.5, 0.6, 0.45, 1},
-                    pressed = {0.3, 0.4, 0.25, 1}, text = {1, 1, 1, 1}, border = {0.3, 0.4, 0.25, 1}
-                },
-                onClick = function()
-                    if canArcher and resources.gold >= ScoutTower.UPGRADE_COST then
-                        resources.gold = resources.gold - ScoutTower.UPGRADE_COST
-                        selfRef:startUpgrade(ScoutTower.TYPE_ARCHER)
-                    end
-                end
-            })
-        end
-        
-        -- Cannon Tower upgrade button
-        if not self.cannonUpgradeButton then
-            self.cannonUpgradeButton = Button.new({
-                x = panelX + 10, y = buttonY + 40, width = 150, height = 35,
-                text = "Cannon Tower (100g)", font = font,
-                colors = {
-                    normal = {0.5, 0.4, 0.35, 1}, hover = {0.6, 0.5, 0.45, 1},
-                    pressed = {0.4, 0.3, 0.25, 1}, text = {1, 1, 1, 1}, border = {0.4, 0.3, 0.25, 1}
-                },
-                onClick = function()
-                    if canCannon and resources.gold >= ScoutTower.UPGRADE_COST then
-                        resources.gold = resources.gold - ScoutTower.UPGRADE_COST
-                        selfRef:startUpgrade(ScoutTower.TYPE_CANNON)
-                    end
-                end
-            })
-        end
-        
-        self.archerUpgradeButton:setEnabled(canArcher and resources.gold >= ScoutTower.UPGRADE_COST)
-        self.cannonUpgradeButton:setEnabled(canCannon and resources.gold >= ScoutTower.UPGRADE_COST)
-        self.archerUpgradeButton:update(0)
-        self.cannonUpgradeButton:update(0)
-    else
-        self.archerUpgradeButton = nil
-        self.cannonUpgradeButton = nil
-    end
+function ScoutTower:isDead()
+    return self.hp <= 0
 end
 
-function ScoutTower:drawUI()
-    if self.selected and self.completed and self.towerType == ScoutTower.TYPE_SCOUT and not self.isUpgrading then
-        if self.archerUpgradeButton then self.archerUpgradeButton:draw() end
-        if self.cannonUpgradeButton then self.cannonUpgradeButton:draw() end
-        
-        local screenW = love.graphics.getWidth()
-        
-        -- Show requirements
-        if not Requirements.canUpgradeToArcherTower() then
-            love.graphics.setColor(1, 0.6, 0.4, 1)
-            love.graphics.setFont(Game.fonts.small)
-            love.graphics.print("Needs Lumber Mill", screenW - 170, 70 + 183)
-        end
-        if not Requirements.canUpgradeToCannonTower() then
-            love.graphics.setColor(1, 0.6, 0.4, 1)
-            love.graphics.setFont(Game.fonts.small)
-            love.graphics.print("Needs Blacksmith", screenW - 170, 70 + 223)
-        end
-        love.graphics.setColor(1, 1, 1, 1)
-    end
-end
-
-function ScoutTower:mousepressed(x, y, button)
-    if self.archerUpgradeButton then self.archerUpgradeButton:mousepressed(x, y, button) end
-    if self.cannonUpgradeButton then self.cannonUpgradeButton:mousepressed(x, y, button) end
-end
-
-function ScoutTower:mousereleased(x, y, button)
-    if self.archerUpgradeButton then self.archerUpgradeButton:mousereleased(x, y, button) end
-    if self.cannonUpgradeButton then self.cannonUpgradeButton:mousereleased(x, y, button) end
+function ScoutTower:drawHealthBar()
+    if not self.selected and self.hp >= self.maxHp then return end
+    
+    local x, y = self:getScreenPos()
+    local barWidth = self.pixelSize - 10
+    local barHeight = 4
+    local barX = x + 5
+    local barY = y - 12  -- Slightly higher due to tower height
+    
+    -- Background
+    love.graphics.setColor(0.2, 0.2, 0.2, 0.8)
+    love.graphics.rectangle("fill", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
+    
+    -- Health bar
+    local healthPct = self.hp / self.maxHp
+    love.graphics.setColor(1 - healthPct, healthPct, 0.2, 1)
+    love.graphics.rectangle("fill", barX, barY, barWidth * healthPct, barHeight)
+    
+    -- Border
+    love.graphics.setColor(0, 0, 0, 0.8)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
 end
 
 function ScoutTower:drawOnMinimap(mapX, mapY, scale)
-    if self.towerType == ScoutTower.TYPE_ARCHER then
-        love.graphics.setColor(0.4, 0.6, 0.4, 1)
-    elseif self.towerType == ScoutTower.TYPE_CANNON then
-        love.graphics.setColor(0.5, 0.4, 0.35, 1)
-    elseif self.completed then
-        love.graphics.setColor(0.5, 0.5, 0.45, 1)
+    if self.completed then
+        -- Use team color
+        if Teams then
+            Teams.setColor(self.team, "minimapBuilding")
+        else
+            love.graphics.setColor(0.5, 0.5, 0.6, 1)
+        end
     else
-        love.graphics.setColor(0.4, 0.4, 0.38, 0.6)
+        love.graphics.setColor(0.4, 0.4, 0.45, 0.6)
     end
     local x = mapX + (self.gridX - 1) * scale
     local y = mapY + (self.gridY - 1) * scale

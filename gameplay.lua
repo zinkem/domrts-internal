@@ -16,20 +16,22 @@ local Footman = require("footman")
 -- FlowField no longer needed - using pathfinding.lua
 local Requirements = require("requirements")
 
--- New buildings
-local LumberMill = require("lumbermill")
-local Blacksmith = require("blacksmith")
+-- New buildings (optional, may not all be implemented yet)
+local LumberMill, Blacksmith, ArcheryRange, Stable, SiegeWorkshop
+pcall(function() LumberMill = require("lumbermill") end)
+pcall(function() Blacksmith = require("blacksmith") end)
 local ScoutTower = require("scouttower")
-local ArcheryRange = require("archeryrange")
-local Stable = require("stable")
-local SiegeWorkshop = require("siegeworkshop")
+pcall(function() ArcheryRange = require("archeryrange") end)
+pcall(function() Stable = require("stable") end)
+pcall(function() SiegeWorkshop = require("siegeworkshop") end)
 
--- New units
-local Archer = require("archer")
-local Knight = require("knight")
-local FlyingScout = require("flyingscout")
-local Ballista = require("ballista")
-local Kamikaze = require("kamikaze")
+-- New units (optional, may not all be implemented yet)
+local Archer, Knight, FlyingScout, Ballista, Kamikaze
+pcall(function() Archer = require("archer") end)
+pcall(function() Knight = require("knight") end)
+pcall(function() FlyingScout = require("flyingscout") end)
+pcall(function() Ballista = require("ballista") end)
+pcall(function() Kamikaze = require("kamikaze") end)
 local UIDraw = require("ui_draw")
 
 -- Team system
@@ -556,7 +558,7 @@ local function getCommandButtons()
             enabled = canBuild and resources.gold >= 200 and resources.lumber >= 100,
             action = function()
                 if resources.gold >= 200 and resources.lumber >= 100 then
-                    startBuildingPlacement(selEntity, "scoutTower")
+                    startBuildingPlacement(selEntity, "scouttower")
                 end
             end
         })
@@ -1425,11 +1427,11 @@ local function createBuilding(gridX, gridY, buildingType, peon)
         local building = Barracks.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(barracks, building)
-    elseif buildingType == "lumbermill" then
+    elseif buildingType == "lumbermill" and LumberMill then
         local building = LumberMill.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(lumberMills, building)
-    elseif buildingType == "blacksmith" then
+    elseif buildingType == "blacksmith" and Blacksmith then
         local building = Blacksmith.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(blacksmiths, building)
@@ -1437,11 +1439,11 @@ local function createBuilding(gridX, gridY, buildingType, peon)
         local building = ScoutTower.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(scoutTowers, building)
-    elseif buildingType == "archeryrange" then
+    elseif buildingType == "archeryrange" and ArcheryRange then
         local building = ArcheryRange.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(archeryRanges, building)
-    elseif buildingType == "stable" then
+    elseif buildingType == "stable" and Stable then
         local building = Stable.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         -- Set callback for Paladin upgrade
@@ -1451,7 +1453,7 @@ local function createBuilding(gridX, gridY, buildingType, peon)
             end
         end
         table.insert(stables, building)
-    elseif buildingType == "siegeworkshop" then
+    elseif buildingType == "siegeworkshop" and SiegeWorkshop then
         local building = SiegeWorkshop.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(siegeWorkshops, building)
@@ -1467,12 +1469,12 @@ end
 local function getBuildingCost(buildingType)
     if buildingType == "farm" then return Farm.COST_GOLD, Farm.COST_LUMBER
     elseif buildingType == "barracks" then return Barracks.COST_GOLD, Barracks.COST_LUMBER
-    elseif buildingType == "lumbermill" then return LumberMill.COST_GOLD, LumberMill.COST_LUMBER
-    elseif buildingType == "blacksmith" then return Blacksmith.COST_GOLD, Blacksmith.COST_LUMBER
+    elseif buildingType == "lumbermill" and LumberMill then return LumberMill.COST_GOLD, LumberMill.COST_LUMBER
+    elseif buildingType == "blacksmith" and Blacksmith then return Blacksmith.COST_GOLD, Blacksmith.COST_LUMBER
     elseif buildingType == "scouttower" then return ScoutTower.COST_GOLD, ScoutTower.COST_LUMBER
-    elseif buildingType == "archeryrange" then return ArcheryRange.COST_GOLD, ArcheryRange.COST_LUMBER
-    elseif buildingType == "stable" then return Stable.COST_GOLD, Stable.COST_LUMBER
-    elseif buildingType == "siegeworkshop" then return SiegeWorkshop.COST_GOLD, SiegeWorkshop.COST_LUMBER
+    elseif buildingType == "archeryrange" and ArcheryRange then return ArcheryRange.COST_GOLD, ArcheryRange.COST_LUMBER
+    elseif buildingType == "stable" and Stable then return Stable.COST_GOLD, Stable.COST_LUMBER
+    elseif buildingType == "siegeworkshop" and SiegeWorkshop then return SiegeWorkshop.COST_GOLD, SiegeWorkshop.COST_LUMBER
     elseif buildingType == "townhall" then return TownHall.COST_GOLD, TownHall.COST_LUMBER
     end
     return 0, 0

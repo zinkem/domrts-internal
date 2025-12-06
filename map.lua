@@ -378,7 +378,13 @@ function Map:updateFog(units, buildings, playerTeam)
     -- Grant vision from player buildings
     for _, building in ipairs(buildings) do
         if building.team == playerTeam and not (building.isDead and building:isDead()) then
-            local sightRadius = building.sightRadius or 5  -- Buildings see a bit further
+            -- Building sites (under construction) only have sight radius of 1
+            local sightRadius
+            if building.isBuilding then
+                sightRadius = 1
+            else
+                sightRadius = building.sightRadius or 5
+            end
             local cx, cy = building:getWorldCenter()
             local gridX, gridY = self:worldToGrid(cx, cy)
             self:revealArea(gridX, gridY, sightRadius)
