@@ -1,18 +1,23 @@
 --[[
-    Button Component
-    Reusable button with hover/click states - Metal theme
+    Button Component - Professional Medieval Metal Theme
+    Features: Beveled borders, gradient fills, pressed states with depth
 ]]
 
 local Button = {}
 Button.__index = Button
 
--- Metal themed default colors
-local colors = {
-    normal = {0.4, 0.38, 0.35, 1},    -- Bronze metal
-    hover = {0.5, 0.48, 0.42, 1},      -- Lighter bronze
-    pressed = {0.3, 0.28, 0.25, 1},    -- Darker bronze
-    text = {0.95, 0.92, 0.85, 1},      -- Light cream
-    border = {0.6, 0.5, 0.35, 1}       -- Gold accent
+-- Enhanced metal themed colors
+local defaultColors = {
+    normal = {0.42, 0.38, 0.32, 1},
+    hover = {0.52, 0.48, 0.40, 1},
+    pressed = {0.32, 0.28, 0.24, 1},
+    disabled = {0.30, 0.28, 0.26, 1},
+    text = {0.95, 0.92, 0.85, 1},
+    textDisabled = {0.6, 0.58, 0.55, 1},
+    border = {0.65, 0.52, 0.35, 1},
+    borderLight = {0.78, 0.65, 0.48, 1},
+    borderDark = {0.40, 0.30, 0.18, 1},
+    shine = {1.0, 0.95, 0.85, 0.4},
 }
 
 function Button.new(params)
@@ -25,15 +30,51 @@ function Button.new(params)
     self.text = params.text or "Button"
     self.onClick = params.onClick or function() end
     self.font = params.font or love.graphics.getFont()
-    self.colors = params.colors or colors
-    self.cornerRadius = params.cornerRadius or 8
+    self.cornerRadius = params.cornerRadius or 6
+    
+    -- Merge custom colors with defaults
+    self.colors = {}
+    for k, v in pairs(defaultColors) do
+        self.colors[k] = params.colors and params.colors[k] or v
+    end
     
     self.state = "normal"
     self.enabled = true
-    self.disabledReason = nil  -- Text to show on hover when disabled
-    self.isHovered = false     -- Track hover even when disabled
+    self.disabledReason = nil
+    self.isHovered = false
     
     return self
+end
+
+-- Helper: Draw gradient background
+local function drawButtonGradient(x, y, w, h, colorTop, colorBottom, cornerRadius)
+    local steps = math.ceil(h / 3)
+    for i = 0, steps - 1 do
+        local t = i / steps
+        local segY = y + i * 3
+        local segH = math.min(3, h - i * 3)
+        love.graphics.setColor(
+            colorTop[1] + (colorBottom[1] - colorTop[1]) * t,
+            colorTop[2] + (colorBottom[2] - colorTop[2]) * t,
+            colorTop[3] + (colorBottom[3] - colorTop[3]) * t,
+            colorTop[4] or 1
+        )
+        love.graphics.rectangle("fill", x, segY, w, segH, 
+            i == 0 and cornerRadius or 0, 
+            i == 0 and cornerRadius or 0)
+    end
+end
+
+-- Helper: Draw 3D rivet
+local function drawSmallRivet(cx, cy, radius)
+    love.graphics.setColor(0.75, 0.6, 0.35, 1)
+    love.graphics.circle("fill", cx, cy, radius, 10)
+    love.graphics.setColor(0.55, 0.42, 0.22, 1)
+    love.graphics.circle("fill", cx + 0.3, cy + 0.3, radius * 0.7, 8)
+    love.graphics.setColor(0.75, 0.6, 0.35, 1)
+    love.graphics.circle("fill", cx, cy, radius * 0.5, 8)
+    love.graphics.setColor(1, 0.95, 0.8, 0.8)
+    love.graphics.circle("fill", cx - radius * 0.25, cy - radius * 0.25, radius * 0.25, 6)
 end
 
 function Button:update(dt)
@@ -41,7 +82,7 @@ function Button:update(dt)
     self.isHovered = self:containsPoint(mx, my)
     
     if not self.enabled then
-        self.state = "normal"
+        self.state = "disabled"
         return
     end
     
@@ -57,46 +98,126 @@ function Button:update(dt)
 end
 
 function Button:draw()
-    local color = self.colors[self.state] or self.colors.normal
+    local x, y, w, h = self.x, self.y, self.width, self.height
+    local cr = self.cornerRadius
+    local isPressed = self.state == "pressed"
+    local isDisabled = not self.enabled
+    local showError = isDisabled and self.isHovered and self.disabledReason
     
-    -- When disabled and hovered with a reason, turn red and show reason as text
-    local displayText = self.text
-    if not self.enabled and self.isHovered and self.disabledReason then
-        love.graphics.setColor(0.7, 0.2, 0.2, 1)
-        displayText = self.disabledReason
-    elseif not self.enabled then
-        -- Dim the button if disabled but not hovered
-        love.graphics.setColor(color[1] * 0.5, color[2] * 0.5, color[3] * 0.5, color[4] * 0.7)
-    else
-        love.graphics.setColor(color)
+    -- Offset for pressed effect
+    local pressOffset = isPressed and 1 or 0
+    
+    -- 1. DROP SHADOW (skip if pressed)
+    if not isPressed then
+        love.graphics.setColor(0, 0, 0, 0.35)
+        love.graphics.rectangle("fill", x + 2, y + 2, w, h, cr)
+        love.graphics.setColor(0, 0, 0, 0.15)
+        love.graphics.rectangle("fill", x + 3, y + 3, w, h, cr + 1)
     end
-    love.graphics.rectangle("fill", self.x, self.y, self.width, self.height, self.cornerRadius)
     
-    -- Border - red when showing reason, normal otherwise
-    if not self.enabled and self.isHovered and self.disabledReason then
-        love.graphics.setColor(0.5, 0.1, 0.1, 1)
+    -- Adjust position for press
+    local dx, dy = x + pressOffset, y + pressOffset
+    
+    -- 2. DETERMINE COLORS
+    local baseColor, topColor, bottomColor
+    
+    if showError then
+        -- Error state (red)
+        baseColor = {0.65, 0.22, 0.18, 1}
+        topColor = {0.75, 0.30, 0.25, 1}
+        bottomColor = {0.50, 0.15, 0.12, 1}
+    elseif isDisabled then
+        baseColor = self.colors.disabled
+        topColor = {baseColor[1] + 0.05, baseColor[2] + 0.05, baseColor[3] + 0.04, 0.8}
+        bottomColor = {baseColor[1] - 0.05, baseColor[2] - 0.05, baseColor[3] - 0.04, 0.8}
     else
-        love.graphics.setColor(self.colors.border)
+        baseColor = self.colors[self.state] or self.colors.normal
+        topColor = {baseColor[1] + 0.08, baseColor[2] + 0.08, baseColor[3] + 0.06, baseColor[4] or 1}
+        bottomColor = {baseColor[1] - 0.08, baseColor[2] - 0.08, baseColor[3] - 0.06, baseColor[4] or 1}
     end
-    love.graphics.setLineWidth(2)
-    love.graphics.rectangle("line", self.x, self.y, self.width, self.height, self.cornerRadius)
     
-    -- Text - white when showing reason, dimmed when disabled, normal otherwise
-    if not self.enabled and self.isHovered and self.disabledReason then
-        love.graphics.setColor(1, 1, 1, 1)
-    elseif not self.enabled then
-        love.graphics.setColor(self.colors.text[1] * 0.6, self.colors.text[2] * 0.6, self.colors.text[3] * 0.6, self.colors.text[4])
+    -- Invert gradient when pressed for "pushed in" look
+    if isPressed then
+        topColor, bottomColor = bottomColor, topColor
+    end
+    
+    -- 3. GRADIENT FILL
+    drawButtonGradient(dx, dy, w, h, topColor, bottomColor, cr)
+    
+    -- 4. INNER HIGHLIGHT (top edge, skip when pressed)
+    if not isPressed then
+        love.graphics.setColor(1, 1, 1, 0.15)
+        love.graphics.rectangle("fill", dx + 3, dy + 2, w - 6, 2, 1)
+    end
+    
+    -- 5. INNER SHADOW (bottom edge, stronger when pressed)
+    local shadowAlpha = isPressed and 0.3 or 0.15
+    love.graphics.setColor(0, 0, 0, shadowAlpha)
+    love.graphics.rectangle("fill", dx + 3, dy + h - 4, w - 6, 3, 1)
+    
+    -- 6. BEVELED BORDER
+    local borderColor = showError and {0.5, 0.12, 0.1, 1} or self.colors.border
+    local borderLight = showError and {0.8, 0.4, 0.35, 1} or self.colors.borderLight
+    local borderDark = showError and {0.35, 0.1, 0.08, 1} or self.colors.borderDark
+    
+    -- Outer dark stroke
+    love.graphics.setColor(borderDark)
+    love.graphics.setLineWidth(2.5)
+    love.graphics.rectangle("line", dx, dy, w, h, cr)
+    
+    -- Main border
+    love.graphics.setColor(borderColor)
+    love.graphics.setLineWidth(1.5)
+    love.graphics.rectangle("line", dx, dy, w, h, cr)
+    
+    -- Top/left highlight (skip when pressed)
+    if not isPressed then
+        love.graphics.setColor(borderLight[1], borderLight[2], borderLight[3], 0.6)
+        love.graphics.setLineWidth(1)
+        love.graphics.line(dx + cr, dy + 1, dx + w - cr, dy + 1)
+        love.graphics.line(dx + 1, dy + cr, dx + 1, dy + h - cr)
+    end
+    
+    -- Bottom/right shadow
+    love.graphics.setColor(0, 0, 0, isPressed and 0.2 or 0.35)
+    love.graphics.setLineWidth(1)
+    love.graphics.line(dx + cr, dy + h - 1, dx + w - cr, dy + h - 1)
+    love.graphics.line(dx + w - 1, dy + cr, dx + w - 1, dy + h - cr)
+    
+    -- 7. CORNER RIVETS (for larger buttons)
+    if w > 80 and h > 30 then
+        local rivetR = 2.5
+        local inset = 8
+        drawSmallRivet(dx + inset, dy + h/2, rivetR)
+        drawSmallRivet(dx + w - inset, dy + h/2, rivetR)
+    end
+    
+    -- 8. TEXT
+    local displayText = showError and self.disabledReason or self.text
+    love.graphics.setFont(self.font)
+    
+    local textW = self.font:getWidth(displayText)
+    local textH = self.font:getHeight()
+    local textX = dx + (w - textW) / 2
+    local textY = dy + (h - textH) / 2
+    
+    -- Text shadow
+    love.graphics.setColor(0, 0, 0, 0.5)
+    love.graphics.print(displayText, textX + 1, textY + 1)
+    
+    -- Text color
+    if showError then
+        love.graphics.setColor(1, 0.9, 0.85, 1)
+    elseif isDisabled then
+        love.graphics.setColor(self.colors.textDisabled)
     else
         love.graphics.setColor(self.colors.text)
     end
-    love.graphics.setFont(self.font)
-    local textWidth = self.font:getWidth(displayText)
-    local textHeight = self.font:getHeight()
-    local textX = self.x + (self.width - textWidth) / 2
-    local textY = self.y + (self.height - textHeight) / 2
     love.graphics.print(displayText, textX, textY)
     
+    -- Reset
     love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.setLineWidth(1)
 end
 
 function Button:containsPoint(px, py)
@@ -114,15 +235,20 @@ function Button:mousereleased(x, y, button)
     if button == 1 and self.enabled and self:containsPoint(x, y) and self.state == "pressed" then
         self.onClick()
     end
-    if self:containsPoint(x, y) then
-        self.state = "hover"
-    else
-        self.state = "normal"
+    if self.enabled then
+        if self:containsPoint(x, y) then
+            self.state = "hover"
+        else
+            self.state = "normal"
+        end
     end
 end
 
 function Button:setEnabled(enabled)
     self.enabled = enabled
+    if not enabled then
+        self.state = "disabled"
+    end
 end
 
 function Button:setDisabledReason(reason)

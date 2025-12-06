@@ -28,6 +28,7 @@ local Knight = require("knight")
 local FlyingScout = require("flyingscout")
 local Ballista = require("ballista")
 local Kamikaze = require("kamikaze")
+local UIDraw = require("ui_draw")
 
 local Gameplay = {}
 
@@ -232,179 +233,22 @@ local function separateUnits()
     end
 end
 
--- Helper: Draw stone panel background
+-- Helper: Draw stone panel background (using UIDraw module)
 local function drawStonePanel(x, y, w, h, cornerRadius)
-    cornerRadius = cornerRadius or 4
-    -- Dark stone base
-    love.graphics.setColor(UI.stoneDark[1], UI.stoneDark[2], UI.stoneDark[3], 0.95)
-    love.graphics.rectangle("fill", x, y, w, h, cornerRadius)
-    
-    -- Stone texture pattern (subtle)
-    love.graphics.setColor(UI.stoneMid[1], UI.stoneMid[2], UI.stoneMid[3], 0.4)
-    for row = 0, math.floor(h / 12) do
-        for col = 0, math.floor(w / 18) do
-            local offsetX = (row % 2) * 9
-            local bx = x + 4 + col * 18 + offsetX
-            local by = y + 4 + row * 12
-            if bx + 14 < x + w - 4 and by + 8 < y + h - 4 then
-                love.graphics.rectangle("fill", bx, by, 14, 8, 1)
-            end
-        end
-    end
-    
-    -- Inner highlight (top edge)
-    love.graphics.setColor(UI.stoneAccent[1], UI.stoneAccent[2], UI.stoneAccent[3], 0.3)
-    love.graphics.rectangle("fill", x + 2, y + 2, w - 4, 2, 1)
-    
-    -- Metal border
-    love.graphics.setColor(UI.metalBronze)
-    love.graphics.setLineWidth(2)
-    love.graphics.rectangle("line", x, y, w, h, cornerRadius)
-    
-    -- Corner rivets
-    love.graphics.setColor(UI.metalGold)
-    local rivetSize = 4
-    love.graphics.circle("fill", x + 8, y + 8, rivetSize)
-    love.graphics.circle("fill", x + w - 8, y + 8, rivetSize)
-    love.graphics.circle("fill", x + 8, y + h - 8, rivetSize)
-    love.graphics.circle("fill", x + w - 8, y + h - 8, rivetSize)
-    -- Rivet highlights
-    love.graphics.setColor(UI.metalShine)
-    love.graphics.circle("fill", x + 7, y + 7, 1.5)
-    love.graphics.circle("fill", x + w - 9, y + 7, 1.5)
-    love.graphics.circle("fill", x + 7, y + h - 9, 1.5)
-    love.graphics.circle("fill", x + w - 9, y + h - 9, 1.5)
+    UIDraw.drawStonePanel(x, y, w, h, cornerRadius)
 end
 
--- Helper: Draw resource group with icon
+-- Helper: Draw resource group with icon (using UIDraw module)
 local function drawResourceGroup(x, y, iconType, value, label)
-    -- Small stone backing
-    love.graphics.setColor(UI.stoneMid[1], UI.stoneMid[2], UI.stoneMid[3], 0.8)
-    love.graphics.rectangle("fill", x, y, 90, 32, 3)
-    love.graphics.setColor(UI.metalBronze[1], UI.metalBronze[2], UI.metalBronze[3], 0.6)
-    love.graphics.setLineWidth(1)
-    love.graphics.rectangle("line", x, y, 90, 32, 3)
-    
-    -- Icon
-    if iconType == "gold" then
-        -- Gold coin
-        love.graphics.setColor(1, 0.85, 0.2, 1)
-        love.graphics.circle("fill", x + 16, y + 16, 10)
-        love.graphics.setColor(0.9, 0.7, 0.1, 1)
-        love.graphics.circle("fill", x + 16, y + 16, 7)
-        love.graphics.setColor(1, 0.9, 0.3, 1)
-        love.graphics.setFont(Game.fonts.small)
-        love.graphics.print("G", x + 12, y + 9)
-    elseif iconType == "lumber" then
-        -- Wood log
-        love.graphics.setColor(0.55, 0.35, 0.15, 1)
-        love.graphics.rectangle("fill", x + 8, y + 10, 16, 12, 2)
-        love.graphics.setColor(0.7, 0.5, 0.25, 1)
-        love.graphics.ellipse("fill", x + 24, y + 16, 4, 6)
-        love.graphics.setColor(0.45, 0.3, 0.1, 1)
-        love.graphics.ellipse("line", x + 24, y + 16, 4, 6)
-    elseif iconType == "pop" then
-        -- House/farm icon
-        love.graphics.setColor(0.6, 0.5, 0.35, 1)
-        love.graphics.polygon("fill", x + 16, y + 6, x + 6, y + 16, x + 26, y + 16)
-        love.graphics.setColor(0.5, 0.4, 0.3, 1)
-        love.graphics.rectangle("fill", x + 9, y + 16, 14, 12)
-        love.graphics.setColor(0.3, 0.25, 0.2, 1)
-        love.graphics.rectangle("fill", x + 13, y + 20, 6, 8)
-    end
-    
-    -- Value text
-    love.graphics.setFont(Game.fonts.medium)
-    love.graphics.setColor(UI.textLight)
-    love.graphics.print(tostring(value), x + 32, y + 7)
+    UIDraw.drawResourceGroup(x, y, iconType, value, label, Game.fonts)
 end
 
 local function drawTopBar(screenW)
-    local barHeight = UI.topBarHeight
-    
-    -- Stone bar background
-    love.graphics.setColor(UI.stoneDark[1], UI.stoneDark[2], UI.stoneDark[3], 0.92)
-    love.graphics.rectangle("fill", 0, 0, screenW, barHeight)
-    
-    -- Stone texture
-    love.graphics.setColor(UI.stoneMid[1], UI.stoneMid[2], UI.stoneMid[3], 0.3)
-    for col = 0, math.floor(screenW / 24) do
-        local bx = 2 + col * 24
-        love.graphics.rectangle("fill", bx, 3, 20, 10, 1)
-        love.graphics.rectangle("fill", bx + 12, 16, 20, 10, 1)
-        love.graphics.rectangle("fill", bx, 29, 20, 10, 1)
-    end
-    
-    -- Bottom metal trim
-    love.graphics.setColor(UI.metalBronze)
-    love.graphics.rectangle("fill", 0, barHeight - 3, screenW, 3)
-    love.graphics.setColor(UI.metalGold[1], UI.metalGold[2], UI.metalGold[3], 0.5)
-    love.graphics.rectangle("fill", 0, barHeight - 3, screenW, 1)
-    
-    -- LEFT SIDE: Resources grouped
-    local x = 10
-    drawResourceGroup(x, 5, "gold", resources.gold, "Gold")
-    x = x + 100
-    drawResourceGroup(x, 5, "lumber", resources.lumber, "Lumber")
-    x = x + 100
-    
-    -- Population with color warning
-    love.graphics.setColor(UI.stoneMid[1], UI.stoneMid[2], UI.stoneMid[3], 0.8)
-    love.graphics.rectangle("fill", x, 5, 90, 32, 3)
-    local popColor = currentPop >= maxPop and {1, 0.4, 0.4, 0.6} or {UI.metalBronze[1], UI.metalBronze[2], UI.metalBronze[3], 0.6}
-    love.graphics.setColor(popColor)
-    love.graphics.setLineWidth(1)
-    love.graphics.rectangle("line", x, 5, 90, 32, 3)
-    
-    -- Pop icon (house)
-    love.graphics.setColor(0.6, 0.5, 0.35, 1)
-    love.graphics.polygon("fill", x + 16, 11, x + 6, 21, x + 26, 21)
-    love.graphics.setColor(0.5, 0.4, 0.3, 1)
-    love.graphics.rectangle("fill", x + 9, 21, 14, 12)
-    love.graphics.setColor(0.3, 0.25, 0.2, 1)
-    love.graphics.rectangle("fill", x + 13, 25, 6, 8)
-    
-    -- Pop text
-    love.graphics.setFont(Game.fonts.medium)
-    love.graphics.setColor(currentPop >= maxPop and {1, 0.5, 0.5, 1} or UI.textLight)
-    love.graphics.print(currentPop .. "/" .. maxPop, x + 32, 12)
-    
-    -- CENTER: Time and Speed
-    local centerX = screenW / 2
-    love.graphics.setFont(Game.fonts.medium)
-    love.graphics.setColor(UI.textLight)
-    local timeStr = string.format("%02d:%02d", math.floor(elapsedTime/60), math.floor(elapsedTime%60))
-    local timeW = Game.fonts.medium:getWidth(timeStr)
-    love.graphics.print(timeStr, centerX - timeW/2, 12)
-    
-    -- Speed indicator (small, to the right of time)
-    local speedText = "1x"
-    local speedColor = UI.textLight
-    if Game.settings.gameSpeed == 0.5 then
-        speedText = "0.5x"
-        speedColor = {0.5, 0.7, 1, 1}
-    elseif Game.settings.gameSpeed == 2.0 then
-        speedText = "2x"
-        speedColor = {1, 0.7, 0.4, 1}
-    end
-    love.graphics.setFont(Game.fonts.small)
-    love.graphics.setColor(speedColor)
-    love.graphics.print(speedText, centerX + timeW/2 + 10, 14)
-    
-    -- RIGHT SIDE: HQ tier indicator
-    local tierName = townHall.tier == 3 and "KEEP" or (townHall.tier == 2 and "HOLD" or "HALL")
-    love.graphics.setColor(UI.metalGold)
-    love.graphics.setFont(Game.fonts.small)
-    love.graphics.print(tierName, screenW - UI.minimapSize - 80, 14)
+    UIDraw.drawTopBar(screenW, resources, currentPop, maxPop, elapsedTime, townHall.tier, Game.settings.gameSpeed, Game.fonts)
 end
 
 local function drawMinimap(screenW)
-    local mmSize = UI.minimapSize
-    local mmX = screenW - mmSize - 8
-    local mmY = UI.topBarHeight + 8
-    
-    -- Stone frame for minimap
-    drawStonePanel(mmX - 6, mmY - 6, mmSize + 12, mmSize + 12, 4)
+    local mmX, mmY, mmSize = UIDraw.drawMinimapFrame(screenW)
     
     -- Draw actual minimap
     local mmScale = mmSize / map.width
@@ -432,17 +276,7 @@ local function drawMinimap(screenW)
 end
 
 local function drawBottomPanel(screenW, screenH)
-    local panelW = UI.bottomPanelWidth
-    local panelH = UI.bottomPanelHeight
-    local panelX = screenW - panelW - 8
-    local panelY = screenH - panelH - 8
-    
-    -- Stone panel
-    drawStonePanel(panelX, panelY, panelW, panelH, 6)
-    
-    -- Header bar
-    love.graphics.setColor(UI.metalBronze[1], UI.metalBronze[2], UI.metalBronze[3], 0.4)
-    love.graphics.rectangle("fill", panelX + 4, panelY + 4, panelW - 8, 22, 3)
+    local panelX, panelY, panelW, panelH = UIDraw.drawBottomPanelFrame(screenW, screenH)
     
     love.graphics.setFont(Game.fonts.medium)
     love.graphics.setColor(UI.metalGold)
@@ -450,17 +284,17 @@ local function drawBottomPanel(screenW, screenH)
     local selEntity = selectedEntities[1]
     if selEntity then
         -- Entity name in header
-        love.graphics.print(selEntity.name, panelX + 12, panelY + 6)
+        love.graphics.print(selEntity.name, panelX + 12, panelY + 8)
         
         if #selectedEntities > 1 then
             love.graphics.setColor(UI.textLight)
             love.graphics.setFont(Game.fonts.small)
-            love.graphics.print("+" .. (#selectedEntities - 1) .. " more selected", panelX + 12, panelY + 32)
+            love.graphics.print("+" .. (#selectedEntities - 1) .. " more selected", panelX + 12, panelY + 36)
         end
         
         -- Status info
         love.graphics.setFont(Game.fonts.small)
-        local statusY = panelY + 32
+        local statusY = panelY + 36
         
         if selEntity.type == "townhall" then
             if selEntity.isBuilding then
@@ -498,14 +332,14 @@ local function drawBottomPanel(screenW, screenH)
             end
         end
     else
-        love.graphics.print("No Selection", panelX + 12, panelY + 6)
+        love.graphics.print("No Selection", panelX + 12, panelY + 8)
         love.graphics.setFont(Game.fonts.small)
         love.graphics.setColor(UI.stoneAccent)
-        love.graphics.print("Click to select units", panelX + 12, panelY + 34)
-        love.graphics.print("Drag to box select", panelX + 12, panelY + 50)
-        love.graphics.print("Right-click to command", panelX + 12, panelY + 66)
-        love.graphics.print("WASD to scroll map", panelX + 12, panelY + 82)
-        love.graphics.print("1/2/3 for game speed", panelX + 12, panelY + 98)
+        love.graphics.print("Click to select units", panelX + 12, panelY + 38)
+        love.graphics.print("Drag to box select", panelX + 12, panelY + 54)
+        love.graphics.print("Right-click to command", panelX + 12, panelY + 70)
+        love.graphics.print("WASD to scroll map", panelX + 12, panelY + 86)
+        love.graphics.print("1/2/3 for game speed", panelX + 12, panelY + 102)
     end
 end
 
