@@ -2,11 +2,18 @@
     Peon
     Worker unit that moves, harvests gold, and builds structures
     Size: 1x1 tile, free movement (not grid-aligned), circular collision
+    
+    ENHANCED: Now includes visual effects, outlines, and animations
 ]]
 
 local Button = require("button")
 local Pathfinding = require("pathfinding")
 local Requirements = require("requirements")
+
+-- Visual enhancement modules (optional - graceful fallback if missing)
+local Effects, DrawUtils
+pcall(function() Effects = require("effects") end)
+pcall(function() DrawUtils = require("draw_utils") end)
 
 local Peon = {}
 Peon.__index = Peon
@@ -61,6 +68,13 @@ function Peon.new(params)
     
     -- Animation
     self.animTimer = 0
+    
+    -- Visual effects tracking
+    self.lastWorldX = self.worldX
+    self.lastWorldY = self.worldY
+    self.dustTimer = 0          -- Cooldown for dust particles
+    self.chopEffectTimer = 0    -- Cooldown for wood chip effects
+    self.idleSeed = math.random() * 100  -- Unique seed for idle animation
     
     -- Building
     self.buildTargetX = nil
@@ -300,6 +314,27 @@ end
 function Peon:update(dt, buildings, townHall, goldMine, resources)
     -- Update animation timer
     self.animTimer = self.animTimer + dt
+    
+    -- Track movement for dust effects
+    local moved = false
+    local moveDistSq = (self.worldX - self.lastWorldX)^2 + (self.worldY - self.lastWorldY)^2
+    if moveDistSq > 4 then  -- Moved more than 2 pixels
+        moved = true
+    end
+    
+    -- Dust effect cooldown
+    self.dustTimer = math.max(0, self.dustTimer - dt)
+    self.chopEffectTimer = math.max(0, self.chopEffectTimer - dt)
+    
+    -- Spawn dust when walking
+    if moved and self.dustTimer <= 0 and Effects then
+        Effects.footstep(self.worldX, self.worldY + 10)
+        self.dustTimer = 0.15  -- Cooldown between dust puffs
+    end
+    
+    -- Remember position for next frame
+    self.lastWorldX = self.worldX
+    self.lastWorldY = self.worldY
     
     if self.state == Peon.STATE_MOVING then
         self:updateMoving(dt, buildings, goldMine)
@@ -573,6 +608,13 @@ end
 function Peon:updateChopping(dt, resources)
     self.choppingTimer = self.choppingTimer + dt
     
+    -- Spawn wood chips during chopping animation
+    if Effects and self.chopEffectTimer <= 0 then
+        local treeWorldX, treeWorldY = self.map:getTileWorldCenter(self.targetTreeX, self.targetTreeY)
+        Effects.woodChips(treeWorldX, treeWorldY - 5)
+        self.chopEffectTimer = 0.4  -- Cooldown between chip bursts
+    end
+    
     if self.choppingTimer >= self.choppingTime then
         self.carryingLumber = self.choppingAmount
         
@@ -636,105 +678,182 @@ function Peon:draw()
     
     local x, y = self:getScreenPos()
     
-    -- Jumping offset when chopping
+    -- Animation offsets
     local jumpOffset = 0
+    local idleBob = 0
+    local walkBob = 0
+    local breathe = 0
+    
+    -- State-based animations
     if self.state == Peon.STATE_CHOPPING then
-        -- Jump up and down rapidly
+        -- Jump up and down rapidly when chopping
         jumpOffset = math.abs(math.sin(self.animTimer * 12)) * 6
+    elseif self.state == Peon.STATE_MOVING or self.state == Peon.STATE_RETURNING then
+        -- Bouncy walk
+        walkBob = math.abs(math.sin(self.animTimer * 10)) * 2
+    elseif self.state == Peon.STATE_IDLE then
+        -- Gentle breathing/shifting
+        if DrawUtils then
+            idleBob = DrawUtils.getIdleBob(self.idleSeed, 0.8)
+        else
+            idleBob = math.sin(self.animTimer * 1.5 + self.idleSeed) * 1.2
+        end
     end
-    y = y - jumpOffset
     
-    -- Selection circle (don't apply jump offset)
-    local baseY = y + jumpOffset
+    -- Breathing animation (subtle chest expansion)
+    breathe = math.sin(self.animTimer * 2 + self.idleSeed) * 0.5
+    
+    y = y - jumpOffset - walkBob - idleBob
+    
+    -- Selection circle (don't apply movement offsets)
+    local baseY = y + jumpOffset + walkBob + idleBob
     if self.selected then
-        love.graphics.setColor(0, 1, 0, 0.4)
-        love.graphics.circle("fill", x, baseY, self.radius + 4)
-        love.graphics.setColor(0, 1, 0, 0.8)
-        love.graphics.setLineWidth(2)
-        love.graphics.circle("line", x, baseY, self.radius + 4)
+        if DrawUtils then
+            DrawUtils.drawSelection(x, baseY, self.radius + 2)
+        else
+            love.graphics.setColor(0, 1, 0, 0.4)
+            love.graphics.circle("fill", x, baseY, self.radius + 4)
+            love.graphics.setColor(0, 1, 0, 0.8)
+            love.graphics.setLineWidth(2)
+            love.graphics.circle("line", x, baseY, self.radius + 4)
+        end
     end
     
-    -- Shadow (stays on ground)
-    love.graphics.setColor(0, 0, 0, 0.3)
-    love.graphics.ellipse("fill", x, baseY + 10, 10, 4)
-    
-    -- Feet
-    love.graphics.setColor(0.4, 0.3, 0.2, 1)
-    love.graphics.ellipse("fill", x - 5, y + 7, 5, 3)
-    love.graphics.ellipse("fill", x + 5, y + 7, 5, 3)
-    
-    -- Legs
-    love.graphics.setColor(0.5, 0.35, 0.25, 1)
-    love.graphics.rectangle("fill", x - 6, y + 2, 5, 7, 1)
-    love.graphics.rectangle("fill", x + 1, y + 2, 5, 7, 1)
-    
-    -- Body (work shirt)
-    love.graphics.setColor(0.55, 0.45, 0.35, 1)
-    love.graphics.rectangle("fill", x - 8, y - 6, 16, 12, 2)
-    
-    -- Belt
-    love.graphics.setColor(0.35, 0.25, 0.15, 1)
-    love.graphics.rectangle("fill", x - 8, y + 1, 16, 3)
-    love.graphics.setColor(0.6, 0.5, 0.2, 1)
-    love.graphics.rectangle("fill", x - 2, y + 1, 4, 3)  -- Buckle
-    
-    -- Arms
-    love.graphics.setColor(0.55, 0.45, 0.35, 1)
-    love.graphics.rectangle("fill", x - 11, y - 4, 5, 10, 1)
-    love.graphics.rectangle("fill", x + 6, y - 4, 5, 10, 1)
-    
-    -- Hands (skin tone)
-    love.graphics.setColor(0.85, 0.7, 0.55, 1)
-    love.graphics.circle("fill", x - 9, y + 4, 3)
-    love.graphics.circle("fill", x + 9, y + 4, 3)
-    
-    -- Head
-    love.graphics.setColor(0.85, 0.7, 0.55, 1)
-    love.graphics.ellipse("fill", x, y - 10, 6, 7)
-    
-    -- Hood/cap
-    love.graphics.setColor(0.5, 0.4, 0.3, 1)
-    love.graphics.arc("fill", x, y - 10, 7, math.pi, 2 * math.pi)
-    love.graphics.rectangle("fill", x - 7, y - 12, 14, 4, 1)
-    
-    -- Face details
-    love.graphics.setColor(0, 0, 0, 1)
-    love.graphics.circle("fill", x - 2, y - 11, 1.5)  -- Left eye
-    love.graphics.circle("fill", x + 2, y - 11, 1.5)  -- Right eye
-    love.graphics.setColor(0.7, 0.5, 0.4, 1)
-    love.graphics.ellipse("fill", x, y - 8, 2, 1.5)  -- Nose
-    
-    -- Tool based on state/carrying
-    if self.state == Peon.STATE_CHOPPING or self.carryingLumber > 0 then
-        -- Axe
-        love.graphics.setColor(0.5, 0.35, 0.2, 1)
-        love.graphics.rectangle("fill", x + 10, y - 8, 2, 14, 1)  -- Handle
-        love.graphics.setColor(0.6, 0.6, 0.65, 1)
-        love.graphics.polygon("fill", x + 9, y - 8, x + 16, y - 6, x + 16, y - 2, x + 9, y - 4)  -- Blade
-    elseif self.state == Peon.STATE_HARVESTING or self.carryingGold > 0 then
-        -- Pickaxe
-        love.graphics.setColor(0.5, 0.35, 0.2, 1)
-        love.graphics.rectangle("fill", x + 10, y - 6, 2, 12, 1)  -- Handle
-        love.graphics.setColor(0.5, 0.5, 0.55, 1)
-        love.graphics.polygon("fill", x + 8, y - 8, x + 18, y - 6, x + 14, y - 2)  -- Pick head
+    -- Enhanced shadow (stays on ground)
+    if DrawUtils then
+        DrawUtils.drawShadow(x, baseY + 10, 11, 4, 0.4)
+    else
+        love.graphics.setColor(0, 0, 0, 0.35)
+        love.graphics.ellipse("fill", x, baseY + 10, 11, 4)
     end
     
-    -- Carried resources on back
-    if self.carryingGold > 0 then
-        -- Gold sack
-        love.graphics.setColor(0.7, 0.55, 0.15, 1)
-        love.graphics.ellipse("fill", x, y - 2, 6, 5)
-        love.graphics.setColor(0.9, 0.8, 0.2, 1)
-        love.graphics.circle("fill", x - 2, y - 3, 3)
-        love.graphics.circle("fill", x + 2, y - 1, 2)
-    elseif self.carryingLumber > 0 then
-        -- Lumber bundle
-        love.graphics.setColor(0.55, 0.4, 0.2, 1)
-        love.graphics.rectangle("fill", x - 4, y - 14, 3, 12, 1)
-        love.graphics.rectangle("fill", x - 1, y - 16, 3, 14, 1)
-        love.graphics.rectangle("fill", x + 2, y - 13, 3, 11, 1)
+    -- Draw the peon body with outline
+    local function drawBody()
+        -- Feet
+        love.graphics.setColor(0.4, 0.3, 0.2, 1)
+        love.graphics.ellipse("fill", x - 5, y + 7, 5, 3)
+        love.graphics.ellipse("fill", x + 5, y + 7, 5, 3)
+        
+        -- Legs
+        love.graphics.setColor(0.5, 0.35, 0.25, 1)
+        love.graphics.rectangle("fill", x - 6, y + 2, 5, 7, 1)
+        love.graphics.rectangle("fill", x + 1, y + 2, 5, 7, 1)
+        
+        -- Body (work shirt) - with breathing
+        love.graphics.setColor(0.55, 0.45, 0.35, 1)
+        love.graphics.rectangle("fill", x - 8 - breathe * 0.5, y - 6, 16 + breathe, 12, 2)
+        
+        -- Belt
+        love.graphics.setColor(0.35, 0.25, 0.15, 1)
+        love.graphics.rectangle("fill", x - 8, y + 1, 16, 3)
+        love.graphics.setColor(0.6, 0.5, 0.2, 1)
+        love.graphics.rectangle("fill", x - 2, y + 1, 4, 3)  -- Buckle
+        
+        -- Arms - with slight swing when walking
+        local armSwing = 0
+        if self.state == Peon.STATE_MOVING or self.state == Peon.STATE_RETURNING then
+            armSwing = math.sin(self.animTimer * 10) * 2
+        end
+        love.graphics.setColor(0.55, 0.45, 0.35, 1)
+        love.graphics.rectangle("fill", x - 11, y - 4 + armSwing, 5, 10, 1)
+        love.graphics.rectangle("fill", x + 6, y - 4 - armSwing, 5, 10, 1)
+        
+        -- Hands (skin tone)
+        love.graphics.setColor(0.85, 0.7, 0.55, 1)
+        love.graphics.circle("fill", x - 9, y + 4 + armSwing, 3)
+        love.graphics.circle("fill", x + 9, y + 4 - armSwing, 3)
+        
+        -- Head
+        love.graphics.setColor(0.85, 0.7, 0.55, 1)
+        love.graphics.ellipse("fill", x, y - 10, 6, 7)
+        
+        -- Hood/cap
+        love.graphics.setColor(0.5, 0.4, 0.3, 1)
+        love.graphics.arc("fill", x, y - 10, 7, math.pi, 2 * math.pi)
+        love.graphics.rectangle("fill", x - 7, y - 12, 14, 4, 1)
+        
+        -- Face details
+        love.graphics.setColor(0.15, 0.1, 0.05, 1)
+        love.graphics.circle("fill", x - 2, y - 11, 1.5)  -- Left eye
+        love.graphics.circle("fill", x + 2, y - 11, 1.5)  -- Right eye
+        love.graphics.setColor(0.7, 0.5, 0.4, 1)
+        love.graphics.ellipse("fill", x, y - 8, 2, 1.5)  -- Nose
+        
+        -- Tool based on state/carrying
+        if self.state == Peon.STATE_CHOPPING or self.carryingLumber > 0 then
+            -- Axe with swing animation when chopping
+            local axeAngle = 0
+            if self.state == Peon.STATE_CHOPPING then
+                axeAngle = math.sin(self.animTimer * 12) * 0.4
+            end
+            love.graphics.push()
+            love.graphics.translate(x + 12, y)
+            love.graphics.rotate(axeAngle)
+            love.graphics.setColor(0.5, 0.35, 0.2, 1)
+            love.graphics.rectangle("fill", -2, -8, 2, 14, 1)  -- Handle
+            love.graphics.setColor(0.65, 0.65, 0.7, 1)
+            love.graphics.polygon("fill", -3, -8, 4, -6, 4, -2, -3, -4)  -- Blade
+            -- Blade highlight
+            love.graphics.setColor(0.85, 0.85, 0.9, 0.6)
+            love.graphics.line(-1, -7, 2, -5)
+            love.graphics.pop()
+        elseif self.state == Peon.STATE_HARVESTING or self.carryingGold > 0 then
+            -- Pickaxe
+            love.graphics.setColor(0.5, 0.35, 0.2, 1)
+            love.graphics.rectangle("fill", x + 10, y - 6, 2, 12, 1)  -- Handle
+            love.graphics.setColor(0.55, 0.55, 0.6, 1)
+            love.graphics.polygon("fill", x + 8, y - 8, x + 18, y - 6, x + 14, y - 2)  -- Pick head
+            -- Highlight
+            love.graphics.setColor(0.75, 0.75, 0.8, 0.5)
+            love.graphics.line(x + 10, y - 7, x + 15, y - 5)
+        end
+        
+        -- Carried resources on back
+        if self.carryingGold > 0 then
+            -- Gold sack with shimmer
+            love.graphics.setColor(0.65, 0.5, 0.12, 1)
+            love.graphics.ellipse("fill", x, y - 2, 7, 6)
+            love.graphics.setColor(0.9, 0.75, 0.15, 1)
+            love.graphics.circle("fill", x - 2, y - 3, 3)
+            love.graphics.circle("fill", x + 2, y - 1, 2.5)
+            -- Gold shine
+            love.graphics.setColor(1, 0.95, 0.5, 0.7)
+            love.graphics.circle("fill", x - 3, y - 4, 1.5)
+        elseif self.carryingLumber > 0 then
+            -- Lumber bundle with wood grain hint
+            love.graphics.setColor(0.5, 0.35, 0.18, 1)
+            love.graphics.rectangle("fill", x - 4, y - 14, 3, 12, 1)
+            love.graphics.setColor(0.55, 0.4, 0.2, 1)
+            love.graphics.rectangle("fill", x - 1, y - 16, 3, 14, 1)
+            love.graphics.setColor(0.5, 0.36, 0.19, 1)
+            love.graphics.rectangle("fill", x + 2, y - 13, 3, 11, 1)
+            -- Wood highlights
+            love.graphics.setColor(0.65, 0.5, 0.3, 0.5)
+            love.graphics.line(x - 3, y - 13, x - 3, y - 5)
+            love.graphics.line(x, y - 15, x, y - 4)
+        end
     end
     
+    -- Draw outline then body (or with flash effect)
+    if DrawUtils and Effects then
+        -- Draw dark outline
+        love.graphics.setColor(0.1, 0.08, 0.05, 0.7)
+        local offsets = {{-1.5, 0}, {1.5, 0}, {0, -1.5}, {0, 1.5}}
+        for _, off in ipairs(offsets) do
+            love.graphics.push()
+            love.graphics.translate(off[1], off[2])
+            drawBody()
+            love.graphics.pop()
+        end
+        
+        -- Draw body with flash effect if damaged
+        DrawUtils.applyFlash(self, drawBody)
+    else
+        -- Fallback: just draw body
+        drawBody()
+    end
+    
+    love.graphics.setLineWidth(1)
     love.graphics.setColor(1, 1, 1, 1)
 end
 

@@ -6,18 +6,18 @@
 local Button = {}
 Button.__index = Button
 
--- Enhanced metal themed colors
+-- Enhanced metal themed colors - VERY DARK/AGED
 local defaultColors = {
-    normal = {0.42, 0.38, 0.32, 1},
-    hover = {0.52, 0.48, 0.40, 1},
-    pressed = {0.32, 0.28, 0.24, 1},
-    disabled = {0.30, 0.28, 0.26, 1},
-    text = {0.95, 0.92, 0.85, 1},
-    textDisabled = {0.6, 0.58, 0.55, 1},
-    border = {0.65, 0.52, 0.35, 1},
-    borderLight = {0.78, 0.65, 0.48, 1},
-    borderDark = {0.40, 0.30, 0.18, 1},
-    shine = {1.0, 0.95, 0.85, 0.4},
+    normal = {0.24, 0.22, 0.18, 1},
+    hover = {0.32, 0.29, 0.24, 1},
+    pressed = {0.16, 0.14, 0.12, 1},
+    disabled = {0.18, 0.16, 0.14, 1},
+    text = {0.90, 0.86, 0.76, 1},
+    textDisabled = {0.45, 0.42, 0.38, 1},
+    border = {0.45, 0.36, 0.22, 1},
+    borderLight = {0.60, 0.48, 0.32, 1},
+    borderDark = {0.22, 0.16, 0.10, 1},
+    shine = {1.0, 0.90, 0.70, 0.25},
 }
 
 function Button.new(params)
@@ -143,6 +143,24 @@ function Button:draw()
     
     -- 3. GRADIENT FILL
     drawButtonGradient(dx, dy, w, h, topColor, bottomColor, cr)
+    
+    -- 3.5 SURFACE NOISE (worn texture)
+    local function btnHash(a, b)
+        local hv = (a * 374761393 + b * 668265263) % 2147483647
+        return (hv % 1000) / 1000
+    end
+    local numNoise = math.floor(w * h * 0.02)
+    for i = 1, numNoise do
+        local px = dx + 3 + btnHash(i + x, y) * (w - 6)
+        local py = dy + 3 + btnHash(y, i + x) * (h - 6)
+        local isLight = btnHash(i * 3, i * 7) > 0.45
+        if isLight then
+            love.graphics.setColor(1, 0.95, 0.85, 0.1)
+        else
+            love.graphics.setColor(0, 0, 0, 0.12)
+        end
+        love.graphics.rectangle("fill", px, py, 1, 1)
+    end
     
     -- 4. INNER HIGHLIGHT (top edge, skip when pressed)
     if not isPressed then

@@ -2,7 +2,13 @@
     Map
     64x64 tile grid with scrolling, terrain generation
     Tile size: 32x32 pixels
+    
+    ENHANCED: Trees now have variation and wind sway
 ]]
+
+-- Visual enhancement modules (optional - graceful fallback if missing)
+local DrawUtils
+pcall(function() DrawUtils = require("draw_utils") end)
 
 local Map = {}
 Map.__index = Map
@@ -16,6 +22,9 @@ Map.TILE_STUMP = 3
 Map.TILE_SIZE = 32
 Map.WIDTH = 64
 Map.HEIGHT = 64
+
+-- Animation time (for tree sway)
+Map.animTime = 0
 
 function Map.new()
     local self = setmetatable({}, Map)
@@ -256,6 +265,12 @@ function Map:isWorldPosPassable(worldX, worldY)
 end
 
 function Map:update(dt)
+    -- Update animation time for tree sway
+    Map.animTime = Map.animTime + dt
+    if DrawUtils then
+        DrawUtils.update(dt)
+    end
+    
     -- Keyboard scrolling
     local dx, dy = 0, 0
     if love.keyboard.isDown("left") or love.keyboard.isDown("a") then
@@ -309,14 +324,49 @@ function Map:draw()
             elseif tile == Map.TILE_TREE then
                 -- Grass under tree (use houndstooth too)
                 self:drawHoundstoothTile(screenX, screenY, x, y)
-                -- Trunk
-                love.graphics.setColor(0.4, 0.25, 0.1, 1)
-                love.graphics.rectangle("fill", screenX + 12, screenY + 18, 8, 14)
-                -- Foliage
-                love.graphics.setColor(0.1, 0.35, 0.12, 1)
-                love.graphics.circle("fill", screenX + 16, screenY + 12, 11)
-                love.graphics.setColor(0.15, 0.45, 0.18, 1)
-                love.graphics.circle("fill", screenX + 14, screenY + 10, 7)
+                
+                -- Enhanced tree with DrawUtils (variation + sway) or fallback
+                if DrawUtils then
+                    DrawUtils.drawTree(screenX, screenY, x, y, self.tileSize)
+                else
+                    -- Fallback: simple tree with basic variation
+                    local seed = x * 1000 + y
+                    math.randomseed(seed)
+                    local heightVar = 0.9 + math.random() * 0.2
+                    local colorVar = math.random() * 0.08 - 0.04
+                    math.randomseed(os.time())
+                    
+                    -- Simple sway
+                    local sway = math.sin(Map.animTime * 1.2 + x * 0.1 + y * 0.13) * 1.5
+                    
+                    local cx = screenX + 16
+                    local cy = screenY + 16
+                    
+                    -- Shadow
+                    love.graphics.setColor(0, 0, 0, 0.3)
+                    love.graphics.ellipse("fill", cx + 2, cy + 12, 9, 3)
+                    
+                    -- Trunk (with sway at top)
+                    love.graphics.setColor(0.38, 0.24, 0.1, 1)
+                    love.graphics.polygon("fill",
+                        cx - 3, cy + 10,
+                        cx + 3, cy + 10,
+                        cx + 2 + sway * 0.3, cy - 4 * heightVar,
+                        cx - 2 + sway * 0.3, cy - 4 * heightVar
+                    )
+                    
+                    -- Back foliage
+                    love.graphics.setColor(0.08 + colorVar, 0.32 + colorVar, 0.1 + colorVar * 0.5, 1)
+                    love.graphics.circle("fill", cx + sway * 0.7 - 2, cy - 6 * heightVar, 9)
+                    
+                    -- Main foliage
+                    love.graphics.setColor(0.1 + colorVar, 0.38 + colorVar, 0.12 + colorVar * 0.5, 1)
+                    love.graphics.circle("fill", cx + sway, cy - 4 * heightVar, 11 * heightVar)
+                    
+                    -- Highlight
+                    love.graphics.setColor(0.15 + colorVar, 0.48 + colorVar, 0.18, 1)
+                    love.graphics.circle("fill", cx + sway - 3, cy - 6 * heightVar, 6)
+                end
             elseif tile == Map.TILE_STUMP then
                 -- Brown stump tile with low contrast to grass
                 love.graphics.setColor(0.28, 0.38, 0.22, 1)  -- Brownish-green base

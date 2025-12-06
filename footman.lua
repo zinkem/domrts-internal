@@ -1,9 +1,16 @@
 --[[
     Footman - Basic melee soldier
     Inherits from Unit base class
+    
+    ENHANCED: Now includes visual effects, outlines, and animations
 ]]
 
 local Unit = require("unit")
+
+-- Visual enhancement modules (optional - graceful fallback if missing)
+local Effects, DrawUtils
+pcall(function() Effects = require("effects") end)
+pcall(function() DrawUtils = require("draw_utils") end)
 
 local Footman = setmetatable({}, {__index = Unit})
 Footman.__index = Footman
@@ -21,87 +28,204 @@ function Footman.new(params)
     self.type = "footman"
     self.name = "Footman"
     
+    -- Animation properties
+    self.animTimer = 0
+    self.idleSeed = math.random() * 100
+    self.lastWorldX = self.worldX
+    self.lastWorldY = self.worldY
+    self.dustTimer = 0
+    
     return self
+end
+
+-- Override update to add animation timer and effects
+local originalUpdate = Footman.update or function() end
+function Footman:update(dt, ...)
+    self.animTimer = (self.animTimer or 0) + dt
+    self.dustTimer = math.max(0, (self.dustTimer or 0) - dt)
+    
+    -- Track movement for dust
+    local moveDistSq = (self.worldX - (self.lastWorldX or self.worldX))^2 + 
+                       (self.worldY - (self.lastWorldY or self.worldY))^2
+    if moveDistSq > 4 and self.dustTimer <= 0 and Effects then
+        Effects.footstep(self.worldX, self.worldY + 10)
+        self.dustTimer = 0.12
+    end
+    
+    self.lastWorldX = self.worldX
+    self.lastWorldY = self.worldY
+    
+    if originalUpdate then
+        return originalUpdate(self, dt, ...)
+    end
 end
 
 function Footman:draw()
     local x, y = self:getScreenPos()
     
-    -- Selection circle
-    if self.selected then
-        love.graphics.setColor(0, 1, 0, 0.4)
-        love.graphics.circle("fill", x, y, self.radius + 4)
-        love.graphics.setColor(0, 1, 0, 0.8)
-        love.graphics.setLineWidth(2)
-        love.graphics.circle("line", x, y, self.radius + 4)
+    -- Animation offsets
+    local idleBob = 0
+    local walkBob = 0
+    local breathe = 0
+    
+    -- Determine if moving
+    local isMoving = self.state == "Moving" or 
+                     (self.targetX and self.targetY)
+    
+    if isMoving then
+        walkBob = math.abs(math.sin((self.animTimer or 0) * 9)) * 2.5
+    else
+        -- Idle sway
+        if DrawUtils then
+            idleBob = DrawUtils.getIdleBob(self.idleSeed or 0, 0.6)
+        else
+            idleBob = math.sin((self.animTimer or 0) * 1.2 + (self.idleSeed or 0)) * 1
+        end
     end
     
-    -- Shadow
-    love.graphics.setColor(0, 0, 0, 0.3)
-    love.graphics.ellipse("fill", x, y + 10, 11, 4)
+    -- Breathing
+    breathe = math.sin((self.animTimer or 0) * 1.8 + (self.idleSeed or 0)) * 0.4
     
-    -- Feet (leather boots)
-    love.graphics.setColor(0.4, 0.3, 0.2, 1)
-    love.graphics.ellipse("fill", x - 5, y + 8, 4, 3)
-    love.graphics.ellipse("fill", x + 5, y + 8, 4, 3)
+    y = y - walkBob - idleBob
+    local baseY = y + walkBob + idleBob
     
-    -- Legs (chainmail)
-    love.graphics.setColor(0.5, 0.5, 0.55, 1)
-    love.graphics.rectangle("fill", x - 6, y + 1, 5, 9, 1)
-    love.graphics.rectangle("fill", x + 1, y + 1, 5, 9, 1)
+    -- Selection circle
+    if self.selected then
+        if DrawUtils then
+            DrawUtils.drawSelection(x, baseY, self.radius + 2, {0.3, 1, 0.4})
+        else
+            love.graphics.setColor(0, 1, 0, 0.4)
+            love.graphics.circle("fill", x, baseY, self.radius + 4)
+            love.graphics.setColor(0, 1, 0, 0.8)
+            love.graphics.setLineWidth(2)
+            love.graphics.circle("line", x, baseY, self.radius + 4)
+        end
+    end
     
-    -- Shield on left arm
-    love.graphics.setColor(0.6, 0.3, 0.15, 1)
-    love.graphics.ellipse("fill", x - 12, y - 2, 6, 10)
-    love.graphics.setColor(0.5, 0.5, 0.55, 1)
-    love.graphics.setLineWidth(2)
-    love.graphics.ellipse("line", x - 12, y - 2, 6, 10)
-    love.graphics.setColor(0.8, 0.7, 0.2, 1)
-    love.graphics.circle("fill", x - 12, y - 2, 3)
+    -- Enhanced shadow
+    if DrawUtils then
+        DrawUtils.drawShadow(x, baseY + 10, 12, 4, 0.4)
+    else
+        love.graphics.setColor(0, 0, 0, 0.3)
+        love.graphics.ellipse("fill", x, baseY + 10, 11, 4)
+    end
     
-    -- Body (chainmail)
-    love.graphics.setColor(0.55, 0.55, 0.6, 1)
-    love.graphics.rectangle("fill", x - 7, y - 8, 14, 12, 2)
+    -- Draw function for body (used for outline and flash)
+    local function drawBody()
+        -- Arm swing when walking
+        local armSwing = 0
+        if isMoving then
+            armSwing = math.sin((self.animTimer or 0) * 9) * 3
+        end
+        
+        -- Feet (leather boots)
+        love.graphics.setColor(0.35, 0.25, 0.15, 1)
+        love.graphics.ellipse("fill", x - 5, y + 8, 4, 3)
+        love.graphics.ellipse("fill", x + 5, y + 8, 4, 3)
+        
+        -- Legs (chainmail)
+        love.graphics.setColor(0.45, 0.45, 0.5, 1)
+        love.graphics.rectangle("fill", x - 6, y + 1, 5, 9, 1)
+        love.graphics.rectangle("fill", x + 1, y + 1, 5, 9, 1)
+        -- Chainmail texture hint
+        love.graphics.setColor(0.5, 0.5, 0.55, 0.5)
+        love.graphics.line(x - 5, y + 3, x - 2, y + 3)
+        love.graphics.line(x + 2, y + 5, x + 5, y + 5)
+        
+        -- Shield on left arm (moves with arm)
+        love.graphics.setColor(0.55, 0.28, 0.12, 1)
+        love.graphics.ellipse("fill", x - 12, y - 2 + armSwing * 0.5, 6, 10)
+        love.graphics.setColor(0.45, 0.45, 0.5, 1)
+        love.graphics.setLineWidth(2)
+        love.graphics.ellipse("line", x - 12, y - 2 + armSwing * 0.5, 6, 10)
+        -- Shield boss
+        love.graphics.setColor(0.75, 0.65, 0.2, 1)
+        love.graphics.circle("fill", x - 12, y - 2 + armSwing * 0.5, 3)
+        love.graphics.setColor(0.9, 0.8, 0.3, 0.6)
+        love.graphics.circle("fill", x - 13, y - 3 + armSwing * 0.5, 1.5)
+        
+        -- Body (chainmail) - with breathing
+        love.graphics.setColor(0.5, 0.5, 0.55, 1)
+        love.graphics.rectangle("fill", x - 7 - breathe * 0.3, y - 8, 14 + breathe * 0.6, 12, 2)
+        -- Chainmail highlight
+        love.graphics.setColor(0.6, 0.6, 0.65, 0.4)
+        love.graphics.rectangle("fill", x - 5, y - 7, 4, 2, 1)
+        
+        -- Belt
+        love.graphics.setColor(0.4, 0.32, 0.18, 1)
+        love.graphics.rectangle("fill", x - 7, y, 14, 3)
+        love.graphics.setColor(0.6, 0.5, 0.25, 1)
+        love.graphics.rectangle("fill", x - 2, y, 4, 3)
+        
+        -- Right arm holding sword (moves opposite to left)
+        love.graphics.setColor(0.5, 0.5, 0.55, 1)
+        love.graphics.ellipse("fill", x + 9, y - 4 - armSwing * 0.5, 3, 5)
+        love.graphics.setColor(0.85, 0.72, 0.58, 1)
+        love.graphics.rectangle("fill", x + 7, y - 2 - armSwing * 0.3, 4, 8, 1)
+        
+        -- Hand
+        love.graphics.setColor(0.85, 0.72, 0.58, 1)
+        love.graphics.circle("fill", x + 9, y + 6 - armSwing * 0.3, 3)
+        
+        -- Sword with slight animation
+        local swordAngle = math.sin((self.animTimer or 0) * 2) * 0.05
+        love.graphics.push()
+        love.graphics.translate(x + 9, y + 4 - armSwing * 0.3)
+        love.graphics.rotate(swordAngle)
+        -- Blade
+        love.graphics.setColor(0.7, 0.7, 0.75, 1)
+        love.graphics.setLineWidth(3)
+        love.graphics.line(0, 0, 0, -18)
+        -- Blade highlight
+        love.graphics.setColor(0.9, 0.9, 0.95, 0.6)
+        love.graphics.setLineWidth(1)
+        love.graphics.line(-1, -2, -1, -16)
+        -- Handle
+        love.graphics.setColor(0.45, 0.35, 0.2, 1)
+        love.graphics.setLineWidth(2)
+        love.graphics.line(0, 0, 0, 4)
+        -- Crossguard
+        love.graphics.setColor(0.65, 0.55, 0.25, 1)
+        love.graphics.line(-4, 0, 4, 0)
+        love.graphics.pop()
+        
+        -- Head
+        love.graphics.setColor(0.85, 0.72, 0.58, 1)
+        love.graphics.ellipse("fill", x, y - 12, 6, 7)
+        
+        -- Helmet
+        love.graphics.setColor(0.45, 0.45, 0.5, 1)
+        love.graphics.arc("fill", x, y - 14, 7, math.pi, 2 * math.pi)
+        -- Helmet crest
+        love.graphics.setColor(0.5, 0.5, 0.55, 1)
+        love.graphics.rectangle("fill", x - 1, y - 14, 2, 6)
+        -- Helmet shine
+        love.graphics.setColor(0.65, 0.65, 0.7, 0.5)
+        love.graphics.arc("line", x - 2, y - 15, 4, math.pi * 1.1, math.pi * 1.5)
+        
+        -- Eyes
+        love.graphics.setColor(0.15, 0.12, 0.08, 1)
+        love.graphics.circle("fill", x - 3, y - 12, 1.5)
+        love.graphics.circle("fill", x + 3, y - 12, 1.5)
+    end
     
-    -- Belt
-    love.graphics.setColor(0.45, 0.35, 0.2, 1)
-    love.graphics.rectangle("fill", x - 7, y, 14, 3)
-    love.graphics.setColor(0.6, 0.5, 0.3, 1)
-    love.graphics.rectangle("fill", x - 2, y, 4, 3)
-    
-    -- Right arm holding sword
-    love.graphics.setColor(0.55, 0.55, 0.6, 1)
-    love.graphics.ellipse("fill", x + 9, y - 4, 3, 5)
-    love.graphics.setColor(0.85, 0.72, 0.58, 1)
-    love.graphics.rectangle("fill", x + 7, y - 2, 4, 8, 1)
-    
-    -- Hand
-    love.graphics.setColor(0.85, 0.72, 0.58, 1)
-    love.graphics.circle("fill", x + 9, y + 6, 3)
-    
-    -- Sword
-    love.graphics.setColor(0.7, 0.7, 0.75, 1)
-    love.graphics.setLineWidth(3)
-    love.graphics.line(x + 9, y + 4, x + 9, y - 14)
-    love.graphics.setColor(0.5, 0.4, 0.25, 1)
-    love.graphics.setLineWidth(2)
-    love.graphics.line(x + 9, y + 4, x + 9, y + 8)
-    love.graphics.setColor(0.7, 0.6, 0.3, 1)
-    love.graphics.line(x + 5, y + 4, x + 13, y + 4)
-    
-    -- Head
-    love.graphics.setColor(0.85, 0.72, 0.58, 1)
-    love.graphics.ellipse("fill", x, y - 12, 6, 7)
-    
-    -- Helmet
-    love.graphics.setColor(0.5, 0.5, 0.55, 1)
-    love.graphics.arc("fill", x, y - 14, 7, math.pi, 2 * math.pi)
-    love.graphics.rectangle("fill", x - 1, y - 14, 2, 6)
-    
-    -- Eyes
-    love.graphics.setColor(0.2, 0.15, 0.1, 1)
-    love.graphics.circle("fill", x - 3, y - 12, 1.5)
-    love.graphics.circle("fill", x + 3, y - 12, 1.5)
+    -- Draw with outline
+    if DrawUtils and Effects then
+        -- Dark outline
+        love.graphics.setColor(0.08, 0.06, 0.04, 0.7)
+        local offsets = {{-1.5, 0}, {1.5, 0}, {0, -1.5}, {0, 1.5}}
+        for _, off in ipairs(offsets) do
+            love.graphics.push()
+            love.graphics.translate(off[1], off[2])
+            drawBody()
+            love.graphics.pop()
+        end
+        
+        -- Body with flash
+        DrawUtils.applyFlash(self, drawBody)
+    else
+        drawBody()
+    end
     
     love.graphics.setLineWidth(1)
     love.graphics.setColor(1, 1, 1, 1)

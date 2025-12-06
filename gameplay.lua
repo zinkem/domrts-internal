@@ -2,6 +2,8 @@
     Gameplay Scene
     RTS Resource Gathering with scrolling map
     Includes full tech tree with all buildings and units
+    
+    ENHANCED: Now includes particle effects and visual enhancements
 ]]
 
 local Map = require("map")
@@ -29,6 +31,11 @@ local FlyingScout = require("flyingscout")
 local Ballista = require("ballista")
 local Kamikaze = require("kamikaze")
 local UIDraw = require("ui_draw")
+
+-- Visual effects (optional - graceful fallback)
+local Effects, DrawUtils
+pcall(function() Effects = require("effects") end)
+pcall(function() DrawUtils = require("draw_utils") end)
 
 local Gameplay = {}
 
@@ -688,6 +695,9 @@ end
 function Gameplay.load()
     local screenW, screenH = love.graphics.getDimensions()
     
+    -- Initialize visual effects system
+    if Effects then Effects.init() end
+    
     -- Pathfinding computed on-demand, no need to invalidate
     
     elapsedTime = 0
@@ -761,6 +771,10 @@ function Gameplay.update(dt)
     
     -- Apply game speed multiplier
     local gameDt = dt * Game.settings.gameSpeed
+    
+    -- Update visual effects
+    if Effects then Effects.update(gameDt) end
+    if DrawUtils then DrawUtils.update(gameDt) end
     
     elapsedTime = elapsedTime + gameDt
     map:update(dt)  -- Camera stays at real-time for responsiveness
@@ -1037,6 +1051,9 @@ function Gameplay.draw()
     for _, unit in ipairs(flyingScouts) do unit:draw() end
     for _, unit in ipairs(ballistas) do unit:draw() end
     for _, unit in ipairs(kamikazes) do unit:draw() end
+    
+    -- Draw particle effects (dust, sparks, etc)
+    if Effects then Effects.draw(map) end
     
     drawBuildingPlacement()
     drawBoxSelection()
