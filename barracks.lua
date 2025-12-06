@@ -56,6 +56,8 @@ function Barracks.new(params)
     self.producingUnit = nil  -- "footman" or "knight"
     self.actionButton = nil
     self.knightButton = nil
+    self.productionQueue = {}  -- Queue of unit types to produce
+    self.maxQueueSize = 5
     
     if self.map then
         self.map:clearArea(self.gridX, self.gridY, self.gridSize, self.gridSize)
@@ -111,9 +113,23 @@ function Barracks:update(dt)
         self.productionTimer = self.productionTimer + dt
         if self.productionTimer >= productionTime then
             local unitType = self.producingUnit
-            self.isProducing = false
-            self.productionTimer = 0
-            self.producingUnit = nil
+            
+            -- Remove the completed unit from queue
+            if #self.productionQueue > 0 then
+                table.remove(self.productionQueue, 1)
+            end
+            
+            -- Check if there's another unit in queue
+            if #self.productionQueue > 0 then
+                -- Start next unit
+                self.productionTimer = 0
+                self.producingUnit = self.productionQueue[1]
+            else
+                -- Queue empty, stop production
+                self.isProducing = false
+                self.productionTimer = 0
+                self.producingUnit = nil
+            end
             return unitType, false -- unit type ready
         end
     end
@@ -273,17 +289,48 @@ end
 
 function Barracks:startProduction(unitType)
     unitType = unitType or "footman"
-    if self.completed and not self.isProducing then
-        self.isProducing = true
-        self.productionTimer = 0
-        self.producingUnit = unitType
+    -- Add to queue if not full
+    if #self.productionQueue < self.maxQueueSize then
+        table.insert(self.productionQueue, unitType)
+        
+        -- Start production immediately if not already producing
+        if not self.isProducing and #self.productionQueue > 0 then
+            self.isProducing = true
+            self.productionTimer = 0
+            self.producingUnit = self.productionQueue[1]
+        end
         return true
     end
     return false
 end
 
+function Barracks:cancelProduction()
+    -- Cancel the last item in queue and refund
+    if #self.productionQueue > 0 then
+        local unitType = self.productionQueue[#self.productionQueue]
+        table.remove(self.productionQueue)
+        -- If we cancelled the one being produced, stop or start next
+        if #self.productionQueue == 0 then
+            self.isProducing = false
+            self.productionTimer = 0
+            self.producingUnit = nil
+        end
+        -- Return cost for refund
+        if unitType == "knight" then
+            return Barracks.KNIGHT_COST
+        else
+            return Barracks.FOOTMAN_COST
+        end
+    end
+    return 0
+end
+
+function Barracks:getQueueSize()
+    return #self.productionQueue
+end
+
 function Barracks:canProduce()
-    return self.completed and not self.isProducing
+    return self.completed and #self.productionQueue < self.maxQueueSize
 end
 
 function Barracks:getProductionProgress()

@@ -68,6 +68,8 @@ function TownHall.new(params)
     self.productionTimer = 0
     self.productionCost = 400
     self.actionButton = nil
+    self.productionQueue = {}  -- Queue of units to produce
+    self.maxQueueSize = 5
     
     -- Upgrade state
     self.isUpgrading = false
@@ -141,8 +143,20 @@ function TownHall:update(dt)
     if self.isProducing then
         self.productionTimer = self.productionTimer + dt
         if self.productionTimer >= self.productionTime then
-            self.isProducing = false
-            self.productionTimer = 0
+            -- Remove the completed unit from queue
+            if #self.productionQueue > 0 then
+                table.remove(self.productionQueue, 1)
+            end
+            
+            -- Check if there's another unit in queue
+            if #self.productionQueue > 0 then
+                -- Start next unit
+                self.productionTimer = 0
+            else
+                -- Queue empty, stop production
+                self.isProducing = false
+                self.productionTimer = 0
+            end
             return true, false, false  -- peon ready
         end
     end
@@ -557,16 +571,40 @@ function TownHall:drawHealthBar()
 end
 
 function TownHall:startProduction()
-    if not self.isProducing and not self.isUpgrading then
-        self.isProducing = true
-        self.productionTimer = 0
+    -- Add to queue if not full
+    if #self.productionQueue < self.maxQueueSize then
+        table.insert(self.productionQueue, "peon")
+        
+        -- Start production immediately if not already producing
+        if not self.isProducing and not self.isUpgrading and #self.productionQueue > 0 then
+            self.isProducing = true
+            self.productionTimer = 0
+        end
         return true
     end
     return false
 end
 
+function TownHall:cancelProduction()
+    -- Cancel the last item in queue and refund
+    if #self.productionQueue > 0 then
+        table.remove(self.productionQueue)
+        -- If we cancelled the one being produced, stop production
+        if #self.productionQueue == 0 then
+            self.isProducing = false
+            self.productionTimer = 0
+        end
+        return self.productionCost  -- Return cost for refund
+    end
+    return 0
+end
+
+function TownHall:getQueueSize()
+    return #self.productionQueue
+end
+
 function TownHall:canProduce()
-    return self.completed and not self.isProducing and not self.isUpgrading and not self.isBuilding
+    return self.completed and not self.isUpgrading and not self.isBuilding and #self.productionQueue < self.maxQueueSize
 end
 
 function TownHall:getProductionProgress()

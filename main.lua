@@ -232,11 +232,58 @@ function love.load()
         vsync = true
     })
     
+    -- Load fonts with fallbacks
+    local defaultFont = love.graphics.newFont(14)
+    local function loadFont(path, size)
+        local success, font = pcall(love.graphics.newFont, path, size)
+        if success and font then
+            return font
+        else
+            return love.graphics.newFont(size)
+        end
+    end
+    
+    --[[
+    FONT CHOICES & OPINIONS TRACKER
+    ================================
+    Available fonts:
+      - fonts/perigord/pe______.ttf           (medieval serif)
+      - fonts/empire-crown/empirecrown.ttf    (decorative medieval)
+      - fonts/empire-crown/empirecrownexpand.ttf (wider decorative)
+      - fonts/morris-roman-black/MorrisRoman-Black.ttf (bold blackletter)
+      - fonts/ballade/BalladeSh.ttf           (elegant script-like)
+      - fonts/ballade/BalladeHf.ttf           (half version)
+      - fonts/ballade/BalladeContour.ttf      (outline version)
+      - fonts/knights-templar/Knight2.ttf     (templar style)
+    
+    OPINIONS:
+      - perigord: ❌ TOO HARD TO READ for body text/tutorial messages
+      - ballade: Works, but not appropriate for body text
+      - morris-roman-black: ✓ GOOD for title screen title
+      - empirecrown: ✓ GOOD for buttons/headers (part of current best setup)
+      - knights-templar: (pending feedback)
+      - default system font: ✓ GOOD for body text/stats - readable
+    
+    CURRENT STATUS: User likes current setup, keeping it for now.
+    ]]
+    
     Game.fonts = {
+        -- Body text - using default font for maximum readability
         small = love.graphics.newFont(14),
-        medium = love.graphics.newFont(20),
-        large = love.graphics.newFont(32),
-        title = love.graphics.newFont(64)
+        medium = love.graphics.newFont(18),
+        
+        -- Headers and emphasis
+        large = loadFont("fonts/empire-crown/empirecrown.ttf", 28),
+        title = loadFont("fonts/morris-roman-black/MorrisRoman-Black.ttf", 72),
+        button = loadFont("fonts/empire-crown/empirecrown.ttf", 20),
+        
+        -- Stats screen - using default for reliability
+        stats = love.graphics.newFont(18),
+        statsLarge = love.graphics.newFont(28),
+        header = loadFont("fonts/knights-templar/Knight2.ttf", 24),
+        
+        -- Subtitles
+        subtitle = loadFont("fonts/empire-crown/empirecrownexpand.ttf", 16),
     }
     
     -- Initialize audio system
@@ -250,6 +297,7 @@ function love.load()
     Game.SceneManager.register("title", require("title"))
     Game.SceneManager.register("gameplay", require("gameplay"))
     Game.SceneManager.register("victory", require("victory"))
+    Game.SceneManager.register("tutorial", require("tutorial"))
     
     -- Start with title screen
     Game.SceneManager.switch("title")

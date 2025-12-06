@@ -44,6 +44,25 @@ AI.PERSONALITIES = {
         attackWaveSize = 2,  -- Only need 2 to attack!
         attackCooldown = 20,
     },
+    
+    -- PASSIVE: Tutorial AI - builds units but never attacks
+    passive = {
+        name = "Passive",
+        buildOrder = {
+            {type = "barracks"},
+            {type = "farm"},
+            {type = "footman"},
+            {type = "footman"},
+            {type = "farm"},
+            {type = "footman"},
+            {type = "footman"},
+            -- No attack command - just keeps building
+        },
+        lumberRatio = 7,
+        attackWaveSize = 99,  -- Will never reach this
+        attackCooldown = 9999,
+        passive = true,  -- Flag to disable aggression
+    },
 }
 
 function AI.new(params)

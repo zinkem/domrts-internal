@@ -58,12 +58,32 @@ local defeat = false
 
 -- Game stats for victory screen
 local gameStats = {
+    -- Combat stats
     unitsKilled = 0,
     unitsLost = 0,
     buildingsDestroyed = 0,
     buildingsLost = 0,
+    
+    -- Economy stats
     goldCollected = 0,
     lumberCollected = 0,
+    
+    -- Production stats
+    peonsProduced = 0,
+    footmenProduced = 0,
+    
+    -- Building timeline (time when each building was completed)
+    buildingTimeline = {},  -- {time = seconds, type = "barracks", team = 1}
+    
+    -- AI stats (for comparison)
+    aiUnitsKilled = 0,
+    aiUnitsLost = 0,
+    aiBuildingsDestroyed = 0,
+    aiBuildingsLost = 0,
+    aiGoldCollected = 0,
+    aiLumberCollected = 0,
+    aiPeonsProduced = 0,
+    aiFootmenProduced = 0,
 }
 
 local resources = {
@@ -156,7 +176,7 @@ local UI = {
     -- UI dimensions
     topBarHeight = 42,
     minimapSize = 160,
-    bottomPanelHeight = 180,
+    bottomPanelHeight = 70,  -- Horizontal command bar
     bottomPanelWidth = 280,
 }
 
@@ -444,71 +464,300 @@ local function drawMinimap(screenW)
     end
 end
 
-local function drawBottomPanel(screenW, screenH)
-    local panelX, panelY, panelW, panelH = UIDraw.drawBottomPanelFrame(screenW, screenH)
+-- Command bar button definitions
+local commandButtons = {}
+local commandBarY = 0
+local COMMAND_BUTTON_SIZE = 50
+local COMMAND_BUTTON_SPACING = 4
+
+local function startBuildingPlacement(peon, buildingType)
+    isPlacingBuilding = true
+    placingBuildingType = buildingType
+    placingPeon = peon
+end
+
+local function cancelBuildingPlacement()
+    isPlacingBuilding = false
+    placingBuildingType = nil
+    placingPeon = nil
+end
+
+-- Get command buttons for current selection
+local function getCommandButtons()
+    local buttons = {}
+    local selEntity = selectedEntities[1]
+    local playerTeam = Teams and Teams.PLAYER or 1
     
-    love.graphics.setFont(Game.fonts.medium)
-    love.graphics.setColor(UI.metalGold)
+    if not selEntity or selEntity.team ~= playerTeam then
+        return buttons
+    end
+    
+    -- Common commands for mobile units
+    if selEntity.moveTo then
+        table.insert(buttons, {
+            hotkey = "A",
+            text = "Attack",
+            icon = "attack",
+            enabled = selEntity.setAttackTarget ~= nil,
+            action = function()
+                if #selectedEntities > 0 then
+                    input.attackMoveMode = true
+                    addNotification("Attack-Move: Click to attack")
+                end
+            end
+        })
+        table.insert(buttons, {
+            hotkey = "S",
+            text = "Stop",
+            icon = "stop",
+            enabled = true,
+            action = function()
+                for _, entity in ipairs(selectedEntities) do
+                    if entity.stop then entity:stop()
+                    elseif entity.state then entity.state = "Idle" end
+                end
+            end
+        })
+    end
+    
+    -- Peon build commands
+    if selEntity.type == "peon" then
+        local canBuild = selEntity.state ~= "Building"
+        table.insert(buttons, {
+            hotkey = "F",
+            text = "Farm",
+            icon = "farm",
+            cost = "250/100",
+            enabled = canBuild and resources.gold >= 250 and resources.lumber >= 100,
+            action = function()
+                if resources.gold >= 250 and resources.lumber >= 100 then
+                    startBuildingPlacement(selEntity, "farm")
+                end
+            end
+        })
+        table.insert(buttons, {
+            hotkey = "B",
+            text = "Barracks",
+            icon = "barracks",
+            cost = "500/200",
+            enabled = canBuild and resources.gold >= 500 and resources.lumber >= 200,
+            action = function()
+                if resources.gold >= 500 and resources.lumber >= 200 then
+                    startBuildingPlacement(selEntity, "barracks")
+                end
+            end
+        })
+        table.insert(buttons, {
+            hotkey = "T",
+            text = "Tower",
+            icon = "tower",
+            cost = "200/100",
+            enabled = canBuild and resources.gold >= 200 and resources.lumber >= 100,
+            action = function()
+                if resources.gold >= 200 and resources.lumber >= 100 then
+                    startBuildingPlacement(selEntity, "scoutTower")
+                end
+            end
+        })
+    end
+    
+    -- Town Hall commands
+    if selEntity.type == "townhall" and selEntity.completed then
+        local canTrain = selEntity:canProduce() and resources.gold >= selEntity.productionCost and currentPop < maxPop
+        table.insert(buttons, {
+            hotkey = "W",
+            text = "Peon",
+            icon = "peon",
+            cost = tostring(selEntity.productionCost),
+            enabled = canTrain,
+            primary = true,  -- Center this button
+            action = function()
+                if selEntity:canProduce() and resources.gold >= selEntity.productionCost and currentPop < maxPop then
+                    if selEntity:startProduction() then
+                        resources.gold = resources.gold - selEntity.productionCost
+                    end
+                end
+            end
+        })
+    end
+    
+    -- Barracks commands
+    if selEntity.type == "barracks" and selEntity.completed then
+        local Barracks = require("barracks")
+        local canTrain = selEntity:canProduce() and resources.gold >= Barracks.FOOTMAN_COST and currentPop < maxPop
+        table.insert(buttons, {
+            hotkey = "T",
+            text = "Footman",
+            icon = "footman",
+            cost = tostring(Barracks.FOOTMAN_COST),
+            enabled = canTrain,
+            primary = true,  -- Center this button
+            action = function()
+                if selEntity:canProduce() and resources.gold >= Barracks.FOOTMAN_COST and currentPop < maxPop then
+                    if selEntity:startProduction("footman") then
+                        resources.gold = resources.gold - Barracks.FOOTMAN_COST
+                    end
+                end
+            end
+        })
+    end
+    
+    return buttons
+end
+
+local function drawCommandBar(screenW, screenH)
+    local barH = 70
+    local barY = screenH - barH
+    commandBarY = barY
+    
+    -- Draw bar background
+    UIDraw.drawCommandBar(screenW, screenH)
     
     local selEntity = selectedEntities[1]
+    
+    -- Left section: Selection info
+    local infoX = 15
+    local infoY = barY + 10
+    
+    love.graphics.setFont(Game.fonts.medium)
+    
     if selEntity then
-        -- Entity name in header
-        love.graphics.print(selEntity.name, panelX + 12, panelY + 8)
+        -- Entity name
+        love.graphics.setColor(UI.metalGold)
+        love.graphics.print(selEntity.name, infoX, infoY)
         
-        if #selectedEntities > 1 then
-            love.graphics.setColor(UI.textLight)
+        -- HP bar
+        if selEntity.hp and selEntity.maxHp then
+            local hpBarW = 120
+            local hpBarH = 8
+            local hpY = infoY + 22
+            local hpPercent = selEntity.hp / selEntity.maxHp
+            
+            love.graphics.setColor(0.2, 0.15, 0.1, 1)
+            love.graphics.rectangle("fill", infoX, hpY, hpBarW, hpBarH, 2)
+            
+            local hpColor = hpPercent > 0.5 and {0.3, 0.8, 0.3} or (hpPercent > 0.25 and {0.9, 0.7, 0.2} or {0.9, 0.3, 0.2})
+            love.graphics.setColor(hpColor)
+            love.graphics.rectangle("fill", infoX, hpY, hpBarW * hpPercent, hpBarH, 2)
+            
+            love.graphics.setColor(0.5, 0.4, 0.3, 1)
+            love.graphics.setLineWidth(1)
+            love.graphics.rectangle("line", infoX, hpY, hpBarW, hpBarH, 2)
+            
+            -- HP text
             love.graphics.setFont(Game.fonts.small)
-            love.graphics.print("+" .. (#selectedEntities - 1) .. " more selected", panelX + 12, panelY + 36)
+            love.graphics.setColor(UI.textLight)
+            love.graphics.print(math.floor(selEntity.hp) .. "/" .. selEntity.maxHp, infoX + hpBarW + 8, hpY - 2)
         end
         
-        -- Status info
+        -- Status text
         love.graphics.setFont(Game.fonts.small)
-        local statusY = panelY + 36
-        
-        if selEntity.type == "townhall" then
+        local statusY = infoY + 38
+        if selEntity.type == "townhall" or selEntity.type == "barracks" then
             if selEntity.isBuilding then
                 love.graphics.setColor(0.6, 0.8, 1, 1)
-                love.graphics.print("Building: " .. selEntity:getBuildProgress() .. "%", panelX + 12, statusY)
-            elseif selEntity.isUpgrading then
-                love.graphics.setColor(UI.metalGold)
-                love.graphics.print("Upgrading: " .. selEntity:getUpgradeProgress() .. "%", panelX + 12, statusY)
+                love.graphics.print("Building: " .. (selEntity.getBuildProgress and selEntity:getBuildProgress() or 0) .. "%", infoX, statusY)
             elseif selEntity.isProducing then
                 love.graphics.setColor(0.5, 0.9, 0.5, 1)
-                love.graphics.print("Training: " .. selEntity:getProductionProgress() .. "%", panelX + 12, statusY)
+                local queueSize = selEntity.getQueueSize and selEntity:getQueueSize() or 0
+                local queueText = queueSize > 1 and (" [+" .. (queueSize - 1) .. " queued]") or ""
+                love.graphics.print("Training: " .. (selEntity.getProductionProgress and selEntity:getProductionProgress() or 0) .. "%" .. queueText, infoX, statusY)
+            elseif selEntity.isUpgrading then
+                love.graphics.setColor(UI.metalGold)
+                love.graphics.print("Upgrading...", infoX, statusY)
             else
+                -- Show "Ready" when idle
                 love.graphics.setColor(UI.textLight)
-                love.graphics.print("Ready", panelX + 12, statusY)
+                love.graphics.print("Ready", infoX, statusY)
             end
         elseif selEntity.type == "goldmine" then
             love.graphics.setColor(UI.textGold)
-            love.graphics.print("Gold: " .. selEntity.goldReserves, panelX + 12, statusY)
+            love.graphics.print("Gold: " .. selEntity.goldReserves, infoX, statusY)
         elseif selEntity.getStateText then
             love.graphics.setColor(UI.textLight)
-            love.graphics.print(selEntity:getStateText(), panelX + 12, statusY)
-        elseif selEntity.completed ~= nil then
-            if not selEntity.completed then
-                love.graphics.setColor(0.6, 0.8, 1, 1)
-                love.graphics.print("Building: " .. (selEntity.getBuildProgress and selEntity:getBuildProgress() or 0) .. "%", panelX + 12, statusY)
-            elseif selEntity.isProducing then
-                love.graphics.setColor(0.5, 0.9, 0.5, 1)
-                love.graphics.print("Training: " .. (selEntity.getProductionProgress and selEntity:getProductionProgress() or 0) .. "%", panelX + 12, statusY)
-            elseif selEntity.isUpgrading then
-                love.graphics.setColor(UI.metalGold)
-                love.graphics.print("Upgrading...", panelX + 12, statusY)
-            else
-                love.graphics.setColor(UI.textLight)
-                love.graphics.print("Ready", panelX + 12, statusY)
-            end
+            love.graphics.print(selEntity:getStateText(), infoX, statusY)
+        end
+        
+        -- Multi-select indicator
+        if #selectedEntities > 1 then
+            love.graphics.setColor(UI.textLight)
+            love.graphics.print("+" .. (#selectedEntities - 1) .. " more", infoX + 150, infoY + 4)
         end
     else
-        love.graphics.print("No Selection", panelX + 12, panelY + 8)
-        love.graphics.setFont(Game.fonts.small)
         love.graphics.setColor(UI.stoneAccent)
-        love.graphics.print("Click to select units", panelX + 12, panelY + 38)
-        love.graphics.print("Drag to box select", panelX + 12, panelY + 54)
-        love.graphics.print("Right-click to command", panelX + 12, panelY + 70)
-        love.graphics.print("WASD to scroll map", panelX + 12, panelY + 86)
-        love.graphics.print("1/2/3 for game speed", panelX + 12, panelY + 102)
+        love.graphics.print("No Selection", infoX, infoY)
+        love.graphics.setFont(Game.fonts.small)
+        love.graphics.setColor(0.6, 0.55, 0.5, 0.8)
+        love.graphics.print("Click units to select  |  Drag to box select  |  Right-click to command", infoX, infoY + 25)
+    end
+    
+    -- Center section: Command buttons (primary action in center of screen)
+    commandButtons = getCommandButtons()
+    local btnY = barY + 8
+    
+    -- Find primary button and separate from others
+    local primaryBtn = nil
+    local otherBtns = {}
+    for _, btn in ipairs(commandButtons) do
+        if btn.primary then
+            primaryBtn = btn
+        else
+            table.insert(otherBtns, btn)
+        end
+    end
+    
+    local mouseX, mouseY = love.mouse.getPosition()
+    
+    -- Draw primary button in center of screen
+    if primaryBtn then
+        local x = (screenW - COMMAND_BUTTON_SIZE) / 2
+        local hovered = mouseX >= x and mouseX <= x + COMMAND_BUTTON_SIZE and
+                       mouseY >= btnY and mouseY <= btnY + COMMAND_BUTTON_SIZE
+        local pressed = hovered and love.mouse.isDown(1)
+        
+        primaryBtn.x = x
+        primaryBtn.y = btnY
+        primaryBtn.w = COMMAND_BUTTON_SIZE
+        primaryBtn.h = COMMAND_BUTTON_SIZE
+        primaryBtn.hovered = hovered
+        
+        UIDraw.drawCommandButton(x, btnY, COMMAND_BUTTON_SIZE, COMMAND_BUTTON_SIZE, 
+            primaryBtn.text, primaryBtn.hotkey, primaryBtn.enabled, hovered, pressed, primaryBtn.icon)
+        
+        -- Draw cost below button
+        if primaryBtn.cost then
+            love.graphics.setFont(Game.fonts.small)
+            love.graphics.setColor(primaryBtn.enabled and {0.9, 0.8, 0.5, 0.9} or {0.5, 0.45, 0.4, 0.6})
+            local costW = Game.fonts.small:getWidth(primaryBtn.cost)
+            love.graphics.print(primaryBtn.cost, x + (COMMAND_BUTTON_SIZE - costW) / 2, btnY + COMMAND_BUTTON_SIZE + 2)
+        end
+    end
+    
+    -- Draw other buttons to the right of primary
+    local otherStartX = primaryBtn and ((screenW + COMMAND_BUTTON_SIZE) / 2 + 15) or ((screenW - #otherBtns * (COMMAND_BUTTON_SIZE + COMMAND_BUTTON_SPACING)) / 2)
+    
+    for i, btn in ipairs(otherBtns) do
+        local x = otherStartX + (i - 1) * (COMMAND_BUTTON_SIZE + COMMAND_BUTTON_SPACING)
+        local hovered = mouseX >= x and mouseX <= x + COMMAND_BUTTON_SIZE and
+                       mouseY >= btnY and mouseY <= btnY + COMMAND_BUTTON_SIZE
+        local pressed = hovered and love.mouse.isDown(1)
+        
+        btn.x = x
+        btn.y = btnY
+        btn.w = COMMAND_BUTTON_SIZE
+        btn.h = COMMAND_BUTTON_SIZE
+        btn.hovered = hovered
+        
+        UIDraw.drawCommandButton(x, btnY, COMMAND_BUTTON_SIZE, COMMAND_BUTTON_SIZE, 
+            btn.text, btn.hotkey, btn.enabled, hovered, pressed, btn.icon)
+        
+        -- Draw cost below button
+        if btn.cost then
+            love.graphics.setFont(Game.fonts.small)
+            love.graphics.setColor(btn.enabled and {0.9, 0.8, 0.5, 0.9} or {0.5, 0.45, 0.4, 0.6})
+            local costW = Game.fonts.small:getWidth(btn.cost)
+            love.graphics.print(btn.cost, x + (COMMAND_BUTTON_SIZE - costW) / 2, btnY + COMMAND_BUTTON_SIZE + 2)
+        end
     end
 end
 
@@ -529,7 +778,7 @@ local function drawVictoryScreen()
     love.graphics.setColor(0.02, 0.03, 0.02, 0.9)
     love.graphics.rectangle("fill", 0, 0, screenW, screenH)
     
-    local boxW, boxH = 480, 360
+    local boxW, boxH = 600, 480
     local boxX, boxY = (screenW - boxW) / 2, (screenH - boxH) / 2
     
     -- Draw stone panel using UIDraw
@@ -553,7 +802,7 @@ local function drawVictoryScreen()
     local title = "VICTORY!"
     local titleW = Game.fonts.title:getWidth(title)
     local titleX = (screenW - titleW) / 2
-    local titleY = boxY + 25
+    local titleY = boxY + 15
     
     -- Glow effect
     local glowPulse = 0.6 + math.sin(elapsedTime * 3) * 0.4
@@ -570,42 +819,112 @@ local function drawVictoryScreen()
     love.graphics.setColor(1, 0.85, 0.2, 1)
     love.graphics.print(title, titleX, titleY)
     
-    -- Message
-    love.graphics.setFont(Game.fonts.medium)
+    -- Time
+    local minutes = math.floor(elapsedTime / 60)
+    local seconds = math.floor(elapsedTime % 60)
+    local timeStr = string.format("Game Time: %d:%02d", minutes, seconds)
+    love.graphics.setFont(Game.fonts.stats)
     love.graphics.setColor(0.92, 0.88, 0.80, 1)
-    local msg = "All enemy buildings destroyed!"
-    love.graphics.print(msg, (screenW - Game.fonts.medium:getWidth(msg)) / 2, titleY + 75)
+    love.graphics.print(timeStr, (screenW - Game.fonts.stats:getWidth(timeStr)) / 2, titleY + 70)
     
     -- Decorative line
     love.graphics.setColor(0.50, 0.38, 0.20, 1)
     love.graphics.setLineWidth(2)
-    local lineY = titleY + 105
+    local lineY = titleY + 95
     love.graphics.line(boxX + 40, lineY, boxX + boxW - 40, lineY)
     drawRivet(boxX + 40, lineY, 3)
     drawRivet(boxX + boxW - 40, lineY, 3)
     
-    -- Stats
-    love.graphics.setFont(Game.fonts.small)
-    love.graphics.setColor(0.92, 0.88, 0.80, 0.9)
-    local statsY = lineY + 20
-    local lineHeight = 24
-    local leftX = boxX + 50
-    local rightX = boxX + boxW / 2 + 20
+    -- Stats table header
+    local tableY = lineY + 15
+    local col1 = boxX + 50   -- Stat name
+    local col2 = boxX + 280  -- Player
+    local col3 = boxX + 400  -- Enemy
+    local rowH = 22
     
-    local minutes = math.floor(elapsedTime / 60)
-    local seconds = math.floor(elapsedTime % 60)
-    local timeStr = string.format("Time: %d:%02d", minutes, seconds)
-    love.graphics.print(timeStr, leftX, statsY)
+    love.graphics.setFont(Game.fonts.header)
+    love.graphics.setColor(0.72, 0.58, 0.26, 1)
+    love.graphics.print("STATISTIC", col1, tableY)
+    love.graphics.setColor(0.4, 0.6, 1, 1)
+    love.graphics.print("YOU", col2 + 20, tableY)
+    love.graphics.setColor(1, 0.4, 0.4, 1)
+    love.graphics.print("ENEMY", col3 + 10, tableY)
     
-    love.graphics.print("Units Killed: " .. gameStats.unitsKilled, leftX, statsY + lineHeight)
-    love.graphics.print("Units Lost: " .. gameStats.unitsLost, leftX, statsY + lineHeight * 2)
-    love.graphics.print("Buildings Destroyed: " .. gameStats.buildingsDestroyed, leftX, statsY + lineHeight * 3)
-    love.graphics.print("Buildings Lost: " .. gameStats.buildingsLost, leftX, statsY + lineHeight * 4)
+    -- Header underline
+    love.graphics.setColor(0.50, 0.38, 0.20, 0.5)
+    love.graphics.line(col1, tableY + 25, boxX + boxW - 50, tableY + 25)
     
+    -- Stats rows
+    love.graphics.setFont(Game.fonts.stats)
+    local statsY = tableY + 35
+    
+    local function drawStatRow(label, playerVal, enemyVal, y)
+        love.graphics.setColor(0.92, 0.88, 0.80, 0.9)
+        love.graphics.print(label, col1, y)
+        
+        -- Player value (blue tint)
+        love.graphics.setColor(0.7, 0.8, 1, 1)
+        love.graphics.print(tostring(playerVal), col2 + 30, y)
+        
+        -- Enemy value (red tint)
+        love.graphics.setColor(1, 0.7, 0.7, 1)
+        love.graphics.print(tostring(enemyVal), col3 + 30, y)
+    end
+    
+    drawStatRow("Units Killed", gameStats.unitsKilled, gameStats.aiUnitsKilled, statsY)
+    drawStatRow("Units Lost", gameStats.unitsLost, gameStats.aiUnitsLost, statsY + rowH)
+    drawStatRow("Buildings Destroyed", gameStats.buildingsDestroyed, gameStats.aiBuildingsDestroyed, statsY + rowH * 2)
+    drawStatRow("Buildings Lost", gameStats.buildingsLost, gameStats.aiBuildingsLost, statsY + rowH * 3)
+    
+    -- Separator
+    love.graphics.setColor(0.50, 0.38, 0.20, 0.3)
+    love.graphics.line(col1, statsY + rowH * 3.7, boxX + boxW - 50, statsY + rowH * 3.7)
+    
+    drawStatRow("Gold Collected", gameStats.goldCollected, gameStats.aiGoldCollected, statsY + rowH * 4)
+    drawStatRow("Lumber Collected", gameStats.lumberCollected, gameStats.aiLumberCollected, statsY + rowH * 5)
+    drawStatRow("Peons Trained", gameStats.peonsProduced, gameStats.aiPeonsProduced, statsY + rowH * 6)
+    drawStatRow("Footmen Trained", gameStats.footmenProduced, gameStats.aiFootmenProduced, statsY + rowH * 7)
+    
+    -- Score calculation
+    local playerScore = gameStats.unitsKilled * 10 + gameStats.buildingsDestroyed * 50 
+                       + gameStats.goldCollected / 100 + gameStats.lumberCollected / 50
+                       - gameStats.unitsLost * 5 - gameStats.buildingsLost * 25
+    local aiScore = gameStats.aiUnitsKilled * 10 + gameStats.aiBuildingsDestroyed * 50 
+                   + gameStats.aiGoldCollected / 100 + gameStats.aiLumberCollected / 50
+                   - gameStats.aiUnitsLost * 5 - gameStats.aiBuildingsLost * 25
+    
+    -- Score section
+    local scoreY = statsY + rowH * 8.5
+    love.graphics.setColor(0.50, 0.38, 0.20, 0.5)
+    love.graphics.line(col1, scoreY - 5, boxX + boxW - 50, scoreY - 5)
+    
+    love.graphics.setFont(Game.fonts.statsLarge)
     love.graphics.setColor(1, 0.85, 0.3, 1)
-    love.graphics.print("Final Gold: " .. resources.gold, rightX, statsY + lineHeight)
-    love.graphics.setColor(0.65, 0.5, 0.3, 1)
-    love.graphics.print("Final Lumber: " .. resources.lumber, rightX, statsY + lineHeight * 2)
+    love.graphics.print("SCORE", col1, scoreY)
+    love.graphics.setColor(0.5, 0.7, 1, 1)
+    love.graphics.print(string.format("%d", math.floor(playerScore)), col2 + 15, scoreY)
+    love.graphics.setColor(1, 0.6, 0.6, 1)
+    love.graphics.print(string.format("%d", math.floor(aiScore)), col3 + 15, scoreY)
+    
+    -- Building timeline (if any)
+    if #gameStats.buildingTimeline > 0 then
+        local timelineY = scoreY + 40
+        love.graphics.setFont(Game.fonts.small)
+        love.graphics.setColor(0.72, 0.58, 0.26, 0.8)
+        love.graphics.print("Building Timeline:", col1, timelineY)
+        
+        love.graphics.setColor(0.8, 0.75, 0.65, 0.7)
+        local timelineText = ""
+        for i, entry in ipairs(gameStats.buildingTimeline) do
+            if i <= 6 then  -- Show max 6 entries
+                local m = math.floor(entry.time / 60)
+                local s = math.floor(entry.time % 60)
+                local team = entry.team == 1 and "You" or "AI"
+                timelineText = timelineText .. string.format("%d:%02d %s-%s  ", m, s, team, entry.type)
+            end
+        end
+        love.graphics.print(timelineText, col1, timelineY + 18)
+    end
     
     -- Continue prompt (pulsing)
     local promptAlpha = 0.5 + math.sin(elapsedTime * 2) * 0.3
@@ -622,7 +941,7 @@ local function drawDefeatScreen()
     love.graphics.setColor(0.03, 0.02, 0.02, 0.9)
     love.graphics.rectangle("fill", 0, 0, screenW, screenH)
     
-    local boxW, boxH = 480, 360
+    local boxW, boxH = 600, 480
     local boxX, boxY = (screenW - boxW) / 2, (screenH - boxH) / 2
     
     -- Draw stone panel using UIDraw
@@ -646,7 +965,7 @@ local function drawDefeatScreen()
     local title = "DEFEAT"
     local titleW = Game.fonts.title:getWidth(title)
     local titleX = (screenW - titleW) / 2
-    local titleY = boxY + 25
+    local titleY = boxY + 15
     
     -- Dark glow effect
     love.graphics.setColor(0.3, 0.1, 0.1, 0.4)
@@ -662,36 +981,87 @@ local function drawDefeatScreen()
     love.graphics.setColor(0.8, 0.25, 0.2, 1)
     love.graphics.print(title, titleX, titleY)
     
-    -- Message
-    love.graphics.setFont(Game.fonts.medium)
+    -- Time
+    local minutes = math.floor(elapsedTime / 60)
+    local seconds = math.floor(elapsedTime % 60)
+    local timeStr = string.format("Game Time: %d:%02d", minutes, seconds)
+    love.graphics.setFont(Game.fonts.stats)
     love.graphics.setColor(0.92, 0.88, 0.80, 1)
-    local msg = "Your Town Hall was destroyed!"
-    love.graphics.print(msg, (screenW - Game.fonts.medium:getWidth(msg)) / 2, titleY + 75)
+    love.graphics.print(timeStr, (screenW - Game.fonts.stats:getWidth(timeStr)) / 2, titleY + 70)
     
     -- Decorative line
     love.graphics.setColor(0.40, 0.28, 0.15, 1)
     love.graphics.setLineWidth(2)
-    local lineY = titleY + 105
+    local lineY = titleY + 95
     love.graphics.line(boxX + 40, lineY, boxX + boxW - 40, lineY)
     drawRivet(boxX + 40, lineY, 3)
     drawRivet(boxX + boxW - 40, lineY, 3)
     
-    -- Stats
-    love.graphics.setFont(Game.fonts.small)
-    love.graphics.setColor(0.92, 0.88, 0.80, 0.9)
-    local statsY = lineY + 20
-    local lineHeight = 24
-    local leftX = boxX + 50
+    -- Stats table header
+    local tableY = lineY + 15
+    local col1 = boxX + 50   -- Stat name
+    local col2 = boxX + 280  -- Player
+    local col3 = boxX + 400  -- Enemy
+    local rowH = 22
     
-    local minutes = math.floor(elapsedTime / 60)
-    local seconds = math.floor(elapsedTime % 60)
-    local timeStr = string.format("Time: %d:%02d", minutes, seconds)
-    love.graphics.print(timeStr, leftX, statsY)
+    love.graphics.setFont(Game.fonts.header)
+    love.graphics.setColor(0.72, 0.58, 0.26, 1)
+    love.graphics.print("STATISTIC", col1, tableY)
+    love.graphics.setColor(0.4, 0.6, 1, 1)
+    love.graphics.print("YOU", col2 + 20, tableY)
+    love.graphics.setColor(1, 0.4, 0.4, 1)
+    love.graphics.print("ENEMY", col3 + 10, tableY)
     
-    love.graphics.print("Units Killed: " .. gameStats.unitsKilled, leftX, statsY + lineHeight)
-    love.graphics.print("Units Lost: " .. gameStats.unitsLost, leftX, statsY + lineHeight * 2)
-    love.graphics.print("Buildings Destroyed: " .. gameStats.buildingsDestroyed, leftX, statsY + lineHeight * 3)
-    love.graphics.print("Buildings Lost: " .. gameStats.buildingsLost, leftX, statsY + lineHeight * 4)
+    -- Header underline
+    love.graphics.setColor(0.40, 0.28, 0.15, 0.5)
+    love.graphics.line(col1, tableY + 25, boxX + boxW - 50, tableY + 25)
+    
+    -- Stats rows
+    love.graphics.setFont(Game.fonts.stats)
+    local statsY = tableY + 35
+    
+    local function drawStatRow(label, playerVal, enemyVal, y)
+        love.graphics.setColor(0.92, 0.88, 0.80, 0.9)
+        love.graphics.print(label, col1, y)
+        love.graphics.setColor(0.7, 0.8, 1, 1)
+        love.graphics.print(tostring(playerVal), col2 + 30, y)
+        love.graphics.setColor(1, 0.7, 0.7, 1)
+        love.graphics.print(tostring(enemyVal), col3 + 30, y)
+    end
+    
+    drawStatRow("Units Killed", gameStats.unitsKilled, gameStats.aiUnitsKilled, statsY)
+    drawStatRow("Units Lost", gameStats.unitsLost, gameStats.aiUnitsLost, statsY + rowH)
+    drawStatRow("Buildings Destroyed", gameStats.buildingsDestroyed, gameStats.aiBuildingsDestroyed, statsY + rowH * 2)
+    drawStatRow("Buildings Lost", gameStats.buildingsLost, gameStats.aiBuildingsLost, statsY + rowH * 3)
+    
+    love.graphics.setColor(0.40, 0.28, 0.15, 0.3)
+    love.graphics.line(col1, statsY + rowH * 3.7, boxX + boxW - 50, statsY + rowH * 3.7)
+    
+    drawStatRow("Gold Collected", gameStats.goldCollected, gameStats.aiGoldCollected, statsY + rowH * 4)
+    drawStatRow("Lumber Collected", gameStats.lumberCollected, gameStats.aiLumberCollected, statsY + rowH * 5)
+    drawStatRow("Peons Trained", gameStats.peonsProduced, gameStats.aiPeonsProduced, statsY + rowH * 6)
+    drawStatRow("Footmen Trained", gameStats.footmenProduced, gameStats.aiFootmenProduced, statsY + rowH * 7)
+    
+    -- Score calculation
+    local playerScore = gameStats.unitsKilled * 10 + gameStats.buildingsDestroyed * 50 
+                       + gameStats.goldCollected / 100 + gameStats.lumberCollected / 50
+                       - gameStats.unitsLost * 5 - gameStats.buildingsLost * 25
+    local aiScore = gameStats.aiUnitsKilled * 10 + gameStats.aiBuildingsDestroyed * 50 
+                   + gameStats.aiGoldCollected / 100 + gameStats.aiLumberCollected / 50
+                   - gameStats.aiUnitsLost * 5 - gameStats.aiBuildingsLost * 25
+    
+    -- Score section
+    local scoreY = statsY + rowH * 8.5
+    love.graphics.setColor(0.40, 0.28, 0.15, 0.5)
+    love.graphics.line(col1, scoreY - 5, boxX + boxW - 50, scoreY - 5)
+    
+    love.graphics.setFont(Game.fonts.statsLarge)
+    love.graphics.setColor(0.8, 0.6, 0.3, 1)
+    love.graphics.print("SCORE", col1, scoreY)
+    love.graphics.setColor(0.5, 0.7, 1, 1)
+    love.graphics.print(string.format("%d", math.floor(playerScore)), col2 + 15, scoreY)
+    love.graphics.setColor(1, 0.6, 0.6, 1)
+    love.graphics.print(string.format("%d", math.floor(aiScore)), col3 + 15, scoreY)
     
     -- Continue prompt (pulsing)
     local promptAlpha = 0.5 + math.sin(elapsedTime * 2) * 0.3
@@ -758,9 +1128,11 @@ end
 
 local function drawBoxSelection()
     if not isBoxSelecting then return end
-    love.graphics.setColor(0, 1, 0, 0.2)
     local x1, y1 = math.min(boxStartX, boxEndX), math.min(boxStartY, boxEndY)
     local w, h = math.abs(boxEndX - boxStartX), math.abs(boxEndY - boxStartY)
+    -- Only draw if box has meaningful size (avoid drawing at 0,0 or tiny boxes)
+    if w < 2 and h < 2 then return end
+    love.graphics.setColor(0, 1, 0, 0.2)
     love.graphics.rectangle("fill", x1, y1, w, h)
     love.graphics.setColor(0, 1, 0, 0.8)
     love.graphics.setLineWidth(1)
@@ -918,18 +1290,6 @@ local function drawCursor()
     end
     
     love.graphics.setColor(1, 1, 1, 1)
-end
-
-local function startBuildingPlacement(peon, buildingType)
-    isPlacingBuilding = true
-    placingBuildingType = buildingType
-    placingPeon = peon
-end
-
-local function cancelBuildingPlacement()
-    isPlacingBuilding = false
-    placingBuildingType = nil
-    placingPeon = nil
 end
 
 -- Callback for AI to create buildings
@@ -1179,12 +1539,14 @@ local function removeDeadUnits(unitList, isPlayer)
     for i = #unitList, 1, -1 do
         local unit = unitList[i]
         if unit.isDead and unit:isDead() then
-            -- Track stats
+            -- Track stats for both sides
             local playerTeam = Teams and Teams.PLAYER or 1
             if unit.team == playerTeam then
                 gameStats.unitsLost = gameStats.unitsLost + 1
+                gameStats.aiUnitsKilled = gameStats.aiUnitsKilled + 1
             else
                 gameStats.unitsKilled = gameStats.unitsKilled + 1
+                gameStats.aiUnitsLost = gameStats.aiUnitsLost + 1
             end
             -- Spawn death effect
             if Effects then
@@ -1200,12 +1562,14 @@ local function removeDeadBuildings(buildingList)
     for i = #buildingList, 1, -1 do
         local building = buildingList[i]
         if building.isDead and building:isDead() then
-            -- Track stats
+            -- Track stats for both sides
             local playerTeam = Teams and Teams.PLAYER or 1
             if building.team == playerTeam then
                 gameStats.buildingsLost = gameStats.buildingsLost + 1
+                gameStats.aiBuildingsDestroyed = gameStats.aiBuildingsDestroyed + 1
             else
                 gameStats.buildingsDestroyed = gameStats.buildingsDestroyed + 1
+                gameStats.aiBuildingsLost = gameStats.aiBuildingsLost + 1
             end
             -- Clear map area
             if building.gridX and building.gridSize and map then
@@ -1272,8 +1636,14 @@ local function setupPeonCallbacks(peon)
             resources.lumber = resources.lumber - costLumber
         end
         peon.addResources = function(gold, lumber)
-            if gold > 0 then resources.gold = resources.gold + gold end
-            if lumber > 0 then resources.lumber = resources.lumber + lumber end
+            if gold > 0 then 
+                resources.gold = resources.gold + gold 
+                gameStats.goldCollected = gameStats.goldCollected + gold
+            end
+            if lumber > 0 then 
+                resources.lumber = resources.lumber + lumber 
+                gameStats.lumberCollected = gameStats.lumberCollected + lumber
+            end
         end
     else
         -- AI peon callbacks
@@ -1291,14 +1661,28 @@ local function setupPeonCallbacks(peon)
         end
         peon.addResources = function(gold, lumber)
             if enemyAI then
-                if gold > 0 then enemyAI:addGold(gold) end
-                if lumber > 0 then enemyAI:addLumber(lumber) end
+                if gold > 0 then 
+                    enemyAI:addGold(gold) 
+                    gameStats.aiGoldCollected = gameStats.aiGoldCollected + gold
+                end
+                if lumber > 0 then 
+                    enemyAI:addLumber(lumber) 
+                    gameStats.aiLumberCollected = gameStats.aiLumberCollected + lumber
+                end
             end
         end
     end
 end
 
-function Gameplay.load()
+-- Tutorial mode settings
+local tutorialMode = false
+local tutorialOptions = {}
+
+function Gameplay.load(options)
+    options = options or {}
+    tutorialMode = options.tutorialMode or false
+    tutorialOptions = options
+    
     local screenW, screenH = love.graphics.getDimensions()
     
     -- Hide system cursor and use custom
@@ -1334,6 +1718,17 @@ function Gameplay.load()
     gameStats.buildingsLost = 0
     gameStats.goldCollected = 0
     gameStats.lumberCollected = 0
+    gameStats.peonsProduced = 0
+    gameStats.footmenProduced = 0
+    gameStats.buildingTimeline = {}
+    gameStats.aiUnitsKilled = 0
+    gameStats.aiUnitsLost = 0
+    gameStats.aiBuildingsDestroyed = 0
+    gameStats.aiBuildingsLost = 0
+    gameStats.aiGoldCollected = 0
+    gameStats.aiLumberCollected = 0
+    gameStats.aiPeonsProduced = 0
+    gameStats.aiFootmenProduced = 0
     
     -- Clear new building tables
     lumberMills = {}
@@ -1361,7 +1756,7 @@ function Gameplay.load()
     input.isMapDragging = false
     
     map = Map.new()
-    map:setViewport(0, UI.topBarHeight, screenW, screenH - UI.topBarHeight)
+    map:setViewport(0, UI.topBarHeight, screenW, screenH - UI.topBarHeight - 70)  -- 70 = command bar height
     
     -- Human player team
     local playerTeam = Teams and Teams.PLAYER or 1
@@ -1498,6 +1893,7 @@ function Gameplay.load()
     
     -- Initialize AI controller
     if AI then
+        local aiPersonality = tutorialOptions.aiPersonality or "blinky"
         enemyAI = AI.new({
             team = enemyTeam,
             townHall = enemyTownHall,
@@ -1505,8 +1901,13 @@ function Gameplay.load()
             startGold = 1000,
             startLumber = 400,
             startingPeons = 7,
-            personality = "blinky"  -- Aggressive 4-grunt rush
+            personality = aiPersonality
         })
+    end
+    
+    -- Disable fog in tutorial mode
+    if tutorialOptions.disableFog then
+        map.fogEnabled = false
     end
     
     calculatePopulation()
@@ -1583,6 +1984,13 @@ function Gameplay.update(dt)
         setupPeonCallbacks(newPeon)
         pushUnitOutOfBuildings(newPeon)
         table.insert(peons, newPeon)
+        -- Track production
+        local playerTeam = Teams and Teams.PLAYER or 1
+        if townHall.team == playerTeam then
+            gameStats.peonsProduced = gameStats.peonsProduced + 1
+        else
+            gameStats.aiPeonsProduced = gameStats.aiPeonsProduced + 1
+        end
         -- Auto-send to closest mine
         local closestMine = findClosestMine(spawnX, spawnY)
         if closestMine then
@@ -1602,6 +2010,12 @@ function Gameplay.update(dt)
             pushUnitOutOfBuildings(peon)
             farm.builderPeon = nil
             calculatePopulation()
+            -- Track building completion in timeline
+            table.insert(gameStats.buildingTimeline, {
+                time = elapsedTime,
+                type = "Farm",
+                team = farm.team
+            })
             -- Send AI peons back to mining
             local enemyTeam = Teams and Teams.ENEMY or 2
             if peon.team == enemyTeam then
@@ -1621,6 +2035,12 @@ function Gameplay.update(dt)
             peon:finishBuilding(barrack)
             pushUnitOutOfBuildings(peon)
             barrack.builderPeon = nil
+            -- Track building completion in timeline
+            table.insert(gameStats.buildingTimeline, {
+                time = elapsedTime,
+                type = "Barracks",
+                team = barrack.team
+            })
             -- Send AI peons back to mining
             local enemyTeam = Teams and Teams.ENEMY or 2
             if peon.team == enemyTeam then
@@ -1632,10 +2052,17 @@ function Gameplay.update(dt)
         end
         if unitType and currentPop < maxPop then
             local spawnX, spawnY = barrack:getSpawnPos()
+            local playerTeam = Teams and Teams.PLAYER or 1
             if unitType == "footman" then
                 local newUnit = Footman.new({worldX = spawnX, worldY = spawnY, map = map, team = barrack.team})
                 pushUnitOutOfBuildings(newUnit)
                 table.insert(footmen, newUnit)
+                -- Track production
+                if barrack.team == playerTeam then
+                    gameStats.footmenProduced = gameStats.footmenProduced + 1
+                else
+                    gameStats.aiFootmenProduced = gameStats.aiFootmenProduced + 1
+                end
             elseif unitType == "knight" then
                 local newUnit = Knight.new({worldX = spawnX, worldY = spawnY, map = map, team = barrack.team})
                 -- Check if Paladin upgrade is active
@@ -2012,15 +2439,11 @@ function Gameplay.draw()
     -- Draw new UI elements
     drawTopBar(screenW)
     drawMinimap(screenW)
-    drawBottomPanel(screenW, screenH)
-    
-    -- Draw entity-specific UI (buttons etc)
-    local selEntity = selectedEntities[1]
-    if selEntity and selEntity.drawUI then selEntity:drawUI() end
+    drawCommandBar(screenW, screenH)
     
     -- Draw notifications (slide in from left, stack up)
     love.graphics.setFont(Game.fonts.medium)
-    local notifBaseY = screenH - 200  -- Start from lower left
+    local notifBaseY = screenH - 100  -- Above command bar
     
     for i, notif in ipairs(notifications) do
         local slot = notif.currentSlot or notif.targetSlot
@@ -2060,8 +2483,8 @@ function Gameplay.draw()
         love.graphics.print(notif.text, x + 15, y + 8)
     end
     
-    if victory then drawVictoryScreen() end
-    if defeat then drawDefeatScreen() end
+    if victory and not tutorialMode then drawVictoryScreen() end
+    if defeat and not tutorialMode then drawDefeatScreen() end
     
     -- Draw custom cursor (always on top)
     drawCursor()
@@ -2070,7 +2493,7 @@ function Gameplay.draw()
 end
 
 function Gameplay.keypressed(key)
-    if victory or defeat then
+    if (victory or defeat) and not tutorialMode then
         if key == "space" or key == "return" then 
             -- Return to title screen
             Game.SceneManager.switch("title")
@@ -2084,24 +2507,38 @@ function Gameplay.keypressed(key)
         elseif input.attackMoveMode then
             input.attackMoveMode = false
         else
-            clearSelection()
+            -- Check if selected entity has a production queue to cancel
+            local selEntity = selectedEntities[1]
+            if selEntity and selEntity.cancelProduction and selEntity.getQueueSize and selEntity:getQueueSize() > 0 then
+                local refund = selEntity:cancelProduction()
+                if refund > 0 then
+                    resources.gold = resources.gold + refund
+                    -- TODO: Could add lumber refund if units cost lumber
+                end
+            else
+                clearSelection()
+            end
         end
     end
     
-    -- Attack-move mode with 'a' key
-    if key == "a" then
-        if #selectedEntities > 0 then
-            -- Check if any selected entity can attack
-            local canAttack = false
-            for _, entity in ipairs(selectedEntities) do
-                if entity.setAttackTarget then
-                    canAttack = true
-                    break
-                end
-            end
-            if canAttack then
-                input.attackMoveMode = true
-                addNotification("Attack-Move: Click to attack")
+    -- Check command button hotkeys
+    local upperKey = string.upper(key)
+    for _, btn in ipairs(commandButtons) do
+        if btn.hotkey == upperKey and btn.enabled and btn.action then
+            btn.action()
+            return
+        end
+    end
+    
+    -- Stop command (S) - works for all units even when not in command buttons
+    if key == "s" then
+        for _, entity in ipairs(selectedEntities) do
+            if entity.stop then 
+                entity:stop()
+            elseif entity.state then 
+                entity.state = "Idle"
+                if entity.path then entity.path = nil end
+                if entity.attackTarget then entity.attackTarget = nil end
             end
         end
     end
@@ -2116,8 +2553,8 @@ function Gameplay.keypressed(key)
     elseif key == "3" then
         Game.settings.gameSpeed = 2.0
         addNotification("Game Speed: Fast (2x)")
-    elseif key == "f" then
-        -- Toggle fog of war (for testing)
+    elseif key == "v" then
+        -- V = Toggle fog of war visibility (for testing)
         map.fogEnabled = not map.fogEnabled
         addNotification("Fog of War: " .. (map.fogEnabled and "ON" or "OFF"))
     end
@@ -2251,8 +2688,20 @@ function Gameplay.mousemoved(x, y, dx, dy)
 end
 
 function Gameplay.mousereleased(x, y, button)
-    local selEntity = selectedEntities[1]
-    if selEntity and selEntity.mousereleased then selEntity:mousereleased(x, y, button) end
+    -- Check command button clicks first
+    if button == 1 then
+        for _, btn in ipairs(commandButtons) do
+            if btn.enabled and btn.x and btn.hovered then
+                if x >= btn.x and x <= btn.x + btn.w and
+                   y >= btn.y and y <= btn.y + btn.h then
+                    if btn.action then
+                        btn.action()
+                        return
+                    end
+                end
+            end
+        end
+    end
     
     -- Stop minimap dragging
     if button == 1 and map:isMinimapDragging() then
@@ -2270,133 +2719,166 @@ function Gameplay.mousereleased(x, y, button)
         
         local boxW = math.abs(boxEndX - boxStartX)
         local boxH = math.abs(boxEndY - boxStartY)
+        local shiftHeld = love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")
         
         if boxW < 5 and boxH < 5 then
-            handleLeftClick(x, y)
+            handleLeftClick(x, y, shiftHeld)
         else
-            clearSelection()
+            -- If shift is not held, clear existing selection first
+            if not shiftHeld then
+                clearSelection()
+            end
+            
+            -- Helper to add to selection without duplicates
+            local function addToSelection(entity)
+                for _, e in ipairs(selectedEntities) do
+                    if e == entity then return end  -- Already selected
+                end
+                entity.selected = true
+                table.insert(selectedEntities, entity)
+            end
             
             -- Select all PLAYER-OWNED unit types in box
             for _, peon in ipairs(peons) do
                 if isPlayerOwned(peon) and peon:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
-                    peon.selected = true
-                    table.insert(selectedEntities, peon)
+                    addToSelection(peon)
                 end
             end
             for _, footman in ipairs(footmen) do
                 if isPlayerOwned(footman) and footman:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
-                    footman.selected = true
-                    table.insert(selectedEntities, footman)
+                    addToSelection(footman)
                 end
             end
             for _, archer in ipairs(archers) do
                 if isPlayerOwned(archer) and archer:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
-                    archer.selected = true
-                    table.insert(selectedEntities, archer)
+                    addToSelection(archer)
                 end
             end
             for _, knight in ipairs(knights) do
                 if isPlayerOwned(knight) and knight:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
-                    knight.selected = true
-                    table.insert(selectedEntities, knight)
+                    addToSelection(knight)
                 end
             end
             for _, unit in ipairs(flyingScouts) do
                 if isPlayerOwned(unit) and unit:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
-                    unit.selected = true
-                    table.insert(selectedEntities, unit)
+                    addToSelection(unit)
                 end
             end
             for _, unit in ipairs(ballistas) do
                 if isPlayerOwned(unit) and unit:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
-                    unit.selected = true
-                    table.insert(selectedEntities, unit)
+                    addToSelection(unit)
                 end
             end
             for _, unit in ipairs(kamikazes) do
                 if isPlayerOwned(unit) and unit:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
-                    unit.selected = true
-                    table.insert(selectedEntities, unit)
+                    addToSelection(unit)
                 end
             end
         end
     end
 end
 
-function handleLeftClick(x, y)
-    clearSelection()
+function handleLeftClick(x, y, shiftHeld)
+    -- If shift is not held, clear existing selection
+    if not shiftHeld then
+        clearSelection()
+    end
+    
+    -- Helper to check if entity is already selected
+    local function isAlreadySelected(entity)
+        for _, e in ipairs(selectedEntities) do
+            if e == entity then return true end
+        end
+        return false
+    end
+    
+    -- Helper to toggle or add selection
+    local function selectEntity(entity)
+        if shiftHeld and isAlreadySelected(entity) then
+            -- Shift+click on already selected = deselect
+            entity.selected = false
+            for i, e in ipairs(selectedEntities) do
+                if e == entity then
+                    table.remove(selectedEntities, i)
+                    break
+                end
+            end
+        else
+            -- Select (or add to selection with shift)
+            entity.selected = true
+            if not isAlreadySelected(entity) then
+                table.insert(selectedEntities, entity)
+            end
+        end
+    end
     
     -- Check all PLAYER-OWNED unit types
     for _, peon in ipairs(peons) do
         if peon.visible and isPlayerOwned(peon) and peon:containsPoint(x, y) then
-            peon.selected = true
-            table.insert(selectedEntities, peon)
+            selectEntity(peon)
             return
         end
     end
     
     for _, footman in ipairs(footmen) do
         if isPlayerOwned(footman) and footman:containsPoint(x, y) then
-            footman.selected = true
-            table.insert(selectedEntities, footman)
+            selectEntity(footman)
             return
         end
     end
     
     for _, archer in ipairs(archers) do
         if isPlayerOwned(archer) and archer:containsPoint(x, y) then
-            archer.selected = true
-            table.insert(selectedEntities, archer)
+            selectEntity(archer)
             return
         end
     end
     
     for _, knight in ipairs(knights) do
         if isPlayerOwned(knight) and knight:containsPoint(x, y) then
-            knight.selected = true
-            table.insert(selectedEntities, knight)
+            selectEntity(knight)
             return
         end
     end
     
     for _, unit in ipairs(flyingScouts) do
         if isPlayerOwned(unit) and unit:containsPoint(x, y) then
-            unit.selected = true
-            table.insert(selectedEntities, unit)
+            selectEntity(unit)
             return
         end
     end
     
     for _, unit in ipairs(ballistas) do
         if isPlayerOwned(unit) and unit:containsPoint(x, y) then
-            unit.selected = true
-            table.insert(selectedEntities, unit)
+            selectEntity(unit)
             return
         end
     end
     
     for _, unit in ipairs(kamikazes) do
         if isPlayerOwned(unit) and unit:containsPoint(x, y) then
-            unit.selected = true
-            table.insert(selectedEntities, unit)
+            selectEntity(unit)
             return
         end
     end
     
     -- ENEMY UNITS - selectable for viewing HP (no controls)
-    for _, peon in ipairs(peons) do
-        if peon.visible and not isPlayerOwned(peon) and peon:containsPoint(x, y) then
-            peon.selected = true
-            table.insert(selectedEntities, peon)
-            return
+    -- Only if not shift-clicking (don't mix enemy with player selection)
+    if not shiftHeld then
+        for _, peon in ipairs(peons) do
+            if peon.visible and not isPlayerOwned(peon) and peon:containsPoint(x, y) then
+                peon.selected = true
+                table.insert(selectedEntities, peon)
+                return
+            end
         end
-    end
-    
-    for _, footman in ipairs(footmen) do
-        if not isPlayerOwned(footman) and footman:containsPoint(x, y) then
-            footman.selected = true
-            table.insert(selectedEntities, footman)
-            return
+        
+        for _, footman in ipairs(footmen) do
+            if not isPlayerOwned(footman) and footman:containsPoint(x, y) then
+                footman.selected = true
+                table.insert(selectedEntities, footman)
+                return
+            end
         end
     end
     
@@ -2673,6 +3155,58 @@ end
 function Gameplay.unload()
     -- Restore system cursor when leaving gameplay
     love.mouse.setVisible(true)
+end
+
+-- Get game state for tutorial to check conditions
+function Gameplay.getTutorialState()
+    local playerTeam = Teams and Teams.PLAYER or 1
+    
+    -- Count player peons
+    local peonCount = 0
+    for _, p in ipairs(peons) do
+        if p.team == playerTeam then
+            peonCount = peonCount + 1
+        end
+    end
+    
+    return {
+        -- Core references
+        townHall = townHall,
+        selectedEntities = selectedEntities,
+        playerTeam = playerTeam,
+        
+        -- Lists
+        peons = peons,
+        footmen = footmen,
+        farms = farms,
+        barracks = barracks,
+        
+        -- Counts
+        peonCount = peonCount,
+        
+        -- Building placement
+        isPlacingBuilding = isPlacingBuilding,
+        placingBuildingType = placingBuildingType,
+        
+        -- Win conditions
+        victory = victory,
+        defeat = defeat,
+    }
+end
+
+-- Force select an entity (used by tutorial to restore selection)
+function Gameplay.forceSelect(entity)
+    -- Clear current selection
+    for _, e in ipairs(selectedEntities) do
+        e.selected = false
+    end
+    selectedEntities = {}
+    
+    -- Select the specified entity
+    if entity then
+        entity.selected = true
+        selectedEntities = {entity}
+    end
 end
 
 return Gameplay

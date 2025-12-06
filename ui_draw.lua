@@ -947,4 +947,158 @@ function UIDraw.drawBottomPanelFrame(screenW, screenH)
     return panelX, panelY, panelW, panelH
 end
 
+-- New horizontal command bar at bottom of screen
+function UIDraw.drawCommandBar(screenW, screenH)
+    local barH = 80
+    local barY = screenH - barH
+    local barX = 0
+    local barW = screenW
+    
+    -- Draw bar background
+    UIDraw.drawStonePanel(barX, barY, barW, barH, 4, true)
+    
+    -- Divider line at top
+    love.graphics.setColor(UI.metalBronze[1], UI.metalBronze[2], UI.metalBronze[3], 0.5)
+    love.graphics.setLineWidth(2)
+    love.graphics.line(barX + 4, barY + 2, barX + barW - 4, barY + 2)
+    
+    return barX, barY, barW, barH
+end
+
+-- Draw a command button with hotkey indicator
+function UIDraw.drawCommandButton(x, y, w, h, text, hotkey, enabled, hovered, pressed, iconType)
+    local bgColor, borderColor, textColor
+    
+    if not enabled then
+        bgColor = {0.15, 0.13, 0.11, 0.8}
+        borderColor = {0.3, 0.25, 0.2, 0.5}
+        textColor = {0.5, 0.45, 0.4, 0.6}
+    elseif pressed then
+        bgColor = {0.25, 0.20, 0.15, 1}
+        borderColor = {0.6, 0.5, 0.3, 1}
+        textColor = {1, 0.9, 0.7, 1}
+    elseif hovered then
+        bgColor = {0.35, 0.28, 0.18, 1}
+        borderColor = {0.75, 0.6, 0.35, 1}
+        textColor = {1, 0.95, 0.85, 1}
+    else
+        bgColor = {0.22, 0.18, 0.14, 1}
+        borderColor = {0.5, 0.4, 0.25, 1}
+        textColor = {0.92, 0.88, 0.78, 1}
+    end
+    
+    -- Button background
+    love.graphics.setColor(bgColor)
+    love.graphics.rectangle("fill", x, y, w, h, 4)
+    
+    -- Button border
+    love.graphics.setColor(borderColor)
+    love.graphics.setLineWidth(2)
+    love.graphics.rectangle("line", x, y, w, h, 4)
+    
+    -- Draw icon/portrait in center-top area
+    local iconSize = 28
+    local iconX = x + (w - iconSize) / 2
+    local iconY = y + 5
+    
+    -- Icon background (darker inset)
+    love.graphics.setColor(0.08, 0.06, 0.05, 0.9)
+    love.graphics.rectangle("fill", iconX - 1, iconY - 1, iconSize + 2, iconSize + 2, 3)
+    
+    -- Draw appropriate icon based on type
+    local iconAlpha = enabled and 1 or 0.5
+    if iconType == "peon" then
+        -- Peon face icon
+        love.graphics.setColor(0.85, 0.7, 0.55, iconAlpha)  -- Skin
+        love.graphics.circle("fill", iconX + iconSize/2, iconY + iconSize/2, 10)
+        love.graphics.setColor(0.4, 0.25, 0.15, iconAlpha)  -- Hair
+        love.graphics.arc("fill", iconX + iconSize/2, iconY + iconSize/2 - 3, 10, math.pi, 0)
+        love.graphics.setColor(0.2, 0.15, 0.1, iconAlpha)  -- Eyes
+        love.graphics.circle("fill", iconX + iconSize/2 - 3, iconY + iconSize/2 + 1, 2)
+        love.graphics.circle("fill", iconX + iconSize/2 + 3, iconY + iconSize/2 + 1, 2)
+    elseif iconType == "footman" then
+        -- Footman helmet icon
+        love.graphics.setColor(0.6, 0.6, 0.65, iconAlpha)  -- Steel helmet
+        love.graphics.rectangle("fill", iconX + 5, iconY + 3, iconSize - 10, iconSize - 8, 3)
+        love.graphics.setColor(0.4, 0.4, 0.45, iconAlpha)  -- Visor
+        love.graphics.rectangle("fill", iconX + 7, iconY + 12, iconSize - 14, 6)
+        love.graphics.setColor(0.8, 0.7, 0.3, iconAlpha)  -- Plume/crest
+        love.graphics.polygon("fill", iconX + iconSize/2, iconY + 2, iconX + iconSize/2 - 4, iconY + 8, iconX + iconSize/2 + 4, iconY + 8)
+    elseif iconType == "farm" then
+        -- Farm icon (barn shape)
+        love.graphics.setColor(0.6, 0.35, 0.2, iconAlpha)  -- Brown wood
+        love.graphics.rectangle("fill", iconX + 4, iconY + 10, iconSize - 8, iconSize - 12)
+        love.graphics.setColor(0.7, 0.3, 0.2, iconAlpha)  -- Red roof
+        love.graphics.polygon("fill", iconX + 2, iconY + 10, iconX + iconSize/2, iconY + 2, iconX + iconSize - 2, iconY + 10)
+        love.graphics.setColor(0.4, 0.25, 0.1, iconAlpha)  -- Door
+        love.graphics.rectangle("fill", iconX + iconSize/2 - 3, iconY + 16, 6, 10)
+    elseif iconType == "barracks" then
+        -- Barracks icon (fortress shape)
+        love.graphics.setColor(0.5, 0.45, 0.4, iconAlpha)  -- Stone gray
+        love.graphics.rectangle("fill", iconX + 3, iconY + 8, iconSize - 6, iconSize - 10)
+        -- Battlements
+        love.graphics.rectangle("fill", iconX + 3, iconY + 4, 5, 6)
+        love.graphics.rectangle("fill", iconX + iconSize/2 - 2.5, iconY + 4, 5, 6)
+        love.graphics.rectangle("fill", iconX + iconSize - 8, iconY + 4, 5, 6)
+        love.graphics.setColor(0.25, 0.2, 0.15, iconAlpha)  -- Gate
+        love.graphics.rectangle("fill", iconX + iconSize/2 - 4, iconY + 14, 8, 12)
+    elseif iconType == "tower" then
+        -- Tower icon
+        love.graphics.setColor(0.5, 0.45, 0.4, iconAlpha)  -- Stone
+        love.graphics.rectangle("fill", iconX + 8, iconY + 6, iconSize - 16, iconSize - 8)
+        -- Pointed roof
+        love.graphics.setColor(0.4, 0.3, 0.25, iconAlpha)
+        love.graphics.polygon("fill", iconX + iconSize/2, iconY + 2, iconX + 6, iconY + 8, iconX + iconSize - 6, iconY + 8)
+        -- Window
+        love.graphics.setColor(0.2, 0.3, 0.4, iconAlpha)
+        love.graphics.rectangle("fill", iconX + iconSize/2 - 2, iconY + 14, 4, 6)
+    elseif iconType == "attack" then
+        -- Attack icon (sword)
+        love.graphics.setColor(0.7, 0.7, 0.75, iconAlpha)  -- Blade
+        love.graphics.polygon("fill", iconX + 6, iconY + iconSize - 4, iconX + iconSize - 6, iconY + 4, iconX + iconSize - 4, iconY + 6, iconX + 8, iconY + iconSize - 2)
+        love.graphics.setColor(0.5, 0.35, 0.2, iconAlpha)  -- Handle
+        love.graphics.rectangle("fill", iconX + 4, iconY + iconSize - 8, 6, 8)
+        love.graphics.setColor(0.8, 0.7, 0.3, iconAlpha)  -- Guard
+        love.graphics.rectangle("fill", iconX + 2, iconY + iconSize - 10, 10, 3)
+    elseif iconType == "stop" then
+        -- Stop icon (hand)
+        love.graphics.setColor(0.9, 0.3, 0.2, iconAlpha)
+        love.graphics.circle("fill", iconX + iconSize/2, iconY + iconSize/2, 11)
+        love.graphics.setColor(0.95, 0.85, 0.7, iconAlpha)  -- Palm
+        love.graphics.rectangle("fill", iconX + 8, iconY + 10, 12, 14, 2)
+        -- Fingers
+        for i = 0, 3 do
+            love.graphics.rectangle("fill", iconX + 8 + i * 3, iconY + 5, 3, 8, 1)
+        end
+    else
+        -- Generic icon (question mark or simple shape)
+        love.graphics.setColor(0.6, 0.55, 0.5, iconAlpha)
+        love.graphics.circle("fill", iconX + iconSize/2, iconY + iconSize/2, 10)
+        love.graphics.setColor(0.3, 0.25, 0.2, iconAlpha)
+        love.graphics.setFont(Game.fonts.medium)
+        love.graphics.print("?", iconX + iconSize/2 - 4, iconY + iconSize/2 - 8)
+    end
+    
+    -- Hotkey in top-left corner (no box, just the letter)
+    if hotkey then
+        -- Shadow
+        love.graphics.setColor(0, 0, 0, 0.6)
+        love.graphics.setFont(Game.fonts.small)
+        love.graphics.print(hotkey, x + 5, y + 3)
+        -- Letter
+        love.graphics.setColor(enabled and {1, 0.9, 0.5, 1} or {0.6, 0.5, 0.3, 0.6})
+        love.graphics.print(hotkey, x + 4, y + 2)
+    end
+    
+    -- Button text at bottom
+    love.graphics.setColor(textColor)
+    love.graphics.setFont(Game.fonts.small)
+    local textW = Game.fonts.small:getWidth(text)
+    local textX = x + (w - textW) / 2
+    local textY = y + h - 16
+    love.graphics.print(text, textX, textY)
+    
+    return x, y, w, h
+end
+
 return UIDraw

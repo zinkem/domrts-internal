@@ -7,7 +7,8 @@
     
     Algorithm:
     1. Try direct line to goal
-    2. If blocked by building, add a corner waypoint to go around it
+    2. If blocked by building, add an edge midpoint waypoint to go around it
+       (NOT corners - corners cause pinch points and stuck units)
     3. Repeat until we have line of sight to goal
     4. Final waypoint is ALWAYS the goal
 ]]
@@ -107,18 +108,19 @@ local function pointInsideBuilding(x, y, buildings, map, padding)
     return false
 end
 
--- Get the 4 corners around a building
+-- Get the 4 edge midpoints around a building (NOT corners!)
 -- rx, ry, rw, rh is the PADDED rect (already includes unit radius)
--- We need corners OUTSIDE this padded area so unit can actually reach them
-local function getBuildingCorners(rx, ry, rw, rh, unitRadius)
-    -- Corners must be far enough that unit center can reach them without collision
-    -- Add a healthy margin beyond the padded rect
+-- Edge midpoints are much safer than corners - no pinch points
+local function getBuildingEdgeMidpoints(rx, ry, rw, rh, unitRadius)
+    -- Midpoints must be far enough that unit center can reach them without collision
     local margin = math.max(unitRadius, 16)
+    local centerX = rx + rw / 2
+    local centerY = ry + rh / 2
     return {
-        {x = rx - margin, y = ry - margin},             -- top-left
-        {x = rx + rw + margin, y = ry - margin},        -- top-right
-        {x = rx - margin, y = ry + rh + margin},        -- bottom-left
-        {x = rx + rw + margin, y = ry + rh + margin}    -- bottom-right
+        {x = centerX, y = ry - margin},              -- top edge midpoint
+        {x = centerX, y = ry + rh + margin},         -- bottom edge midpoint
+        {x = rx - margin, y = centerY},              -- left edge midpoint
+        {x = rx + rw + margin, y = centerY}          -- right edge midpoint
     }
 end
 
@@ -126,7 +128,7 @@ end
     Find path from start to goal.
     
     Returns a list of waypoints. The LAST waypoint is ALWAYS the goal.
-    Intermediate waypoints are corners to navigate around buildings.
+    Intermediate waypoints are edge midpoints to navigate around buildings.
 ]]
 function Pathfinding.findPath(startX, startY, goalX, goalY, buildings, map, unitRadius)
     unitRadius = unitRadius or 14
@@ -145,48 +147,48 @@ function Pathfinding.findPath(startX, startY, goalX, goalY, buildings, map, unit
             return path
         end
         
-        -- Building in the way - find a corner to go around
-        local corners = getBuildingCorners(rx, ry, rw, rh, unitRadius)
+        -- Building in the way - find an edge midpoint to go around
+        local waypoints = getBuildingEdgeMidpoints(rx, ry, rw, rh, unitRadius)
         
-        local bestCorner = nil
+        local bestWaypoint = nil
         local bestScore = math.huge
         
-        for _, corner in ipairs(corners) do
-            -- Can we see this corner from current position?
-            local blockerToCorner = findBlockingBuilding(currentX, currentY, corner.x, corner.y, buildings, map, unitRadius)
+        for _, waypoint in ipairs(waypoints) do
+            -- Can we see this waypoint from current position?
+            local blockerToWaypoint = findBlockingBuilding(currentX, currentY, waypoint.x, waypoint.y, buildings, map, unitRadius)
             
-            -- Is this corner not inside another building?
-            local cornerInsideBuilding = pointInsideBuilding(corner.x, corner.y, buildings, map, unitRadius)
+            -- Is this waypoint not inside another building?
+            local waypointInsideBuilding = pointInsideBuilding(waypoint.x, waypoint.y, buildings, map, unitRadius)
             
-            if not blockerToCorner and not cornerInsideBuilding then
-                -- Valid corner - score by total path length
-                local distToCorner = math.sqrt((corner.x - currentX)^2 + (corner.y - currentY)^2)
-                local distToGoal = math.sqrt((goalX - corner.x)^2 + (goalY - corner.y)^2)
-                local score = distToCorner + distToGoal
+            if not blockerToWaypoint and not waypointInsideBuilding then
+                -- Valid waypoint - score by total path length
+                local distToWaypoint = math.sqrt((waypoint.x - currentX)^2 + (waypoint.y - currentY)^2)
+                local distToGoal = math.sqrt((goalX - waypoint.x)^2 + (goalY - waypoint.y)^2)
+                local score = distToWaypoint + distToGoal
                 
-                -- Prefer corners that have line of sight to goal (big bonus)
-                local cornerToGoal = findBlockingBuilding(corner.x, corner.y, goalX, goalY, buildings, map, unitRadius)
-                if not cornerToGoal then
+                -- Prefer waypoints that have line of sight to goal (big bonus)
+                local waypointToGoal = findBlockingBuilding(waypoint.x, waypoint.y, goalX, goalY, buildings, map, unitRadius)
+                if not waypointToGoal then
                     score = score - 1000
                 end
                 
                 if score < bestScore then
                     bestScore = score
-                    bestCorner = corner
+                    bestWaypoint = waypoint
                 end
             end
         end
         
-        if not bestCorner then
-            -- Can't find a valid corner - just try to go to goal directly
+        if not bestWaypoint then
+            -- Can't find a valid waypoint - just try to go to goal directly
             -- The movement system will handle collision
             table.insert(path, {x = goalX, y = goalY})
             return path
         end
         
-        -- Add corner as intermediate waypoint
-        table.insert(path, {x = bestCorner.x, y = bestCorner.y})
-        currentX, currentY = bestCorner.x, bestCorner.y
+        -- Add waypoint as intermediate step
+        table.insert(path, {x = bestWaypoint.x, y = bestWaypoint.y})
+        currentX, currentY = bestWaypoint.x, bestWaypoint.y
     end
     
     -- Ran out of iterations - add goal anyway

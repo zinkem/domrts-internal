@@ -153,7 +153,7 @@ local function drawButton(btn, mx, my)
     love.graphics.line(x + 6, y + 2, x + w - 6, y + 2)
     
     -- Text
-    local font = Game.fonts and Game.fonts.medium or love.graphics.getFont()
+    local font = Game.fonts and Game.fonts.button or love.graphics.getFont()
     love.graphics.setFont(font)
     local textW = font:getWidth(btn.text)
     local textH = font:getHeight()
@@ -202,23 +202,35 @@ function Title.load()
         Audio.playRandomMusic()
     end
     
-    -- Setup buttons
+    -- Setup buttons - positioned relative to center panel
     local screenW, screenH = love.graphics.getDimensions()
-    local btnW, btnH = 200, 50
+    local btnW, btnH = 220, 45
     local btnX = (screenW - btnW) / 2
-    local btnY = screenH * 0.55
+    
+    -- Calculate panel position to align buttons
+    local panelH = 380
+    local panelY = (screenH - panelH) / 2 - 20
+    local btnStartY = panelY + 150  -- Below title and subtitle (moved up)
+    local btnSpacing = 55
     
     buttons = {
         {
             text = "Start Game",
-            x = btnX, y = btnY, w = btnW, h = btnH,
+            x = btnX, y = btnStartY, w = btnW, h = btnH,
             action = function()
                 Game.SceneManager.switch("gameplay")
             end
         },
         {
+            text = "How to Play",
+            x = btnX, y = btnStartY + btnSpacing, w = btnW, h = btnH,
+            action = function()
+                Game.SceneManager.switch("tutorial")
+            end
+        },
+        {
             text = "Settings",
-            x = btnX, y = btnY + 70, w = btnW, h = btnH,
+            x = btnX, y = btnStartY + btnSpacing * 2, w = btnW, h = btnH,
             action = function()
                 -- Toggle settings (simple for now)
                 Game.settings.musicEnabled = not Game.settings.musicEnabled
@@ -288,9 +300,9 @@ function Title.draw()
     end
     
     -- Main title panel
-    local panelW, panelH = 500, 400
+    local panelW, panelH = 500, 380
     local panelX = (screenW - panelW) / 2
-    local panelY = (screenH - panelH) / 2 - 30
+    local panelY = (screenH - panelH) / 2 - 20
     
     drawStonePanel(panelX, panelY, panelW, panelH, 10)
     
@@ -308,7 +320,7 @@ function Title.draw()
     local title = "DOMINION"
     local titleW = titleFont:getWidth(title)
     local titleX = (screenW - titleW) / 2
-    local titleY = panelY + 40
+    local titleY = panelY + 30
     
     -- Title glow
     local glowPulse = 0.7 + math.sin(animTimer * 2) * 0.3
@@ -330,20 +342,20 @@ function Title.draw()
     love.graphics.print(title, titleX, titleY)
     
     -- Subtitle
-    local subtitleFont = Game.fonts and Game.fonts.medium or love.graphics.getFont()
+    local subtitleFont = Game.fonts and Game.fonts.subtitle or love.graphics.getFont()
     love.graphics.setFont(subtitleFont)
     local subtitle = "A Real-Time Strategy Game"
     local subtitleW = subtitleFont:getWidth(subtitle)
     
     love.graphics.setColor(0, 0, 0, 0.4)
-    love.graphics.print(subtitle, (screenW - subtitleW) / 2 + 1, titleY + 70 + 1)
+    love.graphics.print(subtitle, (screenW - subtitleW) / 2 + 1, titleY + 65 + 1)
     love.graphics.setColor(UI.textLight[1], UI.textLight[2], UI.textLight[3], 0.8)
-    love.graphics.print(subtitle, (screenW - subtitleW) / 2, titleY + 70)
+    love.graphics.print(subtitle, (screenW - subtitleW) / 2, titleY + 65)
     
     -- Decorative line
     love.graphics.setColor(UI.metalBronze)
     love.graphics.setLineWidth(2)
-    local lineY = titleY + 110
+    local lineY = titleY + 100
     love.graphics.line(panelX + 50, lineY, panelX + panelW - 50, lineY)
     
     -- Line rivets

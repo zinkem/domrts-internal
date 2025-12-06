@@ -231,7 +231,11 @@ function Unit:updateAttacking(dt, buildings, allUnits, allBuildings)
     local attackRange = self:getAttackRange()
     
     if dist <= attackRange then
-        -- In range - attack if cooldown ready
+        -- In range - stop moving and attack if cooldown ready
+        self.path = nil
+        self.targetX = nil
+        self.targetY = nil
+        
         if self.attackCooldown <= 0 then
             -- Perform attack
             if target.takeDamage then
@@ -254,29 +258,23 @@ function Unit:updateAttacking(dt, buildings, allUnits, allBuildings)
             end
         end
     else
-        -- Move toward target
+        -- Not in range - move toward target
+        -- Simply target the center of the target (building or unit)
         local tx, ty
-        if target.getWorldBounds then
-            -- For buildings, move toward nearest edge
-            local bx1, by1, bx2, by2 = target:getWorldBounds()
-            tx = math.max(bx1, math.min(self.worldX, bx2))
-            ty = math.max(by1, math.min(self.worldY, by2))
-            -- Add small offset to be just outside the building
-            local dx = self.worldX - tx
-            local dy = self.worldY - ty
-            local len = math.sqrt(dx * dx + dy * dy)
-            if len > 0 then
-                tx = tx + (dx / len) * 5
-                ty = ty + (dy / len) * 5
-            end
-        elseif target.getWorldCenter then
+        if target.getWorldCenter then
             tx, ty = target:getWorldCenter()
         else
             tx, ty = target.worldX, target.worldY
         end
         
-        -- Compute path if needed
-        if not self.path then
+        -- Compute path if needed (or if target moved significantly)
+        local needNewPath = not self.path
+        if self.targetX and self.targetY then
+            local targetMoved = math.abs(tx - self.targetX) > 32 or math.abs(ty - self.targetY) > 32
+            if targetMoved then needNewPath = true end
+        end
+        
+        if needNewPath then
             self.targetX = tx
             self.targetY = ty
             -- Filter out target building from pathfinding so we can path TO it, not around it
@@ -410,37 +408,30 @@ function Unit:update(dt, buildings, allUnits, allBuildings)
     if self.stuckTimer >= 0.5 then
         self.stuckTimer = 0
         
-        -- Store position history (keep last 3 samples = 1.5 seconds)
+        -- Store position history (keep last 4 samples = 2 seconds)
         self.posHistory = self.posHistory or {}
         table.insert(self.posHistory, {x = self.worldX, y = self.worldY})
-        if #self.posHistory > 3 then
+        if #self.posHistory > 4 then
             table.remove(self.posHistory, 1)
         end
         
         -- Check if stuck (not moving but should be)
-        if #self.posHistory >= 3 and (self.state == "Moving" or self.state == "Attacking" or self.state == "AttackMoving") then
+        if #self.posHistory >= 4 and (self.state == "Moving" or self.state == "Attacking" or self.state == "AttackMoving") then
             local oldPos = self.posHistory[1]
             local dx = self.worldX - oldPos.x
             local dy = self.worldY - oldPos.y
             local movedDist = math.sqrt(dx * dx + dy * dy)
             
-            -- If moved less than 5 pixels in 1.5 seconds while trying to move, we're stuck
+            -- If moved less than 5 pixels in 2 seconds while trying to move, we're stuck
             if movedDist < 5 then
-                -- Nudge in a random direction
-                local nudgeAngle = math.random() * math.pi * 2
-                local nudgeDist = 15 + math.random() * 10
-                local nudgeX = self.worldX + math.cos(nudgeAngle) * nudgeDist
-                local nudgeY = self.worldY + math.sin(nudgeAngle) * nudgeDist
-                
-                -- Only nudge if the new position is valid
-                if self:canMoveTo(nudgeX, nudgeY, buildings) then
-                    self.worldX = nudgeX
-                    self.worldY = nudgeY
-                end
-                
-                -- Clear path to force recalculation
+                -- Just clear path to force recalculation - don't nudge randomly
                 self.path = nil
                 self.posHistory = {}
+                
+                -- If attacking and stuck, just stop - we're probably as close as we can get
+                if self.state == "Attacking" and self.attackTarget then
+                    -- Stay in attacking state, let attack logic handle it
+                end
             end
         end
     end
