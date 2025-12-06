@@ -1,6 +1,7 @@
 --[[
     Gameplay Scene
     RTS Resource Gathering with scrolling map
+    Includes full tech tree with all buildings and units
 ]]
 
 local Map = require("map")
@@ -11,6 +12,22 @@ local Farm = require("farm")
 local Barracks = require("barracks")
 local Footman = require("footman")
 local FlowField = require("flowfield")
+local Requirements = require("requirements")
+
+-- New buildings
+local LumberMill = require("lumbermill")
+local Blacksmith = require("blacksmith")
+local ScoutTower = require("scouttower")
+local ArcheryRange = require("archeryrange")
+local Stable = require("stable")
+local SiegeWorkshop = require("siegeworkshop")
+
+-- New units
+local Archer = require("archer")
+local Knight = require("knight")
+local FlyingScout = require("flyingscout")
+local Ballista = require("ballista")
+local Kamikaze = require("kamikaze")
 
 local Gameplay = {}
 
@@ -35,6 +52,22 @@ local peons = {}
 local farms = {}
 local barracks = {}
 local footmen = {}
+
+-- New building tables
+local lumberMills = {}
+local blacksmiths = {}
+local scoutTowers = {}
+local archeryRanges = {}
+local stables = {}
+local siegeWorkshops = {}
+
+-- New unit tables
+local archers = {}
+local knights = {}
+local flyingScouts = {}
+local ballistas = {}
+local kamikazes = {}
+
 local selectedEntities = {}  -- Support multiple selection
 
 -- Building placement
@@ -66,7 +99,7 @@ local function checkAllMinesDepleted()
 end
 
 local function calculatePopulation()
-    currentPop = #peons + #footmen
+    currentPop = #peons + #footmen + #archers + #knights + #flyingScouts + #ballistas + #kamikazes
     maxPop = BASE_CAPACITY
     for _, farm in ipairs(farms) do
         if farm.completed then maxPop = maxPop + Farm.CAPACITY_BONUS end
@@ -78,13 +111,47 @@ local function getAllBuildings()
     for _, m in ipairs(goldMines) do table.insert(buildings, m) end
     for _, f in ipairs(farms) do table.insert(buildings, f) end
     for _, b in ipairs(barracks) do table.insert(buildings, b) end
+    for _, b in ipairs(lumberMills) do table.insert(buildings, b) end
+    for _, b in ipairs(blacksmiths) do table.insert(buildings, b) end
+    for _, b in ipairs(scoutTowers) do table.insert(buildings, b) end
+    for _, b in ipairs(archeryRanges) do table.insert(buildings, b) end
+    for _, b in ipairs(stables) do table.insert(buildings, b) end
+    for _, b in ipairs(siegeWorkshops) do table.insert(buildings, b) end
     return buildings
 end
 
+local function getAllUnits()
+    local units = {}
+    for _, p in ipairs(peons) do if p.visible then table.insert(units, p) end end
+    for _, f in ipairs(footmen) do table.insert(units, f) end
+    for _, a in ipairs(archers) do table.insert(units, a) end
+    for _, k in ipairs(knights) do table.insert(units, k) end
+    for _, f in ipairs(flyingScouts) do table.insert(units, f) end
+    for _, b in ipairs(ballistas) do table.insert(units, b) end
+    for _, k in ipairs(kamikazes) do table.insert(units, k) end
+    return units
+end
+
 local function separateUnits()
-    local allUnits = {}
-    for _, p in ipairs(peons) do if p.visible then table.insert(allUnits, p) end end
-    for _, f in ipairs(footmen) do table.insert(allUnits, f) end
+    local allUnits = getAllUnits()
+    local buildings = getAllBuildings()
+    
+    -- Helper to check if position collides with any building
+    local function collidesWithBuilding(x, y, radius)
+        for _, b in ipairs(buildings) do
+            if b.getWorldBounds then
+                local bx1, by1, bx2, by2 = b:getWorldBounds()
+                local closestX = math.max(bx1, math.min(x, bx2))
+                local closestY = math.max(by1, math.min(y, by2))
+                local dx = x - closestX
+                local dy = y - closestY
+                if (dx * dx + dy * dy) < (radius * radius) then
+                    return true
+                end
+            end
+        end
+        return false
+    end
     
     -- Multiple passes for better separation
     for pass = 1, 3 do
@@ -112,11 +179,11 @@ local function separateUnits()
                     local ax, ay = a.worldX - nx * overlap, a.worldY - ny * overlap
                     local bx, by = b.worldX + nx * overlap, b.worldY + ny * overlap
                     
-                    -- Only apply if the new position is passable
-                    if map:isWorldPosPassable(ax, ay) then
+                    -- Only apply if the new position is passable AND not in a building
+                    if map:isWorldPosPassable(ax, ay) and not collidesWithBuilding(ax, ay, a.radius) then
                         a.worldX, a.worldY = ax, ay
                     end
-                    if map:isWorldPosPassable(bx, by) then
+                    if map:isWorldPosPassable(bx, by) and not collidesWithBuilding(bx, by, b.radius) then
                         b.worldX, b.worldY = bx, by
                     end
                 elseif dist < 0.1 then
@@ -125,7 +192,7 @@ local function separateUnits()
                     local push = minDist / 2 + 1
                     local ax = a.worldX + math.cos(angle) * push
                     local ay = a.worldY + math.sin(angle) * push
-                    if map:isWorldPosPassable(ax, ay) then
+                    if map:isWorldPosPassable(ax, ay) and not collidesWithBuilding(ax, ay, a.radius) then
                         a.worldX, a.worldY = ax, ay
                     end
                 end
@@ -189,16 +256,26 @@ local function drawInfoPanel(startY, height)
     love.graphics.print(currentPop .. "/" .. maxPop, panelX + 100, y)
     y = y + 22
     
+    -- Town Hall tier
+    local tierName = townHall.tier == 3 and "Keep" or (townHall.tier == 2 and "Hold" or "Town Hall")
+    love.graphics.setColor(0.8, 0.7, 0.3, 1)
+    love.graphics.print("HQ:", panelX + 20, y)
+    love.graphics.setColor(UI.textColor)
+    love.graphics.print(tierName, panelX + 100, y)
+    y = y + 22
+    
     love.graphics.setColor(0.3, 0.7, 0.3, 1)
     love.graphics.print("Peons:", panelX + 20, y)
     love.graphics.setColor(UI.textColor)
     love.graphics.print(tostring(#peons), panelX + 100, y)
-    y = y + 22
+    y = y + 18
     
+    -- Military units
+    local totalMilitary = #footmen + #archers + #knights + #flyingScouts + #ballistas + #kamikazes
     love.graphics.setColor(0.7, 0.3, 0.3, 1)
-    love.graphics.print("Footmen:", panelX + 20, y)
+    love.graphics.print("Military:", panelX + 20, y)
     love.graphics.setColor(UI.textColor)
-    love.graphics.print(tostring(#footmen), panelX + 100, y)
+    love.graphics.print(tostring(totalMilitary), panelX + 100, y)
     y = y + 22
     
     love.graphics.setColor(UI.accentColor)
@@ -209,16 +286,12 @@ local function drawInfoPanel(startY, height)
     love.graphics.print(activeMines .. "/" .. #goldMines, panelX + 100, y)
     y = y + 22
     
-    love.graphics.setColor(0.5, 0.6, 0.3, 1)
-    love.graphics.print("Farms:", panelX + 20, y)
+    -- Building counts
+    local totalBuildings = #farms + #barracks + #lumberMills + #blacksmiths + #scoutTowers + #archeryRanges + #stables + #siegeWorkshops
+    love.graphics.setColor(0.5, 0.5, 0.6, 1)
+    love.graphics.print("Buildings:", panelX + 20, y)
     love.graphics.setColor(UI.textColor)
-    love.graphics.print(tostring(#farms), panelX + 100, y)
-    y = y + 22
-    
-    love.graphics.setColor(0.5, 0.3, 0.3, 1)
-    love.graphics.print("Barracks:", panelX + 20, y)
-    love.graphics.setColor(UI.textColor)
-    love.graphics.print(tostring(#barracks), panelX + 100, y)
+    love.graphics.print(tostring(totalBuildings), panelX + 100, y)
 end
 
 local function drawRightPanel(screenW, startY, height)
@@ -245,27 +318,37 @@ local function drawRightPanel(screenW, startY, height)
             love.graphics.setColor(0.6, 0.8, 0.6, 1)
             love.graphics.print("+" .. (#selectedEntities - 1) .. " more", panelX + 15, startY + 90)
         elseif selEntity.type == "townhall" then
-            love.graphics.setColor(selEntity.isProducing and {0.3, 0.8, 0.3, 1} or {0.5, 0.5, 0.55, 1})
-            love.graphics.print(selEntity.isProducing and ("Training: " .. selEntity:getProductionProgress() .. "%") or "Ready", panelX + 15, startY + 95)
+            if selEntity.isUpgrading then
+                love.graphics.setColor(0.8, 0.7, 0.2, 1)
+                love.graphics.print("Upgrading: " .. selEntity:getUpgradeProgress() .. "%", panelX + 15, startY + 95)
+            elseif selEntity.isProducing then
+                love.graphics.setColor(0.3, 0.8, 0.3, 1)
+                love.graphics.print("Training: " .. selEntity:getProductionProgress() .. "%", panelX + 15, startY + 95)
+            else
+                love.graphics.setColor(0.5, 0.5, 0.55, 1)
+                love.graphics.print("Ready", panelX + 15, startY + 95)
+            end
         elseif selEntity.type == "goldmine" then
             love.graphics.setColor(1, 0.85, 0, 1)
             love.graphics.print("Gold: " .. selEntity.goldReserves, panelX + 15, startY + 95)
-        elseif selEntity.type == "peon" then
+        elseif selEntity.getStateText then
             love.graphics.setColor(0.7, 0.8, 0.9, 1)
             love.graphics.print("Status: " .. selEntity:getStateText(), panelX + 15, startY + 95)
-        elseif selEntity.type == "footman" then
-            love.graphics.setColor(0.8, 0.5, 0.5, 1)
-            love.graphics.print("Status: " .. selEntity:getStateText(), panelX + 15, startY + 95)
-        elseif selEntity.type == "farm" then
-            love.graphics.setColor(0.5, 0.7, 0.4, 1)
-            love.graphics.print(selEntity.completed and ("Capacity: +" .. Farm.CAPACITY_BONUS) or ("Building: " .. selEntity:getBuildProgress() .. "%"), panelX + 15, startY + 95)
-        elseif selEntity.type == "barracks" then
+        elseif selEntity.completed ~= nil then
             if selEntity.completed then
-                love.graphics.setColor(selEntity.isProducing and {0.8, 0.4, 0.4, 1} or {0.5, 0.5, 0.55, 1})
-                love.graphics.print(selEntity.isProducing and ("Training: " .. selEntity:getProductionProgress() .. "%") or "Ready", panelX + 15, startY + 95)
+                if selEntity.isProducing then
+                    love.graphics.setColor(0.3, 0.8, 0.3, 1)
+                    love.graphics.print("Training: " .. (selEntity.getProductionProgress and selEntity:getProductionProgress() or 0) .. "%", panelX + 15, startY + 95)
+                elseif selEntity.isUpgrading then
+                    love.graphics.setColor(0.8, 0.7, 0.2, 1)
+                    love.graphics.print("Upgrading...", panelX + 15, startY + 95)
+                else
+                    love.graphics.setColor(0.5, 0.5, 0.55, 1)
+                    love.graphics.print("Ready", panelX + 15, startY + 95)
+                end
             else
                 love.graphics.setColor(0.7, 0.7, 0.4, 1)
-                love.graphics.print("Building: " .. selEntity:getBuildProgress() .. "%", panelX + 15, startY + 95)
+                love.graphics.print("Building: " .. (selEntity.getBuildProgress and selEntity:getBuildProgress() or 0) .. "%", panelX + 15, startY + 95)
             end
         end
     else
@@ -290,8 +373,19 @@ local function drawRightPanel(screenW, startY, height)
     for _, m in ipairs(goldMines) do m:drawOnMinimap(mmX, mmY, mmScale) end
     for _, f in ipairs(farms) do f:drawOnMinimap(mmX, mmY, mmScale) end
     for _, b in ipairs(barracks) do b:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, b in ipairs(lumberMills) do b:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, b in ipairs(blacksmiths) do b:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, b in ipairs(scoutTowers) do b:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, b in ipairs(archeryRanges) do b:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, b in ipairs(stables) do b:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, b in ipairs(siegeWorkshops) do b:drawOnMinimap(mmX, mmY, mmScale) end
     for _, p in ipairs(peons) do p:drawOnMinimap(mmX, mmY, mmScale) end
     for _, f in ipairs(footmen) do f:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, a in ipairs(archers) do a:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, k in ipairs(knights) do k:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, f in ipairs(flyingScouts) do f:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, b in ipairs(ballistas) do b:drawOnMinimap(mmX, mmY, mmScale) end
+    for _, k in ipairs(kamikazes) do k:drawOnMinimap(mmX, mmY, mmScale) end
 end
 
 local function drawVictoryScreen()
@@ -322,6 +416,15 @@ local function drawVictoryScreen()
     love.graphics.print("Press SPACE to continue", (screenW - Game.fonts.small:getWidth("Press SPACE to continue")) / 2, boxY + 165)
 end
 
+local function getBuildingSize(buildingType)
+    if buildingType == "farm" or buildingType == "lumbermill" or buildingType == "blacksmith" 
+       or buildingType == "scouttower" or buildingType == "stable" then
+        return 2
+    else
+        return 3  -- barracks, archeryrange, siegeworkshop
+    end
+end
+
 local function drawBuildingPlacement()
     if not isPlacingBuilding then return end
     
@@ -330,7 +433,7 @@ local function drawBuildingPlacement()
     
     local worldX, worldY = map:screenToWorld(mx, my)
     local gridX, gridY = map:worldToGrid(worldX, worldY)
-    local buildSize = placingBuildingType == "farm" and 2 or 3
+    local buildSize = getBuildingSize(placingBuildingType)
     
     -- Check if area is clear of trees/terrain
     placementValid = map:isAreaClear(gridX, gridY, buildSize, buildSize)
@@ -342,36 +445,12 @@ local function drawBuildingPlacement()
                    ay < by + bSize and ay + aSize > by
         end
         
-        -- Check town hall (3x3)
-        if townHall and buildingsOverlap(gridX, gridY, buildSize, townHall.gridX, townHall.gridY, 3) then
-            placementValid = false
-        end
-        
-        -- Check gold mines (2x2)
-        for _, mine in ipairs(goldMines) do
-            if buildingsOverlap(gridX, gridY, buildSize, mine.gridX, mine.gridY, 2) then
+        -- Check all buildings
+        local allBuildings = getAllBuildings()
+        for _, building in ipairs(allBuildings) do
+            if building.gridSize and buildingsOverlap(gridX, gridY, buildSize, building.gridX, building.gridY, building.gridSize) then
                 placementValid = false
                 break
-            end
-        end
-        
-        -- Check farms (2x2)
-        if placementValid then
-            for _, farm in ipairs(farms) do
-                if buildingsOverlap(gridX, gridY, buildSize, farm.gridX, farm.gridY, 2) then
-                    placementValid = false
-                    break
-                end
-            end
-        end
-        
-        -- Check barracks (3x3)
-        if placementValid then
-            for _, barrack in ipairs(barracks) do
-                if buildingsOverlap(gridX, gridY, buildSize, barrack.gridX, barrack.gridY, 3) then
-                    placementValid = false
-                    break
-                end
             end
         end
     end
@@ -417,38 +496,77 @@ end
 
 local function createBuilding(gridX, gridY, buildingType, peon)
     if buildingType == "farm" then
-        local farm = Farm.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
-        farm.builderPeon = peon
-        table.insert(farms, farm)
+        local building = Farm.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        building.builderPeon = peon
+        table.insert(farms, building)
     elseif buildingType == "barracks" then
-        local barrack = Barracks.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
-        barrack.builderPeon = peon
-        table.insert(barracks, barrack)
+        local building = Barracks.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        building.builderPeon = peon
+        table.insert(barracks, building)
+    elseif buildingType == "lumbermill" then
+        local building = LumberMill.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        building.builderPeon = peon
+        table.insert(lumberMills, building)
+    elseif buildingType == "blacksmith" then
+        local building = Blacksmith.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        building.builderPeon = peon
+        table.insert(blacksmiths, building)
+    elseif buildingType == "scouttower" then
+        local building = ScoutTower.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        building.builderPeon = peon
+        table.insert(scoutTowers, building)
+    elseif buildingType == "archeryrange" then
+        local building = ArcheryRange.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        building.builderPeon = peon
+        table.insert(archeryRanges, building)
+    elseif buildingType == "stable" then
+        local building = Stable.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        building.builderPeon = peon
+        -- Set callback for Paladin upgrade
+        building.onPaladinUpgrade = function()
+            for _, knight in ipairs(knights) do
+                knight:upgradeToPaladin()
+            end
+        end
+        table.insert(stables, building)
+    elseif buildingType == "siegeworkshop" then
+        local building = SiegeWorkshop.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true})
+        building.builderPeon = peon
+        table.insert(siegeWorkshops, building)
     end
     -- Invalidate all flow fields since map topology changed
     FlowField.invalidateAll()
 end
 
+local function getBuildingCost(buildingType)
+    if buildingType == "farm" then return Farm.COST_GOLD, Farm.COST_LUMBER
+    elseif buildingType == "barracks" then return Barracks.COST_GOLD, Barracks.COST_LUMBER
+    elseif buildingType == "lumbermill" then return LumberMill.COST_GOLD, LumberMill.COST_LUMBER
+    elseif buildingType == "blacksmith" then return Blacksmith.COST_GOLD, Blacksmith.COST_LUMBER
+    elseif buildingType == "scouttower" then return ScoutTower.COST_GOLD, ScoutTower.COST_LUMBER
+    elseif buildingType == "archeryrange" then return ArcheryRange.COST_GOLD, ArcheryRange.COST_LUMBER
+    elseif buildingType == "stable" then return Stable.COST_GOLD, Stable.COST_LUMBER
+    elseif buildingType == "siegeworkshop" then return SiegeWorkshop.COST_GOLD, SiegeWorkshop.COST_LUMBER
+    end
+    return 0, 0
+end
+
 local function findNearestTree(worldX, worldY)
     local gridX, gridY = map:worldToGrid(worldX, worldY)
     
-    -- If clicked tile is a tree, use it
     if map:isTileTree(gridX, gridY) then
         return gridX, gridY
     end
     
-    -- Search in expanding rings for nearest tree
     for radius = 1, 15 do
         local bestDist = math.huge
         local bestX, bestY = nil, nil
         
         for dy = -radius, radius do
             for dx = -radius, radius do
-                -- Only check tiles on the ring edge
                 if math.abs(dx) == radius or math.abs(dy) == radius then
                     local tx, ty = gridX + dx, gridY + dy
                     if map:isTileTree(tx, ty) then
-                        -- Calculate distance from original click
                         local dist = dx * dx + dy * dy
                         if dist < bestDist then
                             bestDist = dist
@@ -469,37 +587,89 @@ end
 
 local function pushUnitOutOfBuildings(unit)
     local buildings = getAllBuildings()
-    for _, b in ipairs(buildings) do
-        if b.getWorldBounds then
-            local bx1, by1, bx2, by2 = b:getWorldBounds()
-            local closestX = math.max(bx1, math.min(unit.worldX, bx2))
-            local closestY = math.max(by1, math.min(unit.worldY, by2))
-            local dx = unit.worldX - closestX
-            local dy = unit.worldY - closestY
-            local dist = math.sqrt(dx * dx + dy * dy)
-            
-            if dist < unit.radius then
-                -- Inside building, push out
-                if dist > 0.1 then
-                    local pushDist = unit.radius - dist + 2
-                    unit.worldX = unit.worldX + (dx / dist) * pushDist
-                    unit.worldY = unit.worldY + (dy / dist) * pushDist
-                else
-                    -- At center, push in arbitrary direction (away from building center)
-                    local bcx, bcy = b:getWorldCenter()
-                    dx = unit.worldX - bcx
-                    dy = unit.worldY - bcy
-                    dist = math.sqrt(dx * dx + dy * dy)
+    
+    -- Helper to check if position collides with any building
+    local function collidesWithAnyBuilding(x, y, radius, excludeBuilding)
+        for _, b in ipairs(buildings) do
+            if b ~= excludeBuilding and b.getWorldBounds then
+                local bx1, by1, bx2, by2 = b:getWorldBounds()
+                local closestX = math.max(bx1, math.min(x, bx2))
+                local closestY = math.max(by1, math.min(y, by2))
+                local dx = x - closestX
+                local dy = y - closestY
+                if (dx * dx + dy * dy) < (radius * radius) then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+    
+    -- Multiple passes to handle being pushed into another building
+    for pass = 1, 5 do
+        local pushedThisPass = false
+        
+        for _, b in ipairs(buildings) do
+            if b.getWorldBounds then
+                local bx1, by1, bx2, by2 = b:getWorldBounds()
+                local closestX = math.max(bx1, math.min(unit.worldX, bx2))
+                local closestY = math.max(by1, math.min(unit.worldY, by2))
+                local dx = unit.worldX - closestX
+                local dy = unit.worldY - closestY
+                local dist = math.sqrt(dx * dx + dy * dy)
+                
+                if dist < unit.radius then
+                    pushedThisPass = true
+                    local newX, newY
+                    
                     if dist > 0.1 then
-                        local pushDist = unit.radius + (bx2 - bx1) / 2 + 5
-                        unit.worldX = bcx + (dx / dist) * pushDist
-                        unit.worldY = bcy + (dy / dist) * pushDist
+                        local pushDist = unit.radius - dist + 2
+                        newX = unit.worldX + (dx / dist) * pushDist
+                        newY = unit.worldY + (dy / dist) * pushDist
                     else
-                        unit.worldX = bx2 + unit.radius + 5
-                        unit.worldY = by1 + (by2 - by1) / 2
+                        -- Unit is exactly inside, push to nearest edge
+                        local bcx, bcy = b:getWorldCenter()
+                        dx = unit.worldX - bcx
+                        dy = unit.worldY - bcy
+                        dist = math.sqrt(dx * dx + dy * dy)
+                        if dist > 0.1 then
+                            local pushDist = unit.radius + math.max(bx2 - bx1, by2 - by1) / 2 + 5
+                            newX = bcx + (dx / dist) * pushDist
+                            newY = bcy + (dy / dist) * pushDist
+                        else
+                            newX = bx2 + unit.radius + 5
+                            newY = by1 + (by2 - by1) / 2
+                        end
+                    end
+                    
+                    -- Check if new position would collide with another building
+                    if not collidesWithAnyBuilding(newX, newY, unit.radius, b) and map:isWorldPosPassable(newX, newY) then
+                        unit.worldX = newX
+                        unit.worldY = newY
+                    else
+                        -- Try 8 directions around the building
+                        local bcx, bcy = b:getWorldCenter()
+                        local halfW = (bx2 - bx1) / 2
+                        local halfH = (by2 - by1) / 2
+                        local escapeRadius = math.max(halfW, halfH) + unit.radius + 5
+                        
+                        local angles = {0, math.pi/4, math.pi/2, 3*math.pi/4, math.pi, -3*math.pi/4, -math.pi/2, -math.pi/4}
+                        for _, angle in ipairs(angles) do
+                            local testX = bcx + math.cos(angle) * escapeRadius
+                            local testY = bcy + math.sin(angle) * escapeRadius
+                            if not collidesWithAnyBuilding(testX, testY, unit.radius, nil) and map:isWorldPosPassable(testX, testY) then
+                                unit.worldX = testX
+                                unit.worldY = testY
+                                break
+                            end
+                        end
                     end
                 end
             end
+        end
+        
+        if not pushedThisPass then
+            break
         end
     end
 end
@@ -509,10 +679,21 @@ local function clearSelection()
     selectedEntities = {}
 end
 
+local function updateRequirementsState()
+    Requirements.setGameState({
+        townHall = townHall,
+        barracks = barracks,
+        archeryRanges = archeryRanges,
+        stables = stables,
+        siegeWorkshops = siegeWorkshops,
+        lumberMills = lumberMills,
+        blacksmiths = blacksmiths
+    })
+end
+
 function Gameplay.load()
     local screenW, screenH = love.graphics.getDimensions()
     
-    -- Clear any cached flow fields from previous game
     FlowField.invalidateAll()
     
     elapsedTime = 0
@@ -524,6 +705,22 @@ function Gameplay.load()
     farms = {}
     barracks = {}
     goldMines = {}
+    
+    -- Clear new building tables
+    lumberMills = {}
+    blacksmiths = {}
+    scoutTowers = {}
+    archeryRanges = {}
+    stables = {}
+    siegeWorkshops = {}
+    
+    -- Clear new unit tables
+    archers = {}
+    knights = {}
+    flyingScouts = {}
+    ballistas = {}
+    kamikazes = {}
+    
     selectedEntities = {}
     isPlacingBuilding = false
     isBoxSelecting = false
@@ -544,7 +741,6 @@ function Gameplay.load()
     local m3X, m3Y = map:findClearArea(buildingSize, buildingSize, 50, 50, 15)
     table.insert(goldMines, GoldMine.new({gridX = m3X, gridY = m3Y, gold = 100000, map = map}))
     
-    -- Spawn 3 starting peons (away from town hall)
     local spawnX, spawnY = townHall:getSpawnPos()
     for i = 1, 3 do
         local newPeon = Peon.new({
@@ -557,6 +753,7 @@ function Gameplay.load()
     end
     
     calculatePopulation()
+    updateRequirementsState()
     
     local thCenterX, thCenterY = townHall:getWorldCenter()
     map:centerOn(thCenterX, thCenterY)
@@ -568,11 +765,13 @@ function Gameplay.update(dt)
     elapsedTime = elapsedTime + dt
     map:update(dt)
     calculatePopulation()
+    updateRequirementsState()
     
     local buildings = getAllBuildings()
     
     -- Town hall
-    if townHall:update(dt) and currentPop < maxPop then
+    local peonReady, upgradeComplete = townHall:update(dt)
+    if peonReady and currentPop < maxPop then
         local spawnX, spawnY = townHall:getSpawnPos()
         local newPeon = Peon.new({worldX = spawnX, worldY = spawnY, map = map})
         pushUnitOutOfBuildings(newPeon)
@@ -586,7 +785,9 @@ function Gameplay.update(dt)
     -- Farms
     for _, farm in ipairs(farms) do
         if farm:update(dt) and farm.builderPeon then
-            farm.builderPeon:finishBuilding()
+            local peon = farm.builderPeon
+            peon:finishBuilding(farm)
+            pushUnitOutOfBuildings(peon)
             farm.builderPeon = nil
             calculatePopulation()
         end
@@ -594,25 +795,124 @@ function Gameplay.update(dt)
     
     -- Barracks
     for _, barrack in ipairs(barracks) do
-        local footmanReady, buildComplete = barrack:update(dt)
+        local unitType, buildComplete = barrack:update(dt)
         if buildComplete and barrack.builderPeon then
-            barrack.builderPeon:finishBuilding()
+            local peon = barrack.builderPeon
+            peon:finishBuilding(barrack)
+            pushUnitOutOfBuildings(peon)
             barrack.builderPeon = nil
         end
-        if footmanReady and currentPop < maxPop then
+        if unitType and currentPop < maxPop then
             local spawnX, spawnY = barrack:getSpawnPos()
-            local newFootman = Footman.new({worldX = spawnX, worldY = spawnY, map = map})
-            pushUnitOutOfBuildings(newFootman)
-            table.insert(footmen, newFootman)
+            if unitType == "footman" then
+                local newUnit = Footman.new({worldX = spawnX, worldY = spawnY, map = map})
+                pushUnitOutOfBuildings(newUnit)
+                table.insert(footmen, newUnit)
+            elseif unitType == "knight" then
+                local newUnit = Knight.new({worldX = spawnX, worldY = spawnY, map = map})
+                -- Check if Paladin upgrade is active
+                for _, stable in ipairs(stables) do
+                    if stable.completed and stable.hasPaladinUpgrade then
+                        newUnit:upgradeToPaladin()
+                        break
+                    end
+                end
+                pushUnitOutOfBuildings(newUnit)
+                table.insert(knights, newUnit)
+            end
+            calculatePopulation()
+        end
+    end
+    
+    -- Lumber Mills
+    for _, building in ipairs(lumberMills) do
+        if building:update(dt) and building.builderPeon then
+            local peon = building.builderPeon
+            peon:finishBuilding(building)
+            pushUnitOutOfBuildings(peon)
+            building.builderPeon = nil
+        end
+    end
+    
+    -- Blacksmiths
+    for _, building in ipairs(blacksmiths) do
+        if building:update(dt) and building.builderPeon then
+            local peon = building.builderPeon
+            peon:finishBuilding(building)
+            pushUnitOutOfBuildings(peon)
+            building.builderPeon = nil
+        end
+    end
+    
+    -- Scout Towers
+    for _, building in ipairs(scoutTowers) do
+        if building:update(dt) and building.builderPeon then
+            local peon = building.builderPeon
+            peon:finishBuilding(building)
+            pushUnitOutOfBuildings(peon)
+            building.builderPeon = nil
+        end
+    end
+    
+    -- Archery Ranges
+    for _, building in ipairs(archeryRanges) do
+        local archerReady, buildComplete = building:update(dt)
+        if buildComplete and building.builderPeon then
+            local peon = building.builderPeon
+            peon:finishBuilding(building)
+            pushUnitOutOfBuildings(peon)
+            building.builderPeon = nil
+        end
+        if archerReady and currentPop < maxPop then
+            local spawnX, spawnY = building:getSpawnPos()
+            local newUnit = Archer.new({worldX = spawnX, worldY = spawnY, map = map})
+            pushUnitOutOfBuildings(newUnit)
+            table.insert(archers, newUnit)
+            calculatePopulation()
+        end
+    end
+    
+    -- Stables
+    for _, building in ipairs(stables) do
+        if building:update(dt) and building.builderPeon then
+            local peon = building.builderPeon
+            peon:finishBuilding(building)
+            pushUnitOutOfBuildings(peon)
+            building.builderPeon = nil
+        end
+    end
+    
+    -- Siege Workshops
+    for _, building in ipairs(siegeWorkshops) do
+        local unitType, buildComplete = building:update(dt)
+        if buildComplete and building.builderPeon then
+            local peon = building.builderPeon
+            peon:finishBuilding(building)
+            pushUnitOutOfBuildings(peon)
+            building.builderPeon = nil
+        end
+        if unitType and currentPop < maxPop then
+            local spawnX, spawnY = building:getSpawnPos()
+            if unitType == "flyingscout" then
+                local newUnit = FlyingScout.new({worldX = spawnX, worldY = spawnY, map = map})
+                pushUnitOutOfBuildings(newUnit)
+                table.insert(flyingScouts, newUnit)
+            elseif unitType == "ballista" then
+                local newUnit = Ballista.new({worldX = spawnX, worldY = spawnY, map = map})
+                pushUnitOutOfBuildings(newUnit)
+                table.insert(ballistas, newUnit)
+            elseif unitType == "kamikaze" then
+                local newUnit = Kamikaze.new({worldX = spawnX, worldY = spawnY, map = map})
+                pushUnitOutOfBuildings(newUnit)
+                table.insert(kamikazes, newUnit)
+            end
             calculatePopulation()
         end
     end
     
     -- Peons
     for _, peon in ipairs(peons) do
-        local goldDep, lumberDep = peon:update(dt, townHall, buildings)
-        resources.gold = resources.gold + goldDep
-        resources.lumber = resources.lumber + lumberDep
+        peon:update(dt, buildings, townHall, goldMines[1], resources)
     end
     
     -- Footmen
@@ -620,8 +920,39 @@ function Gameplay.update(dt)
         footman:update(dt, buildings)
     end
     
+    -- Archers
+    for _, archer in ipairs(archers) do
+        archer:update(dt, buildings)
+    end
+    
+    -- Knights
+    for _, knight in ipairs(knights) do
+        knight:update(dt, buildings)
+    end
+    
+    -- Flying Scouts
+    for _, unit in ipairs(flyingScouts) do
+        unit:update(dt, buildings)
+    end
+    
+    -- Ballistas
+    for _, unit in ipairs(ballistas) do
+        unit:update(dt, buildings)
+    end
+    
+    -- Kamikazes
+    for _, unit in ipairs(kamikazes) do
+        unit:update(dt, buildings)
+    end
+    
     -- Separate overlapping units
     separateUnits()
+    
+    -- Ensure no units are inside buildings (safety check)
+    local allUnits = getAllUnits()
+    for _, unit in ipairs(allUnits) do
+        pushUnitOutOfBuildings(unit)
+    end
     
     -- Update selected entity UI
     local screenW, screenH = love.graphics.getDimensions()
@@ -629,7 +960,7 @@ function Gameplay.update(dt)
     if selEntity and selEntity.updateUI then
         if selEntity.type == "peon" then
             selEntity:updateUI(resources, screenW, screenH, Game.fonts.small, startBuildingPlacement)
-        elseif selEntity.type == "townhall" or selEntity.type == "barracks" then
+        elseif selEntity.type == "townhall" or selEntity.type == "barracks" or selEntity.type == "archeryrange" or selEntity.type == "siegeworkshop" then
             selEntity:updateUI(resources, screenW, screenH, Game.fonts.small, currentPop, maxPop)
         else
             selEntity:updateUI(resources, screenW, screenH, Game.fonts.small)
@@ -652,12 +983,26 @@ function Gameplay.draw()
     
     love.graphics.setScissor(map.viewportX, map.viewportY, map.viewportW, map.viewportH)
     
+    -- Draw all buildings
     for _, farm in ipairs(farms) do farm:draw() end
     for _, barrack in ipairs(barracks) do barrack:draw() end
+    for _, building in ipairs(lumberMills) do building:draw() end
+    for _, building in ipairs(blacksmiths) do building:draw() end
+    for _, building in ipairs(scoutTowers) do building:draw() end
+    for _, building in ipairs(archeryRanges) do building:draw() end
+    for _, building in ipairs(stables) do building:draw() end
+    for _, building in ipairs(siegeWorkshops) do building:draw() end
     townHall:draw()
     for _, mine in ipairs(goldMines) do mine:draw() end
+    
+    -- Draw all units
     for _, peon in ipairs(peons) do peon:draw() end
     for _, footman in ipairs(footmen) do footman:draw() end
+    for _, archer in ipairs(archers) do archer:draw() end
+    for _, knight in ipairs(knights) do knight:draw() end
+    for _, unit in ipairs(flyingScouts) do unit:draw() end
+    for _, unit in ipairs(ballistas) do unit:draw() end
+    for _, unit in ipairs(kamikazes) do unit:draw() end
     
     drawBuildingPlacement()
     drawBoxSelection()
@@ -697,13 +1042,9 @@ function Gameplay.mousepressed(x, y, button)
     -- Building placement
     if isPlacingBuilding then
         if button == 1 and placementValid and map:isInViewport(x, y) then
-            if placingBuildingType == "farm" then
-                resources.gold = resources.gold - Farm.COST_GOLD
-                resources.lumber = resources.lumber - Farm.COST_LUMBER
-            else
-                resources.gold = resources.gold - Barracks.COST_GOLD
-                resources.lumber = resources.lumber - Barracks.COST_LUMBER
-            end
+            local costGold, costLumber = getBuildingCost(placingBuildingType)
+            resources.gold = resources.gold - costGold
+            resources.lumber = resources.lumber - costLumber
             placingPeon:goToBuild(placementGridX, placementGridY, placingBuildingType, createBuilding)
             cancelBuildingPlacement()
             return
@@ -724,7 +1065,6 @@ function Gameplay.mousepressed(x, y, button)
     if not map:isInViewport(x, y) then return end
     
     if button == 1 then
-        -- Start box selection
         isBoxSelecting = true
         boxStartX, boxStartY = x, y
         boxEndX, boxEndY = x, y
@@ -734,6 +1074,12 @@ function Gameplay.mousepressed(x, y, button)
 end
 
 function Gameplay.mousemoved(x, y, dx, dy)
+    -- Handle minimap dragging (map handles this internally in update, but we can also do it here for responsiveness)
+    if map:isMinimapDragging() then
+        map:minimapNavigate(x, y)
+        return
+    end
+    
     if isBoxSelecting then
         boxEndX, boxEndY = x, y
     end
@@ -743,6 +1089,11 @@ function Gameplay.mousereleased(x, y, button)
     local selEntity = selectedEntities[1]
     if selEntity and selEntity.mousereleased then selEntity:mousereleased(x, y, button) end
     
+    -- Stop minimap dragging
+    if button == 1 and map:isMinimapDragging() then
+        map:minimapRelease()
+    end
+    
     if button == 1 and isBoxSelecting then
         isBoxSelecting = false
         
@@ -750,13 +1101,11 @@ function Gameplay.mousereleased(x, y, button)
         local boxH = math.abs(boxEndY - boxStartY)
         
         if boxW < 5 and boxH < 5 then
-            -- Single click
             handleLeftClick(x, y)
         else
-            -- Box selection
             clearSelection()
             
-            -- Select units in box (peons and footmen only)
+            -- Select all unit types in box
             for _, peon in ipairs(peons) do
                 if peon:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
                     peon.selected = true
@@ -769,6 +1118,36 @@ function Gameplay.mousereleased(x, y, button)
                     table.insert(selectedEntities, footman)
                 end
             end
+            for _, archer in ipairs(archers) do
+                if archer:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
+                    archer.selected = true
+                    table.insert(selectedEntities, archer)
+                end
+            end
+            for _, knight in ipairs(knights) do
+                if knight:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
+                    knight.selected = true
+                    table.insert(selectedEntities, knight)
+                end
+            end
+            for _, unit in ipairs(flyingScouts) do
+                if unit:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
+                    unit.selected = true
+                    table.insert(selectedEntities, unit)
+                end
+            end
+            for _, unit in ipairs(ballistas) do
+                if unit:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
+                    unit.selected = true
+                    table.insert(selectedEntities, unit)
+                end
+            end
+            for _, unit in ipairs(kamikazes) do
+                if unit:isInBox(boxStartX, boxStartY, boxEndX, boxEndY) then
+                    unit.selected = true
+                    table.insert(selectedEntities, unit)
+                end
+            end
         end
     end
 end
@@ -776,7 +1155,7 @@ end
 function handleLeftClick(x, y)
     clearSelection()
     
-    -- Check peons
+    -- Check all unit types
     for _, peon in ipairs(peons) do
         if peon.visible and peon:containsPoint(x, y) then
             peon.selected = true
@@ -785,7 +1164,6 @@ function handleLeftClick(x, y)
         end
     end
     
-    -- Check footmen
     for _, footman in ipairs(footmen) do
         if footman:containsPoint(x, y) then
             footman.selected = true
@@ -794,7 +1172,47 @@ function handleLeftClick(x, y)
         end
     end
     
-    -- Check buildings
+    for _, archer in ipairs(archers) do
+        if archer:containsPoint(x, y) then
+            archer.selected = true
+            table.insert(selectedEntities, archer)
+            return
+        end
+    end
+    
+    for _, knight in ipairs(knights) do
+        if knight:containsPoint(x, y) then
+            knight.selected = true
+            table.insert(selectedEntities, knight)
+            return
+        end
+    end
+    
+    for _, unit in ipairs(flyingScouts) do
+        if unit:containsPoint(x, y) then
+            unit.selected = true
+            table.insert(selectedEntities, unit)
+            return
+        end
+    end
+    
+    for _, unit in ipairs(ballistas) do
+        if unit:containsPoint(x, y) then
+            unit.selected = true
+            table.insert(selectedEntities, unit)
+            return
+        end
+    end
+    
+    for _, unit in ipairs(kamikazes) do
+        if unit:containsPoint(x, y) then
+            unit.selected = true
+            table.insert(selectedEntities, unit)
+            return
+        end
+    end
+    
+    -- Check all buildings
     if townHall:containsPoint(x, y) then
         townHall.selected = true
         table.insert(selectedEntities, townHall)
@@ -813,6 +1231,54 @@ function handleLeftClick(x, y)
         if farm:containsPoint(x, y) then
             farm.selected = true
             table.insert(selectedEntities, farm)
+            return
+        end
+    end
+    
+    for _, building in ipairs(lumberMills) do
+        if building:containsPoint(x, y) then
+            building.selected = true
+            table.insert(selectedEntities, building)
+            return
+        end
+    end
+    
+    for _, building in ipairs(blacksmiths) do
+        if building:containsPoint(x, y) then
+            building.selected = true
+            table.insert(selectedEntities, building)
+            return
+        end
+    end
+    
+    for _, building in ipairs(scoutTowers) do
+        if building:containsPoint(x, y) then
+            building.selected = true
+            table.insert(selectedEntities, building)
+            return
+        end
+    end
+    
+    for _, building in ipairs(archeryRanges) do
+        if building:containsPoint(x, y) then
+            building.selected = true
+            table.insert(selectedEntities, building)
+            return
+        end
+    end
+    
+    for _, building in ipairs(stables) do
+        if building:containsPoint(x, y) then
+            building.selected = true
+            table.insert(selectedEntities, building)
+            return
+        end
+    end
+    
+    for _, building in ipairs(siegeWorkshops) do
+        if building:containsPoint(x, y) then
+            building.selected = true
+            table.insert(selectedEntities, building)
             return
         end
     end
@@ -843,30 +1309,80 @@ function handleRightClick(x, y)
     
     local clickedTownHall = townHall:containsPoint(x, y)
     
-    -- Only check for tree if clicked directly on a tree tile
     local gridX, gridY = map:worldToGrid(worldX, worldY)
     local clickedTree = map:isTileTree(gridX, gridY)
     local treeX, treeY = nil, nil
-    if clickedTree then
-        treeX, treeY = gridX, gridY
-    end
     
-    local clickedOnBuilding = false
-    for _, farm in ipairs(farms) do
-        if farm:containsPoint(x, y) then clickedOnBuilding = true break end
-    end
-    if not clickedOnBuilding then
-        for _, barrack in ipairs(barracks) do
-            if barrack:containsPoint(x, y) then clickedOnBuilding = true break end
+    -- If clicked on a tree or non-passable area, try to find nearest reachable tree
+    -- (peons will use findNearestReachableTree, but we need coordinates for flow field)
+    if clickedTree or not map:isWorldPosPassable(worldX, worldY) then
+        -- Search for nearest tree with accessible neighbor
+        local directions = {{-1,0}, {1,0}, {0,-1}, {0,1}, {-1,-1}, {1,-1}, {-1,1}, {1,1}}
+        
+        -- First check clicked tile if it's a tree
+        if clickedTree then
+            for _, dir in ipairs(directions) do
+                local standX = gridX + dir[1]
+                local standY = gridY + dir[2]
+                if map:isTilePassable(standX, standY) then
+                    treeX, treeY = gridX, gridY
+                    break
+                end
+            end
+        end
+        
+        -- If not found, search in expanding rings
+        if not treeX then
+            for radius = 1, 10 do
+                for dx = -radius, radius do
+                    for dy = -radius, radius do
+                        if math.abs(dx) == radius or math.abs(dy) == radius then
+                            local checkX = gridX + dx
+                            local checkY = gridY + dy
+                            
+                            if map:isTileTree(checkX, checkY) then
+                                for _, dir in ipairs(directions) do
+                                    local standX = checkX + dir[1]
+                                    local standY = checkY + dir[2]
+                                    if map:isTilePassable(standX, standY) then
+                                        treeX, treeY = checkX, checkY
+                                        break
+                                    end
+                                end
+                                if treeX then break end
+                            end
+                        end
+                    end
+                    if treeX then break end
+                end
+                if treeX then break end
+            end
         end
     end
     
-    -- Generate flow field for the destination (shared by all units going there)
+    local clickedOnBuilding = false
+    for _, building in ipairs(buildings) do
+        if building ~= townHall and building.containsPoint and building:containsPoint(x, y) then
+            clickedOnBuilding = true
+            break
+        end
+    end
+    
+    -- Generate flow field for the destination
     local flowField = nil
     if clickedMine then
         flowField = FlowField.getField(clickedMine.gridX + 1, clickedMine.gridY + 1, map, buildings)
     elseif treeX then
-        flowField = FlowField.getField(treeX, treeY, map, buildings)
+        -- Flow field to a passable tile next to the tree
+        local directions = {{-1,0}, {1,0}, {0,-1}, {0,1}, {-1,-1}, {1,-1}, {-1,1}, {1,1}}
+        for _, dir in ipairs(directions) do
+            local standX = treeX + dir[1]
+            local standY = treeY + dir[2]
+            if map:isTilePassable(standX, standY) then
+                flowField = FlowField.getField(standX, standY, map, buildings)
+                break
+            end
+        end
     elseif not clickedOnBuilding and not clickedTownHall and map:isWorldPosPassable(worldX, worldY) then
         flowField = FlowField.getField(gridX, gridY, map, buildings)
     end
@@ -881,7 +1397,7 @@ function handleRightClick(x, y)
             elseif clickedTownHall then
                 if peon.carryingGold > 0 or peon.carryingLumber > 0 then
                     peon.state = Peon.STATE_RETURNING
-                    peon.flowField = nil  -- Will be set in updateReturning
+                    peon.flowField = nil
                 else
                     peon:moveTo(worldX, worldY, flowField)
                 end
@@ -891,10 +1407,12 @@ function handleRightClick(x, y)
                 peon:moveTo(worldX, worldY, flowField)
             end
             
-        elseif entity.type == "footman" then
-            -- Footmen can only move
-            if not clickedOnBuilding and not clickedMine and not clickedTownHall and not clickedTree and map:isWorldPosPassable(worldX, worldY) then
-                entity:moveTo(worldX, worldY, flowField)
+        elseif entity.moveTo then
+            -- All other mobile units (footman, archer, knight, flyingscout, ballista, kamikaze)
+            if not clickedOnBuilding and not clickedMine and not clickedTownHall and not clickedTree then
+                if map:isWorldPosPassable(worldX, worldY) or entity.type == "flyingscout" then
+                    entity:moveTo(worldX, worldY, flowField)
+                end
             end
         end
     end

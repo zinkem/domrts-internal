@@ -1,10 +1,11 @@
 --[[
     Barracks
-    Military building that produces footmen
+    Military building that produces footmen and knights
     Size: 3x3 tiles, grid-aligned
 ]]
 
 local Button = require("button")
+local Requirements = require("requirements")
 
 local Barracks = {}
 Barracks.__index = Barracks
@@ -15,6 +16,9 @@ Barracks.COST_LUMBER = 100
 Barracks.BUILD_TIME = 15.0
 Barracks.FOOTMAN_COST = 135
 Barracks.FOOTMAN_TIME = 8.0
+Barracks.KNIGHT_COST_GOLD = 300
+Barracks.KNIGHT_COST_LUMBER = 100
+Barracks.KNIGHT_TIME = 12.0
 
 function Barracks.new(params)
     local self = setmetatable({}, Barracks)
@@ -37,7 +41,9 @@ function Barracks.new(params)
     
     self.isProducing = false
     self.productionTimer = 0
+    self.producingUnit = nil  -- "footman" or "knight"
     self.actionButton = nil
+    self.knightButton = nil
     
     if self.map then
         self.map:clearArea(self.gridX, self.gridY, self.gridSize, self.gridSize)
@@ -83,20 +89,23 @@ function Barracks:update(dt)
         if self.buildProgress >= self.buildTime then
             self.isBuilding = false
             self.completed = true
-            return false, true -- no footman, build complete
+            return nil, true -- no unit, build complete
         end
-        return false, false
+        return nil, false
     end
     
     if self.isProducing then
+        local productionTime = self.producingUnit == "knight" and Barracks.KNIGHT_TIME or Barracks.FOOTMAN_TIME
         self.productionTimer = self.productionTimer + dt
-        if self.productionTimer >= Barracks.FOOTMAN_TIME then
+        if self.productionTimer >= productionTime then
+            local unitType = self.producingUnit
             self.isProducing = false
             self.productionTimer = 0
-            return true, false -- footman ready
+            self.producingUnit = nil
+            return unitType, false -- unit type ready
         end
     end
-    return false, false
+    return nil, false
 end
 
 function Barracks:draw()
@@ -218,11 +227,17 @@ function Barracks:draw()
     
     -- Production progress bar
     if self.completed and self.isProducing then
+        local productionTime = self.producingUnit == "knight" and Barracks.KNIGHT_TIME or Barracks.FOOTMAN_TIME
         local barW = size - 10
-        local progress = self.productionTimer / Barracks.FOOTMAN_TIME
+        local progress = self.productionTimer / productionTime
         love.graphics.setColor(0.2, 0.2, 0.2, 1)
         love.graphics.rectangle("fill", x + 5, y + size + 5, barW, 8, 2)
-        love.graphics.setColor(0.8, 0.3, 0.3, 1)
+        -- Different color for knight vs footman
+        if self.producingUnit == "knight" then
+            love.graphics.setColor(0.6, 0.5, 0.2, 1)
+        else
+            love.graphics.setColor(0.8, 0.3, 0.3, 1)
+        end
         love.graphics.rectangle("fill", x + 5, y + size + 5, barW * progress, 8, 2)
     end
     
@@ -235,10 +250,12 @@ function Barracks:containsPoint(screenX, screenY)
            screenY >= y and screenY <= y + self.pixelSize
 end
 
-function Barracks:startProduction()
+function Barracks:startProduction(unitType)
+    unitType = unitType or "footman"
     if self.completed and not self.isProducing then
         self.isProducing = true
         self.productionTimer = 0
+        self.producingUnit = unitType
         return true
     end
     return false
@@ -250,7 +267,8 @@ end
 
 function Barracks:getProductionProgress()
     if self.isProducing then
-        return math.floor((self.productionTimer / Barracks.FOOTMAN_TIME) * 100)
+        local productionTime = self.producingUnit == "knight" and Barracks.KNIGHT_TIME or Barracks.FOOTMAN_TIME
+        return math.floor((self.productionTimer / productionTime) * 100)
     end
     return 0
 end
@@ -272,6 +290,7 @@ function Barracks:updateUI(resources, screenW, screenH, font, currentPop, maxPop
         local panelX = screenW - 180
         local buttonY = 70 + 145
         
+        -- Train Footman button
         if not self.actionButton then
             local selfRef = self
             self.actionButton = Button.new({
@@ -292,7 +311,7 @@ function Barracks:updateUI(resources, screenW, screenH, font, currentPop, maxPop
                     if resources.gold >= Barracks.FOOTMAN_COST and 
                        selfRef:canProduce() and 
                        selfRef.currentPop < selfRef.maxPop then
-                        if selfRef:startProduction() then
+                        if selfRef:startProduction("footman") then
                             resources.gold = resources.gold - Barracks.FOOTMAN_COST
                         end
                     end
@@ -302,20 +321,74 @@ function Barracks:updateUI(resources, screenW, screenH, font, currentPop, maxPop
         
         self.actionButton:setEnabled(resources.gold >= Barracks.FOOTMAN_COST and currentPop < maxPop and self:canProduce())
         self.actionButton:update(0)
+        
+        -- Train Knight button (only if Stable exists)
+        if Requirements.canProduceKnight() then
+            if not self.knightButton then
+                local selfRef = self
+                self.knightButton = Button.new({
+                    x = panelX + 10,
+                    y = buttonY + 45,
+                    width = 150,
+                    height = 40,
+                    text = "Train Knight (300g 100L)",
+                    font = font,
+                    colors = {
+                        normal = {0.5, 0.45, 0.25, 1},
+                        hover = {0.6, 0.55, 0.35, 1},
+                        pressed = {0.4, 0.35, 0.15, 1},
+                        text = {1, 1, 1, 1},
+                        border = {0.4, 0.35, 0.15, 1}
+                    },
+                    onClick = function()
+                        if resources.gold >= Barracks.KNIGHT_COST_GOLD and 
+                           resources.lumber >= Barracks.KNIGHT_COST_LUMBER and
+                           selfRef:canProduce() and 
+                           selfRef.currentPop < selfRef.maxPop then
+                            if selfRef:startProduction("knight") then
+                                resources.gold = resources.gold - Barracks.KNIGHT_COST_GOLD
+                                resources.lumber = resources.lumber - Barracks.KNIGHT_COST_LUMBER
+                            end
+                        end
+                    end
+                })
+            end
+            
+            local canAffordKnight = resources.gold >= Barracks.KNIGHT_COST_GOLD and resources.lumber >= Barracks.KNIGHT_COST_LUMBER
+            self.knightButton:setEnabled(canAffordKnight and currentPop < maxPop and self:canProduce())
+            self.knightButton:update(0)
+        else
+            self.knightButton = nil
+        end
     else
         self.actionButton = nil
+        self.knightButton = nil
     end
 end
 
 function Barracks:drawUI()
-    if self.selected and self.completed and self.actionButton then
-        self.actionButton:draw()
+    if self.selected and self.completed then
+        if self.actionButton then
+            self.actionButton:draw()
+        end
+        
+        if self.knightButton then
+            self.knightButton:draw()
+        elseif not Requirements.canProduceKnight() then
+            -- Show hint about needing Stable
+            local screenW = love.graphics.getWidth()
+            love.graphics.setColor(0.6, 0.6, 0.6, 1)
+            love.graphics.setFont(Game.fonts.small)
+            love.graphics.print("Build Stable for Knights", screenW - 170, 70 + 190)
+            love.graphics.setColor(1, 1, 1, 1)
+        end
         
         if self.currentPop >= self.maxPop then
             local screenW = love.graphics.getWidth()
             love.graphics.setColor(1, 0.4, 0.4, 1)
             love.graphics.setFont(Game.fonts.small)
-            love.graphics.print("Need more farms!", screenW - 170, 70 + 190)
+            local yOffset = self.knightButton and 235 or 210
+            love.graphics.print("Need more farms!", screenW - 170, 70 + yOffset)
             love.graphics.setColor(1, 1, 1, 1)
         end
     end
@@ -323,10 +396,12 @@ end
 
 function Barracks:mousepressed(x, y, button)
     if self.actionButton then self.actionButton:mousepressed(x, y, button) end
+    if self.knightButton then self.knightButton:mousepressed(x, y, button) end
 end
 
 function Barracks:mousereleased(x, y, button)
     if self.actionButton then self.actionButton:mousereleased(x, y, button) end
+    if self.knightButton then self.knightButton:mousereleased(x, y, button) end
 end
 
 function Barracks:drawOnMinimap(mapX, mapY, scale)

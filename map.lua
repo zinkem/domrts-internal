@@ -10,6 +10,7 @@ Map.__index = Map
 -- Tile types
 Map.TILE_GRASS = 1
 Map.TILE_TREE = 2
+Map.TILE_STUMP = 3
 
 -- Constants
 Map.TILE_SIZE = 32
@@ -33,6 +34,12 @@ function Map.new()
     self.viewportY = 0
     self.viewportW = 800
     self.viewportH = 600
+    
+    -- Minimap dragging
+    self.minimapDragging = false
+    
+    -- Tree health tracking (harvests remaining)
+    self.treeHealth = {}
     
     -- Perlin noise seed
     self.noiseSeed = math.random(0, 1000)
@@ -65,10 +72,14 @@ function Map:generateTerrain()
     local treeThreshold = 0.65  -- Higher = fewer trees
     
     for y = 1, self.height do
+        self.treeHealth[y] = {}
         for x = 1, self.width do
             local n = self:noise2D(x, y)
             if n > treeThreshold then
                 self.tiles[y][x] = Map.TILE_TREE
+                self.treeHealth[y][x] = 10  -- 10 harvests per tree
+            else
+                self.treeHealth[y][x] = 0
             end
         end
     end
@@ -206,6 +217,34 @@ function Map:isTileTree(gridX, gridY)
     return self.tiles[gridY][gridX] == Map.TILE_TREE
 end
 
+function Map:harvestTree(gridX, gridY)
+    -- Returns true if tree still has health, false if depleted
+    if not self:isTileTree(gridX, gridY) then
+        return false
+    end
+    
+    -- Ensure health table exists for this row
+    if not self.treeHealth[gridY] then
+        self.treeHealth[gridY] = {}
+    end
+    
+    -- Initialize health if not set
+    if not self.treeHealth[gridY][gridX] then
+        self.treeHealth[gridY][gridX] = 10
+    end
+    
+    -- Decrement health
+    self.treeHealth[gridY][gridX] = self.treeHealth[gridY][gridX] - 1
+    
+    -- Check if depleted
+    if self.treeHealth[gridY][gridX] <= 0 then
+        self.tiles[gridY][gridX] = Map.TILE_STUMP
+        return false  -- Tree is gone
+    end
+    
+    return true  -- Tree still has health
+end
+
 function Map:getTileWorldCenter(gridX, gridY)
     local wx, wy = self:gridToWorld(gridX, gridY)
     return wx + self.tileSize / 2, wy + self.tileSize / 2
@@ -234,6 +273,14 @@ function Map:update(dt)
     
     if dx ~= 0 or dy ~= 0 then
         self:scroll(dx, dy)
+    end
+    
+    -- Handle minimap dragging
+    if self.minimapDragging and love.mouse.isDown(1) then
+        local mx, my = love.mouse.getPosition()
+        self:minimapNavigate(mx, my)
+    elseif self.minimapDragging and not love.mouse.isDown(1) then
+        self.minimapDragging = false
     end
 end
 
@@ -270,6 +317,19 @@ function Map:draw()
                 love.graphics.circle("fill", screenX + 16, screenY + 12, 11)
                 love.graphics.setColor(0.15, 0.45, 0.18, 1)
                 love.graphics.circle("fill", screenX + 14, screenY + 10, 7)
+            elseif tile == Map.TILE_STUMP then
+                -- Brown stump tile with low contrast to grass
+                love.graphics.setColor(0.28, 0.38, 0.22, 1)  -- Brownish-green base
+                love.graphics.rectangle("fill", screenX, screenY, self.tileSize, self.tileSize)
+                -- Subtle darker patches
+                love.graphics.setColor(0.25, 0.35, 0.20, 1)
+                love.graphics.rectangle("fill", screenX + 4, screenY + 4, 10, 8)
+                love.graphics.rectangle("fill", screenX + 18, screenY + 20, 8, 6)
+                -- Small stump remnant in center
+                love.graphics.setColor(0.35, 0.25, 0.15, 1)
+                love.graphics.circle("fill", screenX + 16, screenY + 16, 5)
+                love.graphics.setColor(0.30, 0.22, 0.12, 1)
+                love.graphics.circle("fill", screenX + 16, screenY + 16, 3)
             end
         end
     end
@@ -353,26 +413,52 @@ function Map:drawMinimap(x, y, size)
     love.graphics.setColor(1, 1, 1, 1)
 end
 
+-- Check if a point is within minimap bounds
+function Map:isInMinimap(screenX, screenY)
+    if not self.minimapX then return false end
+    return screenX >= self.minimapX and screenX <= self.minimapX + self.minimapSize and
+           screenY >= self.minimapY and screenY <= self.minimapY + self.minimapSize
+end
+
+-- Navigate camera based on minimap position
+function Map:minimapNavigate(screenX, screenY)
+    if not self.minimapX then return end
+    
+    -- Clamp to minimap bounds
+    local clampedX = math.max(self.minimapX, math.min(screenX, self.minimapX + self.minimapSize))
+    local clampedY = math.max(self.minimapY, math.min(screenY, self.minimapY + self.minimapSize))
+    
+    -- Convert minimap position to grid position
+    local relX = clampedX - self.minimapX
+    local relY = clampedY - self.minimapY
+    
+    local gridX = (relX / self.minimapSize) * self.width
+    local gridY = (relY / self.minimapSize) * self.height
+    
+    -- Center camera on position
+    self:centerOnTile(gridX, gridY)
+end
+
 function Map:minimapClick(screenX, screenY)
     -- Check if click is within minimap bounds
-    if not self.minimapX then return false end
-    
-    if screenX >= self.minimapX and screenX <= self.minimapX + self.minimapSize and
-       screenY >= self.minimapY and screenY <= self.minimapY + self.minimapSize then
-        
-        -- Convert minimap click to grid position
-        local relX = screenX - self.minimapX
-        local relY = screenY - self.minimapY
-        
-        local gridX = (relX / self.minimapSize) * self.width
-        local gridY = (relY / self.minimapSize) * self.height
-        
-        -- Center camera on clicked position
-        self:centerOnTile(gridX, gridY)
+    if self:isInMinimap(screenX, screenY) then
+        -- Start dragging and navigate immediately
+        self.minimapDragging = true
+        self:minimapNavigate(screenX, screenY)
         return true
     end
     
     return false
+end
+
+-- Call this on mouse release to stop dragging
+function Map:minimapRelease()
+    self.minimapDragging = false
+end
+
+-- Check if currently dragging on minimap
+function Map:isMinimapDragging()
+    return self.minimapDragging
 end
 
 return Map

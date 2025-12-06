@@ -6,6 +6,7 @@
 
 local Button = require("button")
 local FlowField = require("flowfield")
+local Requirements = require("requirements")
 
 local Peon = {}
 Peon.__index = Peon
@@ -55,6 +56,9 @@ function Peon.new(params)
     self.choppingTimer = 0
     self.targetTreeX = nil
     self.targetTreeY = nil
+    self.returnToStumpX = nil  -- For returning to stump when no adjacent tree
+    self.returnToStumpY = nil
+    self.goIdleAtTarget = nil  -- Flag to go idle when reaching movement target
     
     -- Building
     self.buildTargetX = nil
@@ -64,9 +68,9 @@ function Peon.new(params)
     self.buildEntryX = nil  -- Position when entering building site
     self.buildEntryY = nil
     
-    -- UI
-    self.buildFarmButton = nil
-    self.buildBarracksButton = nil
+    -- UI - Build buttons
+    self.buildButtons = {}
+    self.buildMenuPage = 1  -- For scrolling through buildings
     
     return self
 end
@@ -237,38 +241,11 @@ function Peon:tryMove(moveDirX, moveDirY, moveSpeed, buildings)
         end
     end
     
-    -- Final escape: try diagonals (might help slip past corners)
-    local diagonals = {
-        {dx = 1, dy = 1}, {dx = -1, dy = 1},
-        {dx = 1, dy = -1}, {dx = -1, dy = -1}
-    }
-    table.sort(diagonals, function(a, b)
-        local dotA = a.dx * moveDirX + a.dy * moveDirY
-        local dotB = b.dx * moveDirX + b.dy * moveDirY
-        return dotA > dotB
-    end)
-    for _, dir in ipairs(diagonals) do
-        local testX = self.worldX + dir.dx * escapeStep * 0.707
-        local testY = self.worldY + dir.dy * escapeStep * 0.707
-        if self:canMoveTo(testX, testY, buildings) then
-            self.worldX = testX
-            self.worldY = testY
-            self.lastMoveDirX = dir.dx
-            self.lastMoveDirY = dir.dy
-            return true
-        end
-    end
-    
-    -- Truly stuck
-    self.lastMoveDirX = nil
-    self.lastMoveDirY = nil
     return false
 end
 
--- Get movement direction using flow field with nearby tile sampling fallback
--- Returns normalized dx, dy or nil if no path
 function Peon:getMoveDirection(targetWorldX, targetWorldY, buildings)
-    -- First, try flow field at current position
+    -- First try flow field
     if self.flowField then
         local dirX, dirY = self.flowField:getDirection(self.worldX, self.worldY, self.map)
         if dirX and dirY then
@@ -276,13 +253,13 @@ function Peon:getMoveDirection(targetWorldX, targetWorldY, buildings)
         end
     end
     
-    -- Flow field returned nil - sample nearby tiles to find one with valid direction
-    -- Key: only consider tiles with LOWER cost (closer to destination)
+    -- Try nearby tiles to find a downhill cost direction
     local currentCost = math.huge
     if self.flowField then
         currentCost = self.flowField:getCost(self.worldX, self.worldY, self.map) or math.huge
     end
     
+    -- Sample nearby positions to find one with lower cost
     local sampleOffsets = {
         {dx = 32, dy = 0}, {dx = -32, dy = 0},
         {dx = 0, dy = 32}, {dx = 0, dy = -32},
@@ -291,16 +268,16 @@ function Peon:getMoveDirection(targetWorldX, targetWorldY, buildings)
     }
     
     local bestDirX, bestDirY = nil, nil
-    local bestCost = currentCost  -- Only accept tiles with lower cost than current!
+    local bestCost = currentCost
     
     for _, offset in ipairs(sampleOffsets) do
         local sampleX = self.worldX + offset.dx
         local sampleY = self.worldY + offset.dy
         
+        -- Check if sample position is passable
         if self.map:isWorldPosPassable(sampleX, sampleY) then
             local sampleCost = self.flowField and self.flowField:getCost(sampleX, sampleY, self.map)
             if sampleCost and sampleCost < bestCost then
-                -- This tile is closer to destination - move toward it
                 bestCost = sampleCost
                 local toSampleX = sampleX - self.worldX
                 local toSampleY = sampleY - self.worldY
@@ -317,8 +294,7 @@ function Peon:getMoveDirection(targetWorldX, targetWorldY, buildings)
         return bestDirX, bestDirY
     end
     
-    -- No better nearby tile found - we're likely at destination or stuck
-    -- Use direct movement for final approach (contact detection will trigger)
+    -- Fallback to direct movement
     local dx = targetWorldX - self.worldX
     local dy = targetWorldY - self.worldY
     local dist = math.sqrt(dx * dx + dy * dy)
@@ -330,247 +306,302 @@ function Peon:getMoveDirection(targetWorldX, targetWorldY, buildings)
     return nil, nil
 end
 
-function Peon:update(dt, townHall, buildings)
-    local goldDeposited = 0
-    local lumberDeposited = 0
-    
+function Peon:update(dt, buildings, townHall, goldMine, resources)
     if self.state == Peon.STATE_MOVING then
-        self:updateMoving(dt, buildings)
+        self:updateMoving(dt, buildings, goldMine)
     elseif self.state == Peon.STATE_HARVESTING then
-        self:updateHarvesting(dt)
-    elseif self.state == Peon.STATE_CHOPPING then
-        self:updateChopping(dt)
+        self:updateHarvesting(dt, resources)
     elseif self.state == Peon.STATE_RETURNING then
-        goldDeposited, lumberDeposited = self:updateReturning(dt, townHall, buildings)
+        self:updateReturning(dt, buildings, townHall, resources)
+    elseif self.state == Peon.STATE_CHOPPING then
+        self:updateChopping(dt, resources)
+    elseif self.state == Peon.STATE_BUILDING then
+        -- Building update is handled by gameplay.lua
     end
-    -- STATE_BUILDING: peon waits, handled externally
-    
-    return goldDeposited, lumberDeposited
 end
 
-function Peon:updateMoving(dt, buildings)
+function Peon:updateMoving(dt, buildings, goldMine)
     if not self.targetX or not self.targetY then
         self.state = Peon.STATE_IDLE
         return
     end
     
-    -- Check for contact-based arrival (mines, town hall for returning)
-    -- This happens BEFORE distance checks to handle collision-blocked movement
-    if self.targetMine and not self.targetMine.depleted then
-        if self:isTouchingBuilding(self.targetMine, 4) then
+    -- Check if we should stop for a mine
+    if self.targetMine and goldMine then
+        if self:isTouchingBuilding(goldMine, 4) then
+            self.visible = false
             self.state = Peon.STATE_HARVESTING
             self.harvestTimer = 0
-            self.visible = false
-            self.flowField = nil
             return
         end
     end
     
-    -- Check tree arrival - adjacent to tree tile
-    if self.targetTreeX and self.map:isTileTree(self.targetTreeX, self.targetTreeY) then
-        local treeWorldX, treeWorldY = self.map:getTileWorldCenter(self.targetTreeX, self.targetTreeY)
-        local tdx = treeWorldX - self.worldX
-        local tdy = treeWorldY - self.worldY
-        local tdist = math.sqrt(tdx * tdx + tdy * tdy)
-        -- Tree tile is 32 pixels, so touching is radius + 16 + small buffer
-        if tdist <= self.radius + 20 then
-            self.state = Peon.STATE_CHOPPING
-            self.choppingTimer = 0
-            self.flowField = nil
-            return
+    -- Check if we should stop for a tree (chop any adjacent tree when in chop mode)
+    if self.targetTreeX and self.targetTreeY then
+        local currentGridX, currentGridY = self.map:worldToGrid(self.worldX, self.worldY)
+        
+        -- Check if we're adjacent to ANY tree (not just target)
+        local directions = {{0,0}, {-1,0}, {1,0}, {0,-1}, {0,1}, {-1,-1}, {1,-1}, {-1,1}, {1,1}}
+        for _, dir in ipairs(directions) do
+            local checkX = currentGridX + dir[1]
+            local checkY = currentGridY + dir[2]
+            if self.map:isTileTree(checkX, checkY) then
+                -- Found an adjacent tree, chop it!
+                self.targetTreeX = checkX
+                self.targetTreeY = checkY
+                self.state = Peon.STATE_CHOPPING
+                self.choppingTimer = 0
+                return
+            end
         end
     end
     
-    -- Check build site arrival
-    if self.buildTargetX and self.buildCallback then
+    -- Check if we should start building
+    if self.buildTargetX and self.buildTargetY and self.buildCallback then
         local buildWorldX, buildWorldY = self.map:gridToWorld(self.buildTargetX, self.buildTargetY)
-        local bdx = (buildWorldX + 16) - self.worldX
-        local bdy = (buildWorldY + 16) - self.worldY
-        local bdist = math.sqrt(bdx * bdx + bdy * bdy)
-        if bdist <= 40 then
+        local dx = (buildWorldX + 16) - self.worldX
+        local dy = (buildWorldY + 16) - self.worldY
+        local dist = math.sqrt(dx * dx + dy * dy)
+        if dist < 40 then
             self.buildEntryX = self.worldX
             self.buildEntryY = self.worldY
-            self.state = Peon.STATE_BUILDING
             self.visible = false
-            self.flowField = nil
-            self.buildCallback(self.buildTargetX, self.buildTargetY, self.buildingType, self)
-            self.buildCallback = nil
+            self.state = Peon.STATE_BUILDING
+            if self.buildCallback then
+                self.buildCallback(self.buildTargetX, self.buildTargetY, self.buildingType, self)
+            end
             return
         end
     end
     
+    -- Normal movement towards target
     local dx = self.targetX - self.worldX
     local dy = self.targetY - self.worldY
     local dist = math.sqrt(dx * dx + dy * dy)
     
-    -- Simple move arrival (no special target)
-    local arriveThreshold = 8
-    if not self.targetMine and not self.targetTreeX and not self.buildTargetX then
-        if dist <= arriveThreshold then
-            self.state = Peon.STATE_IDLE
-            self.targetX = nil
-            self.targetY = nil
-            self.flowField = nil
-            return
-        end
+    if dist <= 8 then
+        self.state = Peon.STATE_IDLE
+        self.targetX = nil
+        self.targetY = nil
+        self.flowField = nil
+        self.goIdleAtTarget = nil
+        return
     end
     
-    -- Get movement direction (flow field with A* fallback)
     local moveDirX, moveDirY = self:getMoveDirection(self.targetX, self.targetY, buildings)
     
     if not moveDirX or not moveDirY then
         return
     end
     
-    -- Movement with sliding and cardinal fallbacks
     local moveSpeed = self.speed * dt
     self:tryMove(moveDirX, moveDirY, moveSpeed, buildings)
 end
 
-function Peon:updateHarvesting(dt)
+function Peon:updateHarvesting(dt, resources)
     self.harvestTimer = self.harvestTimer + dt
+    
     if self.harvestTimer >= self.harvestTime then
+        self.carryingGold = self.harvestAmount
         self.visible = true
-        if self.targetMine and not self.targetMine.depleted then
-            self.carryingGold = self.targetMine:extractGold(self.harvestAmount)
-        end
         self.state = Peon.STATE_RETURNING
-        self.flowField = nil
-        self.harvestTimer = 0
     end
 end
 
-function Peon:updateChopping(dt)
-    self.choppingTimer = self.choppingTimer + dt
-    if self.choppingTimer >= self.choppingTime then
-        self.carryingLumber = self.choppingAmount
-        self.state = Peon.STATE_RETURNING
-        self.flowField = nil
-        self.choppingTimer = 0
-    end
-end
-
-function Peon:updateReturning(dt, townHall, buildings)
+function Peon:updateReturning(dt, buildings, townHall, resources)
     if not townHall then
         self.state = Peon.STATE_IDLE
-        return 0, 0
+        return
     end
     
-    self.targetTownHall = townHall
-    
-    -- Check for contact-based arrival at town hall
     if self:isTouchingBuilding(townHall, 4) then
-        -- Deposit resources
-        local goldDeposited = self.carryingGold
-        local lumberDeposited = self.carryingLumber
-        self.carryingGold = 0
-        self.carryingLumber = 0
-        
-        -- Continue harvesting if we have a valid target
-        if self.targetMine and not self.targetMine.depleted then
-            -- Generate flow field to mine
-            local mineField = FlowField.getField(self.targetMine.gridX + 1, self.targetMine.gridY + 1, self.map, buildings)
-            self:goToMine(self.targetMine, mineField)
-        elseif self.targetTreeX and self.map:isTileTree(self.targetTreeX, self.targetTreeY) then
-            -- Generate flow field to tree
-            local treeField = FlowField.getField(self.targetTreeX, self.targetTreeY, self.map, buildings)
-            self:goToTree(self.targetTreeX, self.targetTreeY, treeField)
-        else
-            self.state = Peon.STATE_IDLE
-            self.targetMine = nil
-            self.targetTreeX = nil
-            self.targetTreeY = nil
-            self.flowField = nil
+        if self.carryingGold > 0 then
+            resources.gold = resources.gold + self.carryingGold
+            self.carryingGold = 0
+            if self.targetMine then
+                local cx, cy = self.targetMine:getWorldCenter()
+                self.targetX = cx
+                self.targetY = cy
+                self.state = Peon.STATE_MOVING
+            else
+                self.state = Peon.STATE_IDLE
+            end
+        elseif self.carryingLumber > 0 then
+            resources.lumber = resources.lumber + self.carryingLumber
+            self.carryingLumber = 0
+            if self.targetTreeX and self.targetTreeY then
+                -- Have a target tree (original or adjacent), go chop it
+                if self.map:isTileTree(self.targetTreeX, self.targetTreeY) then
+                    self.targetX, self.targetY = self.map:getTileWorldCenter(self.targetTreeX, self.targetTreeY)
+                    self.state = Peon.STATE_MOVING
+                else
+                    -- Tree disappeared somehow, go idle
+                    self.targetTreeX = nil
+                    self.targetTreeY = nil
+                    self.state = Peon.STATE_IDLE
+                end
+            elseif self.returnToStumpX and self.returnToStumpY then
+                -- No adjacent tree found, return to stump then go idle
+                self.targetX, self.targetY = self.map:getTileWorldCenter(self.returnToStumpX, self.returnToStumpY)
+                self.goIdleAtTarget = true  -- Flag to go idle when reaching target
+                self.returnToStumpX = nil
+                self.returnToStumpY = nil
+                self.state = Peon.STATE_MOVING
+            else
+                self.state = Peon.STATE_IDLE
+            end
         end
-        
-        return goldDeposited, lumberDeposited
+        return
     end
     
-    -- Get or create flow field to town hall
-    if not self.flowField then
-        local thGridX, thGridY = self.map:worldToGrid(townHall:getWorldCenter())
-        self.flowField = FlowField.getField(thGridX, thGridY, self.map, buildings)
-    end
-    
-    -- Get movement direction (flow field with A* fallback)
     local targetX, targetY = townHall:getWorldCenter()
-    local moveDirX, moveDirY = self:getMoveDirection(targetX, targetY, buildings)
+    local dx = targetX - self.worldX
+    local dy = targetY - self.worldY
+    local dist = math.sqrt(dx * dx + dy * dy)
     
-    if not moveDirX or not moveDirY then
-        return 0, 0
+    if dist > 0.1 then
+        local moveDirX = dx / dist
+        local moveDirY = dy / dist
+        local moveSpeed = self.speed * dt
+        self:tryMove(moveDirX, moveDirY, moveSpeed, buildings)
     end
-    
-    -- Movement with sliding and cardinal fallbacks
-    local moveSpeed = self.speed * dt
-    self:tryMove(moveDirX, moveDirY, moveSpeed, buildings)
-    
-    return 0, 0
 end
 
-function Peon:finishBuilding()
-    self.visible = true
-    self.state = Peon.STATE_IDLE
+-- Find an adjacent tree that is accessible (has a passable tile next to it)
+function Peon:findAdjacentAccessibleTree(stumpX, stumpY)
+    local directions = {
+        {-1, 0}, {1, 0}, {0, -1}, {0, 1},  -- Cardinal
+        {-1, -1}, {1, -1}, {-1, 1}, {1, 1}  -- Diagonal
+    }
     
-    -- Find closest empty tile around the completed building
-    if self.buildTargetX and self.buildTargetY and self.map then
-        -- Determine building size based on type
-        local buildingSize = 2  -- Default for farm
-        if self.buildingType == "barracks" then
-            buildingSize = 3
+    -- Check all tiles adjacent to the stump for trees
+    for _, dir in ipairs(directions) do
+        local treeX = stumpX + dir[1]
+        local treeY = stumpY + dir[2]
+        
+        if self.map:isTileTree(treeX, treeY) then
+            -- Check if this tree has at least one passable tile adjacent to it
+            -- (so the peon can stand there to chop)
+            for _, checkDir in ipairs(directions) do
+                local standX = treeX + checkDir[1]
+                local standY = treeY + checkDir[2]
+                if self.map:isTilePassable(standX, standY) then
+                    -- Found an accessible tree
+                    return treeX, treeY
+                end
+            end
         end
-        
-        -- Get building world position
-        local buildWorldX, buildWorldY = self.map:gridToWorld(self.buildTargetX, self.buildTargetY)
-        local buildCenterX = buildWorldX + (buildingSize * 32) / 2
-        local buildCenterY = buildWorldY + (buildingSize * 32) / 2
-        
-        -- Entry position (or building center if no entry recorded)
-        local entryX = self.buildEntryX or buildCenterX
-        local entryY = self.buildEntryY or buildCenterY
-        
-        -- Search adjacent tiles around the building perimeter
-        local bestX, bestY = nil, nil
-        local bestDist = math.huge
-        
-        for dy = -1, buildingSize do
-            for dx = -1, buildingSize do
-                -- Only check perimeter tiles (not inside building)
-                local isPerimeter = dx == -1 or dy == -1 or dx == buildingSize or dy == buildingSize
-                if isPerimeter then
-                    local tileGridX = self.buildTargetX + dx
-                    local tileGridY = self.buildTargetY + dy
-                    local tileWorldX, tileWorldY = self.map:gridToWorld(tileGridX, tileGridY)
-                    local tileCenterX = tileWorldX + 16
-                    local tileCenterY = tileWorldY + 16
+    end
+    
+    return nil, nil
+end
+
+-- Find a tree near a world position that the peon can reach
+-- Searches in expanding rings from the target position
+function Peon:findNearestReachableTree(worldX, worldY)
+    local gridX, gridY = self.map:worldToGrid(worldX, worldY)
+    
+    local directions = {
+        {-1, 0}, {1, 0}, {0, -1}, {0, 1},
+        {-1, -1}, {1, -1}, {-1, 1}, {1, 1}
+    }
+    
+    -- Check if clicked tile itself is a tree with accessible neighbor
+    if self.map:isTileTree(gridX, gridY) then
+        for _, dir in ipairs(directions) do
+            local standX = gridX + dir[1]
+            local standY = gridY + dir[2]
+            if self.map:isTilePassable(standX, standY) then
+                return gridX, gridY
+            end
+        end
+    end
+    
+    -- Search in expanding rings
+    for radius = 1, 10 do
+        for dx = -radius, radius do
+            for dy = -radius, radius do
+                if math.abs(dx) == radius or math.abs(dy) == radius then
+                    local checkX = gridX + dx
+                    local checkY = gridY + dy
                     
-                    -- Check if tile is passable
-                    if self.map:isWorldPosPassable(tileCenterX, tileCenterY) then
-                        local distX = tileCenterX - entryX
-                        local distY = tileCenterY - entryY
-                        local dist = distX * distX + distY * distY
-                        if dist < bestDist then
-                            bestDist = dist
-                            bestX = tileCenterX
-                            bestY = tileCenterY
+                    if self.map:isTileTree(checkX, checkY) then
+                        -- Check if this tree has an accessible neighbor
+                        for _, dir in ipairs(directions) do
+                            local standX = checkX + dir[1]
+                            local standY = checkY + dir[2]
+                            if self.map:isTilePassable(standX, standY) then
+                                return checkX, checkY
+                            end
                         end
                     end
                 end
             end
         end
+    end
+    
+    return nil, nil
+end
+
+function Peon:updateChopping(dt, resources)
+    self.choppingTimer = self.choppingTimer + dt
+    
+    if self.choppingTimer >= self.choppingTime then
+        self.carryingLumber = self.choppingAmount
         
-        -- Place peon at best position found
-        if bestX and bestY then
-            self.worldX = bestX
-            self.worldY = bestY
+        -- Harvest the tree (decrements health, returns false if depleted)
+        if self.map and self.targetTreeX and self.targetTreeY then
+            local oldTreeX, oldTreeY = self.targetTreeX, self.targetTreeY
+            local treeStillAlive = self.map:harvestTree(self.targetTreeX, self.targetTreeY)
+            
+            if not treeStillAlive then
+                -- Tree is depleted, try to find an adjacent accessible tree
+                local newTreeX, newTreeY = self:findAdjacentAccessibleTree(oldTreeX, oldTreeY)
+                
+                if newTreeX and newTreeY then
+                    -- Found adjacent tree, continue harvesting it after returning lumber
+                    self.targetTreeX = newTreeX
+                    self.targetTreeY = newTreeY
+                else
+                    -- No adjacent tree, remember stump location to return to
+                    self.returnToStumpX = oldTreeX
+                    self.returnToStumpY = oldTreeY
+                    self.targetTreeX = nil
+                    self.targetTreeY = nil
+                end
+            end
         end
+        
+        self.state = Peon.STATE_RETURNING
+    end
+end
+
+function Peon:finishBuilding(building)
+    self.state = Peon.STATE_IDLE
+    self.visible = true
+    
+    -- Try to spawn at building's spawn position if available
+    if building and building.getSpawnPos then
+        local spawnX, spawnY = building:getSpawnPos()
+        self.worldX = spawnX
+        self.worldY = spawnY
+    elseif building and building.getWorldBounds then
+        -- Spawn just outside the building
+        local bx1, by1, bx2, by2 = building:getWorldBounds()
+        self.worldX = bx2 + self.radius + 5
+        self.worldY = (by1 + by2) / 2
+    elseif self.buildEntryX and self.buildEntryY then
+        -- Fallback to entry position
+        self.worldX = self.buildEntryX
+        self.worldY = self.buildEntryY
     end
     
     self.buildTargetX = nil
     self.buildTargetY = nil
     self.buildingType = nil
+    self.buildCallback = nil
     self.buildEntryX = nil
     self.buildEntryY = nil
-    self.flowField = nil
 end
 
 function Peon:draw()
@@ -591,36 +622,30 @@ function Peon:draw()
     love.graphics.setColor(0, 0, 0, 0.3)
     love.graphics.ellipse("fill", x, y + 10, 10, 4)
     
-    -- Feet (brown boots)
+    -- Feet
+    love.graphics.setColor(0.4, 0.3, 0.2, 1)
+    love.graphics.ellipse("fill", x - 5, y + 7, 5, 3)
+    love.graphics.ellipse("fill", x + 5, y + 7, 5, 3)
+    
+    -- Legs
+    love.graphics.setColor(0.5, 0.35, 0.25, 1)
+    love.graphics.rectangle("fill", x - 6, y + 2, 5, 7, 1)
+    love.graphics.rectangle("fill", x + 1, y + 2, 5, 7, 1)
+    
+    -- Body (work shirt)
+    love.graphics.setColor(0.55, 0.45, 0.35, 1)
+    love.graphics.rectangle("fill", x - 8, y - 6, 16, 12, 2)
+    
+    -- Belt
     love.graphics.setColor(0.35, 0.25, 0.15, 1)
-    love.graphics.ellipse("fill", x - 5, y + 8, 4, 3)
-    love.graphics.ellipse("fill", x + 5, y + 8, 4, 3)
-    
-    -- Legs (brown pants)
-    love.graphics.setColor(0.45, 0.35, 0.25, 1)
-    love.graphics.rectangle("fill", x - 6, y + 2, 5, 8, 1)
-    love.graphics.rectangle("fill", x + 1, y + 2, 5, 8, 1)
-    
-    -- Body/tunic
-    if self.carryingGold > 0 then
-        love.graphics.setColor(0.7, 0.55, 0.2, 1)  -- Golden tint when carrying gold
-    elseif self.carryingLumber > 0 then
-        love.graphics.setColor(0.5, 0.4, 0.25, 1)  -- Brown tint when carrying lumber
-    else
-        love.graphics.setColor(0.6, 0.5, 0.35, 1)  -- Normal tan tunic
-    end
-    love.graphics.rectangle("fill", x - 7, y - 6, 14, 10, 2)
-    
-    -- Tunic details (belt)
-    love.graphics.setColor(0.35, 0.25, 0.15, 1)
-    love.graphics.rectangle("fill", x - 7, y, 14, 2)
-    love.graphics.setColor(0.8, 0.7, 0.2, 1)
-    love.graphics.circle("fill", x, y + 1, 2)  -- Belt buckle
+    love.graphics.rectangle("fill", x - 8, y + 1, 16, 3)
+    love.graphics.setColor(0.6, 0.5, 0.2, 1)
+    love.graphics.rectangle("fill", x - 2, y + 1, 4, 3)  -- Buckle
     
     -- Arms
-    love.graphics.setColor(0.6, 0.5, 0.35, 1)
-    love.graphics.rectangle("fill", x - 10, y - 4, 4, 8, 1)
-    love.graphics.rectangle("fill", x + 6, y - 4, 4, 8, 1)
+    love.graphics.setColor(0.55, 0.45, 0.35, 1)
+    love.graphics.rectangle("fill", x - 11, y - 4, 5, 10, 1)
+    love.graphics.rectangle("fill", x + 6, y - 4, 5, 10, 1)
     
     -- Hands (skin tone)
     love.graphics.setColor(0.85, 0.7, 0.55, 1)
@@ -698,6 +723,9 @@ function Peon:moveTo(worldX, worldY, flowField)
     self.targetMine = nil
     self.targetTreeX = nil
     self.targetTreeY = nil
+    self.returnToStumpX = nil
+    self.returnToStumpY = nil
+    self.goIdleAtTarget = nil
     self.buildTargetX = nil
     self.buildTargetY = nil
     self.buildCallback = nil
@@ -711,6 +739,9 @@ function Peon:goToMine(mine, flowField)
     self.targetMine = mine
     self.targetTreeX = nil
     self.targetTreeY = nil
+    self.returnToStumpX = nil
+    self.returnToStumpY = nil
+    self.goIdleAtTarget = nil
     self.buildTargetX = nil
     self.buildTargetY = nil
     self.buildCallback = nil
@@ -728,6 +759,9 @@ function Peon:goToTree(gridX, gridY, flowField)
     self.targetTreeX = gridX
     self.targetTreeY = gridY
     self.targetMine = nil
+    self.returnToStumpX = nil
+    self.returnToStumpY = nil
+    self.goIdleAtTarget = nil
     self.buildTargetX = nil
     self.buildTargetY = nil
     self.buildCallback = nil
@@ -748,6 +782,9 @@ function Peon:goToBuild(gridX, gridY, buildingType, callback, flowField)
     self.targetMine = nil
     self.targetTreeX = nil
     self.targetTreeY = nil
+    self.returnToStumpX = nil
+    self.returnToStumpY = nil
+    self.goIdleAtTarget = nil
     self.flowField = flowField
     self.lastMoveDirX = nil
     self.lastMoveDirY = nil
@@ -771,71 +808,240 @@ function Peon:getStateText()
     return self.state
 end
 
+-- Building definitions for UI
+local function getBuildingDefs()
+    local Farm = require("farm")
+    local Barracks = require("barracks")
+    local LumberMill = require("lumbermill")
+    local Blacksmith = require("blacksmith")
+    local ScoutTower = require("scouttower")
+    local ArcheryRange = require("archeryrange")
+    local Stable = require("stable")
+    local SiegeWorkshop = require("siegeworkshop")
+    
+    return {
+        -- Page 1: Basic buildings
+        {
+            type = "farm",
+            name = "Farm",
+            costGold = Farm.COST_GOLD,
+            costLumber = Farm.COST_LUMBER,
+            colors = {normal = {0.3, 0.5, 0.35, 1}, hover = {0.4, 0.6, 0.45, 1}, pressed = {0.2, 0.4, 0.25, 1}},
+            canBuild = function() return true end
+        },
+        {
+            type = "barracks",
+            name = "Barracks",
+            costGold = Barracks.COST_GOLD,
+            costLumber = Barracks.COST_LUMBER,
+            colors = {normal = {0.5, 0.35, 0.35, 1}, hover = {0.6, 0.45, 0.45, 1}, pressed = {0.4, 0.25, 0.25, 1}},
+            canBuild = function() return true end
+        },
+        {
+            type = "lumbermill",
+            name = "Lumber Mill",
+            costGold = LumberMill.COST_GOLD,
+            costLumber = LumberMill.COST_LUMBER,
+            colors = {normal = {0.45, 0.35, 0.25, 1}, hover = {0.55, 0.45, 0.35, 1}, pressed = {0.35, 0.25, 0.15, 1}},
+            canBuild = function() return Requirements.canBuild("lumbermill") end
+        },
+        {
+            type = "scouttower",
+            name = "Scout Tower",
+            costGold = ScoutTower.COST_GOLD,
+            costLumber = ScoutTower.COST_LUMBER,
+            colors = {normal = {0.4, 0.4, 0.45, 1}, hover = {0.5, 0.5, 0.55, 1}, pressed = {0.3, 0.3, 0.35, 1}},
+            canBuild = function() return Requirements.canBuild("scouttower") end
+        },
+        -- Page 2: Advanced buildings
+        {
+            type = "blacksmith",
+            name = "Blacksmith",
+            costGold = Blacksmith.COST_GOLD,
+            costLumber = Blacksmith.COST_LUMBER,
+            colors = {normal = {0.4, 0.38, 0.42, 1}, hover = {0.5, 0.48, 0.52, 1}, pressed = {0.3, 0.28, 0.32, 1}},
+            canBuild = function() return Requirements.canBuild("blacksmith") end,
+            requirement = "Barracks"
+        },
+        {
+            type = "archeryrange",
+            name = "Archery Range",
+            costGold = ArcheryRange.COST_GOLD,
+            costLumber = ArcheryRange.COST_LUMBER,
+            colors = {normal = {0.35, 0.45, 0.35, 1}, hover = {0.45, 0.55, 0.45, 1}, pressed = {0.25, 0.35, 0.25, 1}},
+            canBuild = function() return Requirements.canBuild("archeryrange") end,
+            requirement = "Barracks"
+        },
+        {
+            type = "stable",
+            name = "Stable",
+            costGold = Stable.COST_GOLD,
+            costLumber = Stable.COST_LUMBER,
+            colors = {normal = {0.5, 0.4, 0.3, 1}, hover = {0.6, 0.5, 0.4, 1}, pressed = {0.4, 0.3, 0.2, 1}},
+            canBuild = function() return Requirements.canBuild("stable") end,
+            requirement = "Hold"
+        },
+        {
+            type = "siegeworkshop",
+            name = "Siege Workshop",
+            costGold = SiegeWorkshop.COST_GOLD,
+            costLumber = SiegeWorkshop.COST_LUMBER,
+            colors = {normal = {0.45, 0.4, 0.35, 1}, hover = {0.55, 0.5, 0.45, 1}, pressed = {0.35, 0.3, 0.25, 1}},
+            canBuild = function() return Requirements.canBuild("siegeworkshop") end,
+            requirement = "Keep"
+        },
+    }
+end
+
 function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
     if self.selected and self.state ~= Peon.STATE_BUILDING then
         local panelX = screenW - 180
         local buttonY = 70 + 145
+        local buttonHeight = 32
+        local buttonSpacing = 35
+        local maxButtonsPerPage = 4
         
-        local Farm = require("farm")
-        local Barracks = require("barracks")
+        local buildingDefs = getBuildingDefs()
         
-        if not self.buildFarmButton then
-            self.buildFarmButton = Button.new({
-                x = panelX + 10, y = buttonY, width = 150, height = 35,
-                text = "Farm (250g 50l)", font = font,
+        -- Calculate pages
+        local totalBuildings = #buildingDefs
+        local totalPages = math.ceil(totalBuildings / maxButtonsPerPage)
+        
+        -- Clamp page
+        if self.buildMenuPage > totalPages then self.buildMenuPage = totalPages end
+        if self.buildMenuPage < 1 then self.buildMenuPage = 1 end
+        
+        -- Get buildings for current page
+        local startIdx = (self.buildMenuPage - 1) * maxButtonsPerPage + 1
+        local endIdx = math.min(startIdx + maxButtonsPerPage - 1, totalBuildings)
+        
+        -- Create/update buttons
+        self.buildButtons = {}
+        local buttonIdx = 0
+        
+        for i = startIdx, endIdx do
+            local def = buildingDefs[i]
+            local costText = string.format("%s (%dg %dL)", def.name, def.costGold, def.costLumber)
+            
+            local btn = Button.new({
+                x = panelX + 10, 
+                y = buttonY + buttonIdx * buttonSpacing, 
+                width = 150, 
+                height = buttonHeight,
+                text = costText, 
+                font = font,
                 colors = {
-                    normal = {0.3, 0.5, 0.35, 1}, hover = {0.4, 0.6, 0.45, 1},
-                    pressed = {0.2, 0.4, 0.25, 1}, text = {1, 1, 1, 1}, border = {0.2, 0.4, 0.25, 1}
+                    normal = def.colors.normal, 
+                    hover = def.colors.hover,
+                    pressed = def.colors.pressed, 
+                    text = {1, 1, 1, 1}, 
+                    border = def.colors.pressed
                 },
                 onClick = function()
-                    if startBuildCallback then startBuildCallback(self, "farm") end
+                    if startBuildCallback then startBuildCallback(self, def.type) end
                 end
             })
+            
+            local canAfford = resources.gold >= def.costGold and resources.lumber >= def.costLumber
+            local canGiveOrders = self.state == Peon.STATE_IDLE or self.state == Peon.STATE_MOVING
+            local meetsReqs = def.canBuild()
+            
+            btn:setEnabled(canAfford and canGiveOrders and meetsReqs)
+            btn:update(0)
+            
+            table.insert(self.buildButtons, {button = btn, def = def})
+            buttonIdx = buttonIdx + 1
         end
         
-        if not self.buildBarracksButton then
-            self.buildBarracksButton = Button.new({
-                x = panelX + 10, y = buttonY + 40, width = 150, height = 35,
-                text = "Barracks (400g 100l)", font = font,
-                colors = {
-                    normal = {0.5, 0.35, 0.35, 1}, hover = {0.6, 0.45, 0.45, 1},
-                    pressed = {0.4, 0.25, 0.25, 1}, text = {1, 1, 1, 1}, border = {0.4, 0.25, 0.25, 1}
-                },
-                onClick = function()
-                    if startBuildCallback then startBuildCallback(self, "barracks") end
-                end
-            })
+        -- Page navigation buttons
+        if totalPages > 1 then
+            local navY = buttonY + maxButtonsPerPage * buttonSpacing + 5
+            
+            if not self.prevPageButton then
+                self.prevPageButton = Button.new({
+                    x = panelX + 10, y = navY, width = 70, height = 25,
+                    text = "< Prev", font = font,
+                    colors = {normal = {0.35, 0.35, 0.4, 1}, hover = {0.45, 0.45, 0.5, 1}, pressed = {0.25, 0.25, 0.3, 1}, text = {1,1,1,1}, border = {0.25,0.25,0.3,1}},
+                    onClick = function()
+                        self.buildMenuPage = self.buildMenuPage - 1
+                        if self.buildMenuPage < 1 then self.buildMenuPage = totalPages end
+                    end
+                })
+            end
+            
+            if not self.nextPageButton then
+                self.nextPageButton = Button.new({
+                    x = panelX + 90, y = navY, width = 70, height = 25,
+                    text = "Next >", font = font,
+                    colors = {normal = {0.35, 0.35, 0.4, 1}, hover = {0.45, 0.45, 0.5, 1}, pressed = {0.25, 0.25, 0.3, 1}, text = {1,1,1,1}, border = {0.25,0.25,0.3,1}},
+                    onClick = function()
+                        self.buildMenuPage = self.buildMenuPage + 1
+                        if self.buildMenuPage > totalPages then self.buildMenuPage = 1 end
+                    end
+                })
+            end
+            
+            self.prevPageButton:setEnabled(true)
+            self.nextPageButton:setEnabled(true)
+            self.prevPageButton:update(0)
+            self.nextPageButton:update(0)
+        else
+            self.prevPageButton = nil
+            self.nextPageButton = nil
         end
-        
-        local canFarm = resources.gold >= Farm.COST_GOLD and resources.lumber >= Farm.COST_LUMBER
-        local canBarracks = resources.gold >= Barracks.COST_GOLD and resources.lumber >= Barracks.COST_LUMBER
-        local canGiveOrders = self.state == Peon.STATE_IDLE or self.state == Peon.STATE_MOVING
-        
-        self.buildFarmButton:setEnabled(canFarm and canGiveOrders)
-        self.buildBarracksButton:setEnabled(canBarracks and canGiveOrders)
-        self.buildFarmButton:update(0)
-        self.buildBarracksButton:update(0)
     else
-        self.buildFarmButton = nil
-        self.buildBarracksButton = nil
+        self.buildButtons = {}
+        self.prevPageButton = nil
+        self.nextPageButton = nil
     end
 end
 
 function Peon:drawUI()
     if self.selected and self.state ~= Peon.STATE_BUILDING then
-        if self.buildFarmButton then self.buildFarmButton:draw() end
-        if self.buildBarracksButton then self.buildBarracksButton:draw() end
+        for _, btnData in ipairs(self.buildButtons) do
+            btnData.button:draw()
+            
+            -- Show requirement text if can't build
+            if not btnData.def.canBuild() and btnData.def.requirement then
+                local bx = btnData.button.x
+                local by = btnData.button.y
+                love.graphics.setColor(1, 0.5, 0.3, 0.8)
+                love.graphics.setFont(Game.fonts.small)
+                love.graphics.print("Needs " .. btnData.def.requirement, bx + 2, by + 34)
+                love.graphics.setColor(1, 1, 1, 1)
+            end
+        end
+        
+        if self.prevPageButton then self.prevPageButton:draw() end
+        if self.nextPageButton then self.nextPageButton:draw() end
+        
+        -- Page indicator
+        if self.prevPageButton then
+            local buildingDefs = getBuildingDefs()
+            local totalPages = math.ceil(#buildingDefs / 4)
+            local screenW = love.graphics.getWidth()
+            love.graphics.setColor(0.8, 0.8, 0.8, 1)
+            love.graphics.setFont(Game.fonts.small)
+            love.graphics.print(string.format("Page %d/%d", self.buildMenuPage, totalPages), screenW - 120, 70 + 145 + 4 * 35 + 32)
+            love.graphics.setColor(1, 1, 1, 1)
+        end
     end
 end
 
 function Peon:mousepressed(x, y, button)
-    if self.buildFarmButton then self.buildFarmButton:mousepressed(x, y, button) end
-    if self.buildBarracksButton then self.buildBarracksButton:mousepressed(x, y, button) end
+    for _, btnData in ipairs(self.buildButtons) do
+        btnData.button:mousepressed(x, y, button)
+    end
+    if self.prevPageButton then self.prevPageButton:mousepressed(x, y, button) end
+    if self.nextPageButton then self.nextPageButton:mousepressed(x, y, button) end
 end
 
 function Peon:mousereleased(x, y, button)
-    if self.buildFarmButton then self.buildFarmButton:mousereleased(x, y, button) end
-    if self.buildBarracksButton then self.buildBarracksButton:mousereleased(x, y, button) end
+    for _, btnData in ipairs(self.buildButtons) do
+        btnData.button:mousereleased(x, y, button)
+    end
+    if self.prevPageButton then self.prevPageButton:mousereleased(x, y, button) end
+    if self.nextPageButton then self.nextPageButton:mousereleased(x, y, button) end
 end
 
 function Peon:drawOnMinimap(mapX, mapY, scale)
