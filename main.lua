@@ -86,7 +86,7 @@ KNOWN ISSUES & FIXES:
 ================================================================================
 
 BUG FIX: Peons not entering gold mines
-    PROBLEM: Three issues prevented peons from entering mines:
+    PROBLEM: Multiple issues prevented peons from entering mines:
     
     1) In gameplay.lua line ~941, peon:update() was called with
        goldMines[1] hardcoded, so peons would only properly check
@@ -99,15 +99,27 @@ BUG FIX: Peons not entering gold mines
        pushed away from all buildings every frame, including peons
        trying to enter their target mine.
     
+    4) In peon.lua computePath(), pathfinding treated the target mine
+       as an obstacle, routing peons AROUND the mine instead of TO it.
+    
+    5) In peon.lua updateWaypoint(), line-of-sight checks treated
+       the target mine as blocking, preventing waypoint progression.
+    
     FIX: 
     - peon.lua updateMoving(): Use self.targetMine instead of the
-      goldMine parameter for the isTouchingBuilding check (line ~297)
+      goldMine parameter for the isTouchingBuilding check (line ~307)
     
     - peon.lua canMoveTo(): Skip collision check when building is
       self.targetMine so peon can walk into the mine (line ~144)
     
     - gameplay.lua pushUnitOutOfBuildings(): Skip pushing when unit
       has targetMine and building is that target mine (line ~625)
+    
+    - peon.lua computePath(): Filter out self.targetMine from the
+      buildings list before passing to Pathfinding.findPath (line ~173)
+    
+    - peon.lua updateWaypoint(): Filter out self.targetMine from
+      buildings when checking line-of-sight to next waypoint (line ~188)
     
     FILES AFFECTED: peon.lua, gameplay.lua
 
@@ -156,11 +168,17 @@ GLOBAL STATE (Game table):
 
     Game.settings.musicEnabled  - Audio toggle
     Game.settings.soundEnabled  - Audio toggle
+    Game.settings.gameSpeed     - Game speed multiplier (0.5=slow, 1.0=normal, 2.0=fast)
     Game.currentScene           - Active scene module
     Game.scenes                 - Registered scene table
     Game.SceneManager           - Scene switching interface
     Game.fonts                  - Preloaded fonts (small/medium/large/title)
     Game.finalTime              - Victory screen time display
+
+CONTROLS:
+    1 - Slow speed (0.5x)
+    2 - Normal speed (1x)
+    3 - Fast speed (2x)
 
 ================================================================================
 ]]
@@ -174,7 +192,8 @@ GLOBAL STATE (Game table):
 Game = {
     settings = {
         musicEnabled = true,
-        soundEnabled = true
+        soundEnabled = true,
+        gameSpeed = 1.0  -- 0.5 = slow, 1.0 = normal, 2.0 = fast
     },
     currentScene = nil,
     scenes = {}

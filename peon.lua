@@ -171,7 +171,17 @@ end
 
 -- Compute path to target using line-of-sight pathfinding
 function Peon:computePath(targetX, targetY, buildings)
-    return Pathfinding.findPath(self.worldX, self.worldY, targetX, targetY, buildings, self.map, self.radius)
+    -- Filter out target mine so pathfinding goes TO it, not around it
+    local filteredBuildings = buildings
+    if self.targetMine and buildings then
+        filteredBuildings = {}
+        for _, b in ipairs(buildings) do
+            if b ~= self.targetMine then
+                table.insert(filteredBuildings, b)
+            end
+        end
+    end
+    return Pathfinding.findPath(self.worldX, self.worldY, targetX, targetY, filteredBuildings, self.map, self.radius)
 end
 
 -- Advance to next waypoint if we've reached current one AND can see the next one
@@ -180,8 +190,18 @@ function Peon:updateWaypoint(buildings)
         local nextWp = self.currentWaypoint + 1
         if nextWp <= #self.path then
             local nextTarget = self.path[nextWp]
+            -- Filter out target mine for line-of-sight check
+            local filteredBuildings = buildings
+            if self.targetMine and buildings then
+                filteredBuildings = {}
+                for _, b in ipairs(buildings) do
+                    if b ~= self.targetMine then
+                        table.insert(filteredBuildings, b)
+                    end
+                end
+            end
             -- Only advance if we have clear line of sight to next waypoint
-            if Pathfinding.canSee(self.worldX, self.worldY, nextTarget.x, nextTarget.y, buildings, self.map, self.radius) then
+            if Pathfinding.canSee(self.worldX, self.worldY, nextTarget.x, nextTarget.y, filteredBuildings, self.map, self.radius) then
                 self.currentWaypoint = nextWp
             end
         else

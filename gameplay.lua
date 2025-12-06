@@ -225,7 +225,20 @@ local function drawTopBar(screenW)
     
     love.graphics.setFont(Game.fonts.small)
     love.graphics.setColor(0.5, 0.8, 0.5, 1)
-    love.graphics.print("WASD/Arrows: scroll | Drag: box select | Deplete mines to WIN!", 250, 22)
+    love.graphics.print("WASD: scroll | Drag: select | 1/2/3: speed", 250, 22)
+    
+    -- Game speed indicator
+    local speedText = "1x"
+    local speedColor = {0.8, 0.8, 0.8, 1}
+    if Game.settings.gameSpeed == 0.5 then
+        speedText = "0.5x"
+        speedColor = {0.5, 0.7, 1, 1}  -- Blue for slow
+    elseif Game.settings.gameSpeed == 2.0 then
+        speedText = "2x"
+        speedColor = {1, 0.7, 0.5, 1}  -- Orange for fast
+    end
+    love.graphics.setColor(speedColor)
+    love.graphics.print("Speed: " .. speedText, screenW - 200, 22)
     
     love.graphics.setColor(UI.textColor)
     love.graphics.print(string.format("Time: %02d:%02d", math.floor(elapsedTime/60), math.floor(elapsedTime%60)), screenW - 100, 22)
@@ -794,15 +807,18 @@ end
 function Gameplay.update(dt)
     if victory then return end
     
-    elapsedTime = elapsedTime + dt
-    map:update(dt)
+    -- Apply game speed multiplier
+    local gameDt = dt * Game.settings.gameSpeed
+    
+    elapsedTime = elapsedTime + gameDt
+    map:update(dt)  -- Camera stays at real-time for responsiveness
     calculatePopulation()
     updateRequirementsState()
     
     local buildings = getAllBuildings()
     
     -- Town hall
-    local peonReady, upgradeComplete = townHall:update(dt)
+    local peonReady, upgradeComplete = townHall:update(gameDt)
     if peonReady and currentPop < maxPop then
         local spawnX, spawnY = townHall:getSpawnPos()
         local newPeon = Peon.new({worldX = spawnX, worldY = spawnY, map = map})
@@ -813,11 +829,11 @@ function Gameplay.update(dt)
     end
     
     -- Gold mines
-    for _, mine in ipairs(goldMines) do mine:update(dt) end
+    for _, mine in ipairs(goldMines) do mine:update(gameDt) end
     
     -- Farms
     for _, farm in ipairs(farms) do
-        if farm:update(dt) and farm.builderPeon then
+        if farm:update(gameDt) and farm.builderPeon then
             local peon = farm.builderPeon
             peon:finishBuilding(farm)
             pushUnitOutOfBuildings(peon)
@@ -828,7 +844,7 @@ function Gameplay.update(dt)
     
     -- Barracks
     for _, barrack in ipairs(barracks) do
-        local unitType, buildComplete = barrack:update(dt)
+        local unitType, buildComplete = barrack:update(gameDt)
         if buildComplete and barrack.builderPeon then
             local peon = barrack.builderPeon
             peon:finishBuilding(barrack)
@@ -859,7 +875,7 @@ function Gameplay.update(dt)
     
     -- Lumber Mills
     for _, building in ipairs(lumberMills) do
-        if building:update(dt) and building.builderPeon then
+        if building:update(gameDt) and building.builderPeon then
             local peon = building.builderPeon
             peon:finishBuilding(building)
             pushUnitOutOfBuildings(peon)
@@ -869,7 +885,7 @@ function Gameplay.update(dt)
     
     -- Blacksmiths
     for _, building in ipairs(blacksmiths) do
-        if building:update(dt) and building.builderPeon then
+        if building:update(gameDt) and building.builderPeon then
             local peon = building.builderPeon
             peon:finishBuilding(building)
             pushUnitOutOfBuildings(peon)
@@ -879,7 +895,7 @@ function Gameplay.update(dt)
     
     -- Scout Towers
     for _, building in ipairs(scoutTowers) do
-        if building:update(dt) and building.builderPeon then
+        if building:update(gameDt) and building.builderPeon then
             local peon = building.builderPeon
             peon:finishBuilding(building)
             pushUnitOutOfBuildings(peon)
@@ -889,7 +905,7 @@ function Gameplay.update(dt)
     
     -- Archery Ranges
     for _, building in ipairs(archeryRanges) do
-        local archerReady, buildComplete = building:update(dt)
+        local archerReady, buildComplete = building:update(gameDt)
         if buildComplete and building.builderPeon then
             local peon = building.builderPeon
             peon:finishBuilding(building)
@@ -907,7 +923,7 @@ function Gameplay.update(dt)
     
     -- Stables
     for _, building in ipairs(stables) do
-        if building:update(dt) and building.builderPeon then
+        if building:update(gameDt) and building.builderPeon then
             local peon = building.builderPeon
             peon:finishBuilding(building)
             pushUnitOutOfBuildings(peon)
@@ -917,7 +933,7 @@ function Gameplay.update(dt)
     
     -- Siege Workshops
     for _, building in ipairs(siegeWorkshops) do
-        local unitType, buildComplete = building:update(dt)
+        local unitType, buildComplete = building:update(gameDt)
         if buildComplete and building.builderPeon then
             local peon = building.builderPeon
             peon:finishBuilding(building)
@@ -945,37 +961,37 @@ function Gameplay.update(dt)
     
     -- Peons
     for _, peon in ipairs(peons) do
-        peon:update(dt, buildings, townHall, goldMines[1], resources)
+        peon:update(gameDt, buildings, townHall, goldMines[1], resources)
     end
     
     -- Footmen
     for _, footman in ipairs(footmen) do
-        footman:update(dt, buildings)
+        footman:update(gameDt, buildings)
     end
     
     -- Archers
     for _, archer in ipairs(archers) do
-        archer:update(dt, buildings)
+        archer:update(gameDt, buildings)
     end
     
     -- Knights
     for _, knight in ipairs(knights) do
-        knight:update(dt, buildings)
+        knight:update(gameDt, buildings)
     end
     
     -- Flying Scouts
     for _, unit in ipairs(flyingScouts) do
-        unit:update(dt, buildings)
+        unit:update(gameDt, buildings)
     end
     
     -- Ballistas
     for _, unit in ipairs(ballistas) do
-        unit:update(dt, buildings)
+        unit:update(gameDt, buildings)
     end
     
     -- Kamikazes
     for _, unit in ipairs(kamikazes) do
-        unit:update(dt, buildings)
+        unit:update(gameDt, buildings)
     end
     
     -- Separate overlapping units
@@ -1002,7 +1018,7 @@ function Gameplay.update(dt)
     
     -- Update notifications
     for i = #notifications, 1, -1 do
-        notifications[i].timer = notifications[i].timer - dt
+        notifications[i].timer = notifications[i].timer - gameDt
         if notifications[i].timer <= 0 then
             table.remove(notifications, i)
         end
@@ -1088,6 +1104,18 @@ function Gameplay.keypressed(key)
         else
             clearSelection()
         end
+    end
+    
+    -- Game speed controls
+    if key == "1" then
+        Game.settings.gameSpeed = 0.5
+        addNotification("Game Speed: Slow (0.5x)")
+    elseif key == "2" then
+        Game.settings.gameSpeed = 1.0
+        addNotification("Game Speed: Normal (1x)")
+    elseif key == "3" then
+        Game.settings.gameSpeed = 2.0
+        addNotification("Game Speed: Fast (2x)")
     end
 end
 
