@@ -332,11 +332,15 @@ function Barracks:cancelProduction()
             self.productionTimer = 0
             self.producingUnit = nil
         end
-        -- Return cost for refund
+        -- Return cost for refund (gold, lumber)
         if unitType == "knight" then
-            return Barracks.KNIGHT_COST
+            return Barracks.KNIGHT_COST_GOLD, Barracks.KNIGHT_COST_LUMBER
+        elseif unitType == "archer" then
+            return Barracks.ARCHER_COST_GOLD, Barracks.ARCHER_COST_LUMBER
+        elseif unitType == "ballista" then
+            return Barracks.BALLISTA_COST_GOLD, Barracks.BALLISTA_COST_LUMBER
         else
-            return Barracks.FOOTMAN_COST
+            return Barracks.FOOTMAN_COST, 0
         end
     end
     return 0
