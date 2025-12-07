@@ -331,11 +331,11 @@ Game = {
 -- Scene manager
 local SceneManager = {}
 
-function SceneManager.switch(sceneName)
+function SceneManager.switch(sceneName, options)
     if Game.scenes[sceneName] then
         Game.currentScene = Game.scenes[sceneName]
         if Game.currentScene.load then
-            Game.currentScene.load()
+            Game.currentScene.load(options)
         end
     else
         error("Scene not found: " .. sceneName)
