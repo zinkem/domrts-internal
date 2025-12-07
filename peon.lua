@@ -113,6 +113,7 @@ function Peon.new(params)
     -- Reference to resources (set by gameplay for gather-move)
     self.resourcesRef = nil
     self.goldMinesRef = nil
+    self.allUnitsRef = nil  -- Reference to all units (for collision/separation)
     
     -- Notification callback (set by gameplay)
     self.onNotify = nil
@@ -169,6 +170,76 @@ function Peon:isTouchingBuilding(building, contactBuffer)
     local dist = math.sqrt(distX * distX + distY * distY)
     -- Touching means within radius + buffer distance of building edge
     return dist <= self.radius + contactBuffer
+end
+
+-- Check if peon should ignore collisions with other units
+-- Only true when actively mining with gold (harvesting inside mine or returning gold to town hall)
+function Peon:shouldIgnoreUnitCollisions()
+    -- Inside the mine harvesting
+    if self.state == Peon.STATE_HARVESTING and self.targetMine then
+        return true
+    end
+    -- Returning gold to town hall as part of mining job
+    if self.state == Peon.STATE_RETURNING and self.carryingGold > 0 and self.targetMine then
+        return true
+    end
+    return false
+end
+
+-- Get separation force from nearby units (pushes units apart when overlapping)
+-- Same approach as Unit class - standard RTS behavior
+function Peon:getUnitSeparation(allUnits)
+    -- Skip separation when actively mining with gold
+    if self:shouldIgnoreUnitCollisions() then
+        return 0, 0
+    end
+    
+    local sepX, sepY = 0, 0
+    local separationDist = self.radius * 2.5  -- Start separating when within ~2.5 radii
+    
+    if not allUnits then return 0, 0 end
+    
+    for _, other in ipairs(allUnits) do
+        if other ~= self and other.worldX and other.worldY then
+            -- Skip invisible units (inside buildings)
+            if other.visible == false then
+                goto continue
+            end
+            
+            -- Skip other units that are also ignoring collisions (other mining peons with gold)
+            if other.shouldIgnoreUnitCollisions and other:shouldIgnoreUnitCollisions() then
+                goto continue
+            end
+            
+            local dx = self.worldX - other.worldX
+            local dy = self.worldY - other.worldY
+            local dist = math.sqrt(dx * dx + dy * dy)
+            local minDist = self.radius + (other.radius or 14)
+            
+            if dist < separationDist and dist > 0.1 then
+                -- Push away from other unit proportional to how close we are
+                local force = (separationDist - dist) / separationDist
+                sepX = sepX + (dx / dist) * force
+                sepY = sepY + (dy / dist) * force
+            elseif dist < 0.1 then
+                -- Exactly overlapping, push in random direction
+                local angle = math.random() * math.pi * 2
+                sepX = sepX + math.cos(angle)
+                sepY = sepY + math.sin(angle)
+            end
+            
+            ::continue::
+        end
+    end
+    
+    -- Normalize if too strong
+    local len = math.sqrt(sepX * sepX + sepY * sepY)
+    if len > 1 then
+        sepX = sepX / len
+        sepY = sepY / len
+    end
+    
+    return sepX, sepY
 end
 
 function Peon:canMoveTo(newX, newY, buildings)
@@ -257,6 +328,21 @@ end
 -- Try to move at full speed in the given direction
 -- If blocked, find alternative directions that maintain full speed
 function Peon:tryMove(dirX, dirY, moveSpeed, buildings)
+    -- Apply unit separation force (same as Unit class)
+    local sepX, sepY = self:getUnitSeparation(self.allUnitsRef)
+    local sepStrength = 0.3
+    
+    -- Apply separation to direction
+    dirX = dirX + sepX * sepStrength
+    dirY = dirY + sepY * sepStrength
+    
+    -- Re-normalize direction
+    local len = math.sqrt(dirX * dirX + dirY * dirY)
+    if len > 0.1 then
+        dirX = dirX / len
+        dirY = dirY / len
+    end
+    
     local moveX = dirX * moveSpeed
     local moveY = dirY * moveSpeed
     local newX = self.worldX + moveX
@@ -1139,8 +1225,25 @@ function Peon:moveTowardTarget(dt, buildings)
     local dist = math.sqrt(dx * dx + dy * dy)
     
     if dist > 1 then
-        local moveX = (dx / dist) * self.speed * dt
-        local moveY = (dy / dist) * self.speed * dt
+        local dirX = dx / dist
+        local dirY = dy / dist
+        
+        -- Apply unit separation force (same as Unit class)
+        local sepX, sepY = self:getUnitSeparation(self.allUnitsRef)
+        local sepStrength = 0.3
+        
+        dirX = dirX + sepX * sepStrength
+        dirY = dirY + sepY * sepStrength
+        
+        -- Re-normalize direction
+        local len = math.sqrt(dirX * dirX + dirY * dirY)
+        if len > 0.1 then
+            dirX = dirX / len
+            dirY = dirY / len
+        end
+        
+        local moveX = dirX * self.speed * dt
+        local moveY = dirY * self.speed * dt
         
         local newX = self.worldX + moveX
         local newY = self.worldY + moveY

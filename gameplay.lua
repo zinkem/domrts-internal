@@ -1534,6 +1534,22 @@ local function drawBuildingPlacement()
             end
         end
     end
+    
+    -- Townhall cannot be placed within 2 tiles of a gold mine
+    if placementValid and placingBuildingType == "townhall" then
+        local minDistanceFromMine = 2
+        for _, mine in ipairs(goldMines) do
+            -- Calculate distance between building edges
+            local mineSize = mine.gridSize or 3
+            local distX = math.max(0, math.max(mine.gridX - (gridX + buildSize), gridX - (mine.gridX + mineSize)))
+            local distY = math.max(0, math.max(mine.gridY - (gridY + buildSize), gridY - (mine.gridY + mineSize)))
+            local dist = math.max(distX, distY)
+            if dist < minDistanceFromMine then
+                placementValid = false
+                break
+            end
+        end
+    end
 
     placementGridX, placementGridY = gridX, gridY
 
@@ -2240,12 +2256,22 @@ function Gameplay.load(options)
 
     local buildingSize = 3
     local mapSize = options.mapSize or 64
+    
+    -- Minimum distance from map edge (10% of map size, at least 5 tiles)
+    local edgeBuffer = math.max(5, math.floor(mapSize * 0.10))
+    -- Minimum distance between townhall and mine (in tiles)
+    local minTownHallMineDistance = 5
 
     -- === PLAYER BASE (bottom-left area) ===
-    -- Scale starting position based on map size
-    local playerStartX = math.floor(mapSize * 0.15)
-    local playerStartY = math.floor(mapSize * 0.7)
+    -- Scale starting position based on map size, respecting edge buffer
+    local playerStartX = math.max(edgeBuffer, math.floor(mapSize * 0.15))
+    local playerStartY = math.min(mapSize - edgeBuffer - buildingSize, math.floor(mapSize * 0.7))
     local thGridX, thGridY = map:findClearArea(buildingSize, buildingSize, playerStartX, playerStartY, 15)
+    
+    -- Clamp townhall position to respect edge buffer
+    thGridX = math.max(edgeBuffer, math.min(mapSize - edgeBuffer - buildingSize, thGridX))
+    thGridY = math.max(edgeBuffer, math.min(mapSize - edgeBuffer - buildingSize, thGridY))
+    
     townHall = TownHall.new({gridX = thGridX, gridY = thGridY, map = map, team = playerTeam})
 
     -- Clear trees around town hall (5 tile radius for peons and nearby buildings)
@@ -2254,7 +2280,21 @@ function Gameplay.load(options)
                   buildingSize + clearRadius * 2, buildingSize + clearRadius * 2)
 
     -- Gold mine near player (to the right of town hall)
-    local m1X, m1Y = map:findClearArea(buildingSize, buildingSize, thGridX + 8, thGridY + 5, 10)
+    -- Ensure mine is at least minTownHallMineDistance tiles away from townhall
+    local mineSearchX = thGridX + minTownHallMineDistance + buildingSize
+    local mineSearchY = thGridY + 2
+    local m1X, m1Y = map:findClearArea(buildingSize, buildingSize, mineSearchX, mineSearchY, 10)
+    
+    -- Verify mine is far enough from townhall, adjust if needed
+    if m1X then
+        local distX = math.abs(m1X - thGridX)
+        local distY = math.abs(m1Y - thGridY)
+        -- If too close, search further away
+        if distX < minTownHallMineDistance and distY < minTownHallMineDistance then
+            m1X, m1Y = map:findClearArea(buildingSize, buildingSize, thGridX + minTownHallMineDistance + 5, thGridY, 15)
+        end
+    end
+    
     table.insert(goldMines, GoldMine.new({gridX = m1X, gridY = m1Y, gold = 50000, map = map}))
 
     -- Player starting farms (2 already built) - place on opposite side from mine (left of town hall)
@@ -2319,10 +2359,15 @@ function Gameplay.load(options)
     end
 
     -- === ENEMY BASE (top-right area) ===
-    -- Scale enemy position based on map size
-    local enemyStartX = math.floor(mapSize * 0.8)
-    local enemyStartY = math.floor(mapSize * 0.2)
+    -- Scale enemy position based on map size, respecting edge buffer
+    local enemyStartX = math.min(mapSize - edgeBuffer - buildingSize, math.floor(mapSize * 0.8))
+    local enemyStartY = math.max(edgeBuffer, math.floor(mapSize * 0.2))
     local enemyThGridX, enemyThGridY = map:findClearArea(buildingSize, buildingSize, enemyStartX, enemyStartY, 15)
+    
+    -- Clamp enemy townhall position to respect edge buffer
+    enemyThGridX = math.max(edgeBuffer, math.min(mapSize - edgeBuffer - buildingSize, enemyThGridX))
+    enemyThGridY = math.max(edgeBuffer, math.min(mapSize - edgeBuffer - buildingSize, enemyThGridY))
+    
     enemyTownHall = TownHall.new({gridX = enemyThGridX, gridY = enemyThGridY, map = map, team = enemyTeam})
     table.insert(townHalls, enemyTownHall)  -- Store in additional townhalls list
 
@@ -2331,7 +2376,21 @@ function Gameplay.load(options)
                   buildingSize + clearRadius * 2, buildingSize + clearRadius * 2)
 
     -- Gold mine near enemy
-    local m2X, m2Y = map:findClearArea(buildingSize, buildingSize, enemyThGridX - 8, enemyThGridY + 5, 10)
+    -- Ensure mine is at least minTownHallMineDistance tiles away from townhall
+    local enemyMineSearchX = enemyThGridX - minTownHallMineDistance - buildingSize - 2
+    local enemyMineSearchY = enemyThGridY + 2
+    local m2X, m2Y = map:findClearArea(buildingSize, buildingSize, enemyMineSearchX, enemyMineSearchY, 10)
+    
+    -- Verify mine is far enough from townhall, adjust if needed
+    if m2X then
+        local distX = math.abs(m2X - enemyThGridX)
+        local distY = math.abs(m2Y - enemyThGridY)
+        -- If too close, search further away
+        if distX < minTownHallMineDistance and distY < minTownHallMineDistance then
+            m2X, m2Y = map:findClearArea(buildingSize, buildingSize, enemyThGridX - minTownHallMineDistance - 5, enemyThGridY, 15)
+        end
+    end
+    
     table.insert(goldMines, GoldMine.new({gridX = m2X, gridY = m2Y, gold = 50000, map = map}))
 
     -- Center gold mine (contested) - scale to map center
