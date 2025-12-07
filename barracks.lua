@@ -171,9 +171,14 @@ Barracks.COST_LUMBER = 100
 Barracks.BUILD_TIME = 45.0
 
 -- Unit production costs
-Barracks.FOOTMAN_COST_GOLD = 135
+Barracks.FOOTMAN_COST = 135
 Barracks.FOOTMAN_COST_LUMBER = 0
 Barracks.FOOTMAN_TIME = 6.0
+
+-- Knight costs
+Barracks.KNIGHT_COST_GOLD = 250
+Barracks.KNIGHT_COST_LUMBER = 100
+Barracks.KNIGHT_TIME = 10.0
 
 -- Static counter for unique IDs
 local barracksIdCounter = 0
@@ -665,7 +670,7 @@ function Barracks:cancelProduction()
             self.isProducing = false
             self.productionTimer = 0
         end
-        return Barracks.FOOTMAN_COST_GOLD
+        return Barracks.FOOTMAN_COST
     end
     return 0
 end
