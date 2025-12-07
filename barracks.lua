@@ -166,8 +166,8 @@ Barracks.__index = Barracks
 Barracks.GRID_SIZE = 3
 
 -- Build costs
-Barracks.COST_GOLD = 700
-Barracks.COST_LUMBER = 450
+Barracks.COST_GOLD = 600
+Barracks.COST_LUMBER = 100
 Barracks.BUILD_TIME = 45.0
 
 -- Unit production costs
@@ -327,10 +327,10 @@ function Barracks:draw()
         initPaletteRenderer()
         if paletteRenderer then
             paletteRenderer:beginCapture()
-            -- Offset to position 96px building in 128px canvas (extra space at top)
-            self:drawBarracksIso(16, 32, size)
+            -- Offset to position 96px building in 128px canvas (raised 10%)
+            self:drawBarracksIso(16, 19, size)
             paletteRenderer:endCapture()
-            paletteRenderer:draw(x - 16, y - 32, 1)
+            paletteRenderer:draw(x - 16, y - 19, 1)
         end
     else
         self:drawBarracksIso(x, y, size)
