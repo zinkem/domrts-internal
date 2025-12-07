@@ -281,8 +281,9 @@ function Barracks:update(dt)
     if self.isProducing then
         self.productionTimer = self.productionTimer + dt
         if self.productionTimer >= self.productionTime then
+            local completedUnitType = nil
             if #self.productionQueue > 0 then
-                table.remove(self.productionQueue, 1)
+                completedUnitType = table.remove(self.productionQueue, 1)
             end
             
             if #self.productionQueue > 0 then
@@ -291,10 +292,10 @@ function Barracks:update(dt)
                 self.isProducing = false
                 self.productionTimer = 0
             end
-            return true, false  -- unit ready
+            return completedUnitType, false  -- Return the unit type that was produced
         end
     end
-    return false, false
+    return nil, false
 end
 
 function Barracks:draw()
