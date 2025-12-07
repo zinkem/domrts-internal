@@ -1,16 +1,106 @@
 --[[
     Gold Mine
     Resource node that peons harvest gold from
-    Size: 3x3 tiles, grid-aligned, square collision
+    Size: 3x3 tiles, grid-aligned
+    Style: Isometric rocky mountain with cave entrance and gold veins
 ]]
+
+-- Palette shader for retro pixel art effect
+local PaletteShader
+pcall(function() PaletteShader = require("palette_shader") end)
+
+-- Static palette renderer
+local paletteRenderer = nil
+local usePaletteShader = true
+
+--============================================================================
+-- ISOMETRIC RENDERING SYSTEM
+--============================================================================
+
+local function isoProject(x, y, z, originX, originY)
+    local screenX = originX + (x - y) * 0.5
+    local screenY = originY + (x + y) * 0.25 - z * 0.5
+    return screenX, screenY
+end
+
+local function isoQuad(p1, p2, p3, p4, originX, originY, color)
+    local sx1, sy1 = isoProject(p1[1], p1[2], p1[3], originX, originY)
+    local sx2, sy2 = isoProject(p2[1], p2[2], p2[3], originX, originY)
+    local sx3, sy3 = isoProject(p3[1], p3[2], p3[3], originX, originY)
+    local sx4, sy4 = isoProject(p4[1], p4[2], p4[3], originX, originY)
+    
+    love.graphics.setColor(color[1], color[2], color[3], color[4] or 1)
+    love.graphics.polygon("fill", sx1, sy1, sx2, sy2, sx3, sy3, sx4, sy4)
+end
+
+local function isoBox(x, y, z, w, d, h, originX, originY, topColor, leftColor, rightColor)
+    -- Top face
+    isoQuad(
+        {x, y, z + h},
+        {x + w, y, z + h},
+        {x + w, y + d, z + h},
+        {x, y + d, z + h},
+        originX, originY, topColor
+    )
+    
+    -- Left face
+    isoQuad(
+        {x, y + d, z},
+        {x, y + d, z + h},
+        {x + w, y + d, z + h},
+        {x + w, y + d, z},
+        originX, originY, leftColor
+    )
+    
+    -- Right face
+    isoQuad(
+        {x + w, y, z},
+        {x + w, y, z + h},
+        {x + w, y + d, z + h},
+        {x + w, y + d, z},
+        originX, originY, rightColor
+    )
+end
+
+-- Initialize palette renderer
+local function initPaletteRenderer()
+    local canvasSize = 128  -- 3x3 building
+    
+    if paletteRenderer then
+        local canvas = paletteRenderer:getCanvas()
+        if canvas then
+            local w, h = canvas:getDimensions()
+            if w ~= canvasSize or h ~= canvasSize then
+                paletteRenderer = nil
+            end
+        end
+    end
+    
+    if paletteRenderer or not PaletteShader then return end
+    
+    paletteRenderer = PaletteShader.new({
+        width = canvasSize,
+        height = canvasSize,
+        palette = PaletteShader.PALETTES.FANTASY,
+        dithering = false,
+        ditherStrength = 0
+    })
+end
 
 local GoldMine = {}
 GoldMine.__index = GoldMine
 
 GoldMine.GRID_SIZE = 3
 
+-- Static counter
+local goldMineIdCounter = 0
+
 function GoldMine.new(params)
     local self = setmetatable({}, GoldMine)
+    
+    goldMineIdCounter = goldMineIdCounter + 1
+    self.uniqueId = goldMineIdCounter
+    self.animTimer = 0
     
     self.gridX = params.gridX or 1
     self.gridY = params.gridY or 1
@@ -18,7 +108,7 @@ function GoldMine.new(params)
     self.map = params.map
     self.pixelSize = self.gridSize * 32
     
-    self.goldReserves = params.gold or 12500  -- About 1,250 harvests at 10 gold each
+    self.goldReserves = params.gold or 12500
     self.maxGold = self.goldReserves
     self.selected = false
     self.depleted = false
@@ -58,6 +148,8 @@ function GoldMine:getWorldBounds()
 end
 
 function GoldMine:update(dt)
+    self.animTimer = (self.animTimer or 0) + dt
+    
     if self.goldReserves <= 0 then
         self.depleted = true
     end
@@ -67,101 +159,32 @@ function GoldMine:draw()
     local x, y = self:getScreenPos()
     local size = self.pixelSize
     
-    -- Shadow
-    love.graphics.setColor(0, 0, 0, 0.3)
-    love.graphics.ellipse("fill", x + size/2, y + size + 3, size/2 - 5, 6)
-    
-    -- Rocky mountain/hill base
-    if self.depleted then
-        love.graphics.setColor(0.35, 0.33, 0.3, 1)
+    -- Use palette shader with 2x scaling
+    if usePaletteShader and PaletteShader then
+        initPaletteRenderer()
+        if paletteRenderer then
+            paletteRenderer:beginCapture()
+            self:drawGoldMineIso(16, 24, 96)
+            paletteRenderer:endCapture()
+            
+            local drawScale = 2
+            local canvasSize = 128
+            local scaledSize = canvasSize * drawScale
+            local offsetX = x + (size - scaledSize) / 2
+            local offsetY = y + size - scaledSize
+            paletteRenderer:draw(offsetX, offsetY, drawScale)
+        end
     else
-        love.graphics.setColor(0.45, 0.4, 0.32, 1)
-    end
-    
-    -- Main rocky formation
-    love.graphics.polygon("fill",
-        x + 5, y + size,
-        x, y + size - 20,
-        x + 10, y + 15,
-        x + 25, y + 5,
-        x + size/2, y,
-        x + size - 25, y + 5,
-        x + size - 10, y + 15,
-        x + size, y + size - 20,
-        x + size - 5, y + size
-    )
-    
-    -- Rock texture/layers
-    love.graphics.setColor(0.4, 0.36, 0.28, 1)
-    love.graphics.polygon("fill", x + 15, y + 20, x + 35, y + 12, x + 50, y + 18, x + 40, y + 30, x + 20, y + 28)
-    love.graphics.polygon("fill", x + size - 45, y + 25, x + size - 25, y + 15, x + size - 10, y + 25, x + size - 20, y + 35)
-    love.graphics.polygon("fill", x + 10, y + 50, x + 30, y + 45, x + 25, y + 60, x + 8, y + 58)
-    love.graphics.polygon("fill", x + size - 35, y + 55, x + size - 15, y + 48, x + size - 12, y + 62, x + size - 30, y + 65)
-    
-    -- Gold veins (if not depleted)
-    if not self.depleted then
-        love.graphics.setColor(0.9, 0.75, 0.15, 1)
-        -- Gold vein streaks
-        love.graphics.setLineWidth(3)
-        love.graphics.line(x + 18, y + 22, x + 28, y + 18)
-        love.graphics.line(x + 22, y + 26, x + 30, y + 28)
-        love.graphics.line(x + size - 30, y + 20, x + size - 18, y + 25)
-        love.graphics.line(x + 12, y + 55, x + 22, y + 52)
-        love.graphics.line(x + size - 28, y + 58, x + size - 18, y + 55)
-        
-        -- Gold nugget highlights
-        love.graphics.setColor(1, 0.85, 0.2, 1)
-        love.graphics.circle("fill", x + 25, y + 20, 3)
-        love.graphics.circle("fill", x + size - 22, y + 22, 2)
-        love.graphics.circle("fill", x + 18, y + 53, 2)
-        love.graphics.circle("fill", x + size - 22, y + 56, 3)
-    end
-    
-    -- Mine entrance (dark cave opening)
-    love.graphics.setColor(0.08, 0.06, 0.04, 1)
-    love.graphics.rectangle("fill", x + size/2 - 20, y + size/2, 40, size/2)
-    love.graphics.arc("fill", x + size/2, y + size/2, 20, math.pi, 2 * math.pi)
-    
-    -- Wooden support beams
-    love.graphics.setColor(0.5, 0.35, 0.2, 1)
-    -- Left beam
-    love.graphics.polygon("fill", x + size/2 - 22, y + size/2 - 5, x + size/2 - 18, y + size/2 - 5, 
-                                   x + size/2 - 18, y + size, x + size/2 - 24, y + size)
-    -- Right beam
-    love.graphics.polygon("fill", x + size/2 + 18, y + size/2 - 5, x + size/2 + 22, y + size/2 - 5,
-                                   x + size/2 + 24, y + size, x + size/2 + 18, y + size)
-    -- Top beam
-    love.graphics.rectangle("fill", x + size/2 - 24, y + size/2 - 10, 48, 8, 2)
-    
-    -- Beam details
-    love.graphics.setColor(0.4, 0.28, 0.15, 1)
-    love.graphics.line(x + size/2 - 20, y + size/2 + 10, x + size/2 - 20, y + size - 5)
-    love.graphics.line(x + size/2 + 20, y + size/2 + 10, x + size/2 + 20, y + size - 5)
-    
-    -- Mine cart track rails
-    love.graphics.setColor(0.4, 0.38, 0.35, 1)
-    love.graphics.rectangle("fill", x + size/2 - 15, y + size - 8, 30, 3)
-    love.graphics.setColor(0.5, 0.45, 0.4, 1)
-    love.graphics.rectangle("fill", x + size/2 - 12, y + size - 6, 4, 6)
-    love.graphics.rectangle("fill", x + size/2 + 8, y + size - 6, 4, 6)
-    
-    -- Lantern/torch by entrance
-    if not self.depleted then
-        love.graphics.setColor(0.5, 0.35, 0.2, 1)
-        love.graphics.rectangle("fill", x + size/2 - 28, y + size/2 + 5, 3, 15)
-        love.graphics.setColor(1, 0.7, 0.2, 0.9)
-        love.graphics.circle("fill", x + size/2 - 27, y + size/2 + 3, 5)
-        love.graphics.setColor(1, 0.85, 0.4, 0.4)
-        love.graphics.circle("fill", x + size/2 - 27, y + size/2 + 3, 8)
-    end
-    
-    -- Pick axe leaning against entrance (if not depleted)
-    if not self.depleted then
-        love.graphics.setColor(0.5, 0.35, 0.2, 1)
-        love.graphics.rectangle("fill", x + size/2 + 25, y + size/2 + 15, 3, 25, 1)
-        love.graphics.setColor(0.5, 0.5, 0.55, 1)
-        love.graphics.polygon("fill", x + size/2 + 22, y + size/2 + 12, x + size/2 + 34, y + size/2 + 8,
-                                       x + size/2 + 30, y + size/2 + 18)
+        love.graphics.push()
+        local drawScale = 2
+        local canvasSize = 128
+        local scaledSize = canvasSize * drawScale
+        local offsetX = x + (size - scaledSize) / 2
+        local offsetY = y + size - scaledSize
+        love.graphics.translate(offsetX, offsetY)
+        love.graphics.scale(drawScale, drawScale)
+        self:drawGoldMineIso(16, 24, 96)
+        love.graphics.pop()
     end
     
     -- Selection
@@ -170,7 +193,7 @@ function GoldMine:draw()
         love.graphics.setLineWidth(3)
         love.graphics.rectangle("line", x - 2, y - 2, size + 4, size + 4, 4)
         
-        -- Gold reserves display (only when selected)
+        -- Gold reserves display
         love.graphics.setColor(0, 0, 0, 0.6)
         local goldText = tostring(self.goldReserves) .. " gold"
         local font = love.graphics.getFont()
@@ -181,6 +204,203 @@ function GoldMine:draw()
     end
     
     love.graphics.setColor(1, 1, 1, 1)
+end
+
+function GoldMine:drawGoldMineIso(x, y, size)
+    local scale = 1
+    local originX = x + size/2
+    local originY = y + size - 10
+    
+    -- Colors (duller if depleted)
+    local rockTop = self.depleted and {0.40, 0.38, 0.35} or {0.50, 0.46, 0.40}
+    local rockLeft = self.depleted and {0.32, 0.30, 0.28} or {0.38, 0.35, 0.30}
+    local rockRight = self.depleted and {0.36, 0.34, 0.32} or {0.44, 0.40, 0.35}
+    local rockDark = {0.25, 0.23, 0.20}
+    local goldColor = {0.95, 0.80, 0.20}
+    local goldBright = {1.0, 0.90, 0.40}
+    local woodColor = {0.50, 0.38, 0.25}
+    local woodDark = {0.38, 0.28, 0.18}
+    local caveColor = {0.08, 0.06, 0.04}
+    
+    -- === ROCKY MOUNTAIN BASE ===
+    -- Back peak (tallest)
+    isoBox(-10*scale, -22*scale, 0, 28*scale, 22*scale, 42*scale, originX, originY,
+           rockTop, rockLeft, rockRight)
+    
+    -- Left outcrop
+    isoBox(-24*scale, -8*scale, 0, 20*scale, 18*scale, 28*scale, originX, originY,
+           rockTop, rockLeft, rockRight)
+    
+    -- Right outcrop
+    isoBox(10*scale, -12*scale, 0, 18*scale, 20*scale, 32*scale, originX, originY,
+           rockTop, rockLeft, rockRight)
+    
+    -- Front lower rocks
+    isoBox(-16*scale, 6*scale, 0, 34*scale, 16*scale, 18*scale, originX, originY,
+           rockTop, rockLeft, rockRight)
+    
+    -- Additional rock detail left
+    isoBox(-20*scale, -2*scale, 0, 14*scale, 10*scale, 16*scale, originX, originY,
+           {rockTop[1]*0.95, rockTop[2]*0.95, rockTop[3]*0.95}, rockLeft, rockRight)
+    
+    -- Additional rock detail right
+    isoBox(14*scale, 4*scale, 0, 10*scale, 14*scale, 14*scale, originX, originY,
+           {rockTop[1]*0.92, rockTop[2]*0.92, rockTop[3]*0.92}, rockLeft, rockRight)
+    
+    -- Rock cracks/texture
+    love.graphics.setColor(rockDark[1], rockDark[2], rockDark[3], 0.5)
+    love.graphics.setLineWidth(1)
+    
+    local c1x1, c1y1 = isoProject(-6*scale, 22*scale, 6*scale, originX, originY)
+    local c1x2, c1y2 = isoProject(4*scale, 22*scale, 12*scale, originX, originY)
+    love.graphics.line(c1x1, c1y1, c1x2, c1y2)
+    
+    local c2x1, c2y1 = isoProject(8*scale, 22*scale, 4*scale, originX, originY)
+    local c2x2, c2y2 = isoProject(14*scale, 22*scale, 10*scale, originX, originY)
+    love.graphics.line(c2x1, c2y1, c2x2, c2y2)
+    
+    -- === GOLD VEINS (if not depleted) ===
+    if not self.depleted then
+        local time = self.animTimer or 0
+        local shimmer = 0.85 + math.sin(time * 3) * 0.15
+        
+        love.graphics.setColor(goldColor[1] * shimmer, goldColor[2] * shimmer, goldColor[3], 1)
+        love.graphics.setLineWidth(2)
+        
+        -- Vein 1 on front
+        local v1x1, v1y1 = isoProject(-10*scale, 22*scale, 6*scale, originX, originY)
+        local v1x2, v1y2 = isoProject(0*scale, 22*scale, 10*scale, originX, originY)
+        love.graphics.line(v1x1, v1y1, v1x2, v1y2)
+        
+        -- Vein 2 on front
+        local v2x1, v2y1 = isoProject(6*scale, 22*scale, 5*scale, originX, originY)
+        local v2x2, v2y2 = isoProject(14*scale, 22*scale, 9*scale, originX, originY)
+        love.graphics.line(v2x1, v2y1, v2x2, v2y2)
+        
+        -- Vein on right face
+        local v3x1, v3y1 = isoProject(18*scale, 8*scale, 14*scale, originX, originY)
+        local v3x2, v3y2 = isoProject(18*scale, 16*scale, 18*scale, originX, originY)
+        love.graphics.line(v3x1, v3y1, v3x2, v3y2)
+        
+        love.graphics.setLineWidth(1)
+        
+        -- Gold nugget highlights
+        love.graphics.setColor(goldBright[1], goldBright[2], goldBright[3], shimmer)
+        local n1x, n1y = isoProject(-4*scale, 22*scale, 8*scale, originX, originY)
+        love.graphics.circle("fill", n1x, n1y, 2.5)
+        
+        local n2x, n2y = isoProject(10*scale, 22*scale, 7*scale, originX, originY)
+        love.graphics.circle("fill", n2x, n2y, 2)
+        
+        local n3x, n3y = isoProject(18*scale, 12*scale, 16*scale, originX, originY)
+        love.graphics.circle("fill", n3x, n3y, 2)
+        
+        -- Sparkles
+        love.graphics.setColor(1, 1, 0.8, 0.6 + math.sin(time * 5) * 0.3)
+        local sp1x, sp1y = isoProject(-6*scale, 22*scale, 9*scale, originX, originY)
+        love.graphics.circle("fill", sp1x, sp1y, 1)
+        
+        local sp2x, sp2y = isoProject(12*scale, 22*scale, 8*scale, originX, originY)
+        love.graphics.circle("fill", sp2x, sp2y, 1)
+    end
+    
+    -- === CAVE ENTRANCE ===
+    local caveX, caveY = -10*scale, 22*scale
+    local caveW, caveH = 18*scale, 16*scale
+    
+    -- Cave opening (dark)
+    isoQuad(
+        {caveX, caveY, 0},
+        {caveX + caveW, caveY, 0},
+        {caveX + caveW, caveY, caveH},
+        {caveX, caveY, caveH},
+        originX, originY, caveColor
+    )
+    
+    -- Cave arch
+    local archCX, archCY = isoProject(caveX + caveW/2, caveY, caveH, originX, originY)
+    love.graphics.setColor(caveColor[1], caveColor[2], caveColor[3], 1)
+    love.graphics.arc("fill", archCX, archCY, 7, math.pi, 2 * math.pi)
+    
+    -- === WOODEN SUPPORT BEAMS ===
+    -- Left beam
+    isoBox(caveX - 2*scale, caveY - 1, 0, 3*scale, 2*scale, caveH + 2*scale, originX, originY,
+           woodColor, woodDark, woodColor)
+    
+    -- Right beam
+    isoBox(caveX + caveW - 1*scale, caveY - 1, 0, 3*scale, 2*scale, caveH + 2*scale, originX, originY,
+           woodColor, woodDark, woodColor)
+    
+    -- Top beam
+    isoBox(caveX - 3*scale, caveY - 1, caveH, caveW + 6*scale, 3*scale, 3*scale, originX, originY,
+           woodColor, woodDark, woodColor)
+    
+    -- === MINE CART TRACKS ===
+    love.graphics.setColor(0.45, 0.42, 0.40, 1)
+    local t1x1, t1y1 = isoProject(caveX + 3*scale, caveY + 1, 0.5, originX, originY)
+    local t1x2, t1y2 = isoProject(caveX + 3*scale, caveY + 10*scale, 0.5, originX, originY)
+    love.graphics.setLineWidth(2)
+    love.graphics.line(t1x1, t1y1, t1x2, t1y2)
+    
+    local t2x1, t2y1 = isoProject(caveX + caveW - 3*scale, caveY + 1, 0.5, originX, originY)
+    local t2x2, t2y2 = isoProject(caveX + caveW - 3*scale, caveY + 10*scale, 0.5, originX, originY)
+    love.graphics.line(t2x1, t2y1, t2x2, t2y2)
+    love.graphics.setLineWidth(1)
+    
+    -- Track ties
+    love.graphics.setColor(woodDark[1], woodDark[2], woodDark[3], 1)
+    for i = 0, 2 do
+        local tieY = caveY + 2*scale + i * 3.5*scale
+        local tx1, ty1 = isoProject(caveX + 2*scale, tieY, 0, originX, originY)
+        local tx2, ty2 = isoProject(caveX + caveW - 2*scale, tieY, 0, originX, originY)
+        love.graphics.setLineWidth(2)
+        love.graphics.line(tx1, ty1, tx2, ty2)
+    end
+    love.graphics.setLineWidth(1)
+    
+    -- === LANTERN (if not depleted) ===
+    if not self.depleted then
+        local time = self.animTimer or 0
+        local flicker = 0.8 + math.sin(time * 10) * 0.2
+        
+        -- Lantern hook
+        love.graphics.setColor(woodDark[1], woodDark[2], woodDark[3], 1)
+        local lhx, lhy = isoProject(caveX - 5*scale, caveY, caveH - 2*scale, originX, originY)
+        love.graphics.rectangle("fill", lhx - 1, lhy, 2, 7)
+        
+        -- Lantern glow
+        love.graphics.setColor(1, 0.7, 0.2, 0.3 * flicker)
+        love.graphics.circle("fill", lhx, lhy + 9, 7)
+        
+        -- Lantern body
+        love.graphics.setColor(1, 0.75, 0.25, flicker)
+        love.graphics.circle("fill", lhx, lhy + 9, 3.5)
+        
+        -- Lantern core
+        love.graphics.setColor(1, 0.9, 0.5, 1)
+        love.graphics.circle("fill", lhx, lhy + 9, 1.5)
+    end
+    
+    -- === PICKAXE ===
+    if not self.depleted then
+        local pax, pay = isoProject(20*scale, 18*scale, 0, originX, originY)
+        
+        -- Handle
+        love.graphics.setColor(woodColor[1], woodColor[2], woodColor[3], 1)
+        love.graphics.push()
+        love.graphics.translate(pax, pay)
+        love.graphics.rotate(-0.5)
+        love.graphics.rectangle("fill", -1, -16, 2.5, 18)
+        love.graphics.pop()
+        
+        -- Head
+        love.graphics.setColor(0.50, 0.50, 0.55, 1)
+        love.graphics.push()
+        love.graphics.translate(pax, pay - 14)
+        love.graphics.rotate(-0.5)
+        love.graphics.polygon("fill", -7, 0, 0, -3, 7, 2, 0, 3)
+        love.graphics.pop()
+    end
 end
 
 function GoldMine:containsPoint(screenX, screenY)
@@ -195,7 +415,6 @@ function GoldMine:extractGold(amount)
     self.goldReserves = self.goldReserves - extracted
     if self.goldReserves <= 0 then
         self.depleted = true
-        -- Notify callback if set (used by gameplay to update navGrid)
         if self.onDepleted then
             self.onDepleted(self)
         end
@@ -213,6 +432,15 @@ function GoldMine:drawOnMinimap(mapX, mapY, scale)
     local x = mapX + (self.gridX - 1) * scale
     local y = mapY + (self.gridY - 1) * scale
     love.graphics.rectangle("fill", x, y, self.gridSize * scale, self.gridSize * scale)
+end
+
+-- Static functions
+GoldMine.setPaletteShaderEnabled = function(enabled)
+    usePaletteShader = enabled
+end
+
+GoldMine.isPaletteShaderEnabled = function()
+    return usePaletteShader
 end
 
 return GoldMine
