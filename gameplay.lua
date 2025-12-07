@@ -1542,14 +1542,31 @@ local function drawBuildingPlacement()
     
     -- Townhall cannot be placed within 2 tiles of a gold mine
     if placementValid and placingBuildingType == "townhall" then
-        local minDistanceFromMine = 2
+        local minGapFromMine = 2
         for _, mine in ipairs(goldMines) do
-            -- Calculate distance between building edges
+            -- Calculate edge-to-edge gap between buildings
             local mineSize = mine.gridSize or 3
-            local distX = math.max(0, math.max(mine.gridX - (gridX + buildSize), gridX - (mine.gridX + mineSize)))
-            local distY = math.max(0, math.max(mine.gridY - (gridY + buildSize), gridY - (mine.gridY + mineSize)))
-            local dist = math.max(distX, distY)
-            if dist < minDistanceFromMine then
+            local gapX = math.max(mine.gridX - (gridX + buildSize), gridX - (mine.gridX + mineSize))
+            local gapY = math.max(mine.gridY - (gridY + buildSize), gridY - (mine.gridY + mineSize))
+            
+            -- If either gap is negative, buildings overlap in that axis
+            -- We need to check the gap in the non-overlapping axis
+            local effectiveGap
+            if gapX < 0 and gapY < 0 then
+                -- Buildings overlap in both axes (on top of each other)
+                effectiveGap = -1
+            elseif gapX < 0 then
+                -- Overlap in X, so Y gap is what matters
+                effectiveGap = gapY
+            elseif gapY < 0 then
+                -- Overlap in Y, so X gap is what matters
+                effectiveGap = gapX
+            else
+                -- No overlap, use the smaller gap (closest edge)
+                effectiveGap = math.min(gapX, gapY)
+            end
+            
+            if effectiveGap < minGapFromMine then
                 placementValid = false
                 break
             end
@@ -2264,8 +2281,25 @@ function Gameplay.load(options)
     
     -- Minimum distance from map edge (10% of map size, at least 5 tiles)
     local edgeBuffer = math.max(5, math.floor(mapSize * 0.10))
-    -- Minimum distance between townhall and mine (in tiles)
-    local minTownHallMineDistance = 5
+    -- Minimum gap between townhall and mine edges (in tiles)
+    local minTownHallMineGap = 3
+    
+    -- Helper to calculate edge-to-edge gap between two buildings
+    local function getEdgeGap(x1, y1, size1, x2, y2, size2)
+        local gapX = math.max(x2 - (x1 + size1), x1 - (x2 + size2))
+        local gapY = math.max(y2 - (y1 + size1), y1 - (y2 + size2))
+        -- If buildings overlap in one axis, gap in that axis is negative
+        -- Return the minimum gap (most constrained direction)
+        if gapX < 0 and gapY < 0 then
+            return math.max(gapX, gapY)  -- Both overlapping, return least negative
+        elseif gapX < 0 then
+            return gapY  -- Overlapping in X, so Y gap matters
+        elseif gapY < 0 then
+            return gapX  -- Overlapping in Y, so X gap matters
+        else
+            return math.min(gapX, gapY)  -- Neither overlapping, return smallest gap
+        end
+    end
 
     -- === PLAYER BASE (bottom-left area) ===
     -- Scale starting position based on map size, respecting edge buffer
@@ -2285,19 +2319,23 @@ function Gameplay.load(options)
                   buildingSize + clearRadius * 2, buildingSize + clearRadius * 2)
 
     -- Gold mine near player (to the right of town hall)
-    -- Ensure mine is at least minTownHallMineDistance tiles away from townhall
-    local mineSearchX = thGridX + minTownHallMineDistance + buildingSize
-    local mineSearchY = thGridY + 2
-    local m1X, m1Y = map:findClearArea(buildingSize, buildingSize, mineSearchX, mineSearchY, 10)
+    -- Place mine far enough away that even with search radius it can't get too close
+    local mineOffsetX = buildingSize + minTownHallMineGap + 4  -- Extra buffer for search
+    local mineSearchRadius = 3  -- Small radius so it can't come back too close
+    local mineSearchX = thGridX + mineOffsetX
+    local mineSearchY = thGridY
+    local m1X, m1Y = map:findClearArea(buildingSize, buildingSize, mineSearchX, mineSearchY, mineSearchRadius)
     
-    -- Verify mine is far enough from townhall, adjust if needed
-    if m1X then
-        local distX = math.abs(m1X - thGridX)
-        local distY = math.abs(m1Y - thGridY)
-        -- If too close, search further away
-        if distX < minTownHallMineDistance and distY < minTownHallMineDistance then
-            m1X, m1Y = map:findClearArea(buildingSize, buildingSize, thGridX + minTownHallMineDistance + 5, thGridY, 15)
-        end
+    -- Verify mine placement - if still too close or nil, try further out
+    if not m1X or getEdgeGap(thGridX, thGridY, buildingSize, m1X, m1Y, buildingSize) < minTownHallMineGap then
+        m1X, m1Y = map:findClearArea(buildingSize, buildingSize, thGridX + mineOffsetX + 5, thGridY, mineSearchRadius)
+    end
+    
+    -- Final fallback - just place it at a fixed position if all else fails
+    if not m1X or getEdgeGap(thGridX, thGridY, buildingSize, m1X, m1Y, buildingSize) < minTownHallMineGap then
+        m1X = thGridX + buildingSize + minTownHallMineGap + 2
+        m1Y = thGridY
+        map:clearArea(m1X, m1Y, buildingSize, buildingSize)
     end
     
     table.insert(goldMines, GoldMine.new({gridX = m1X, gridY = m1Y, gold = 50000, map = map}))
@@ -2380,20 +2418,22 @@ function Gameplay.load(options)
     map:clearArea(enemyThGridX - clearRadius, enemyThGridY - clearRadius,
                   buildingSize + clearRadius * 2, buildingSize + clearRadius * 2)
 
-    -- Gold mine near enemy
-    -- Ensure mine is at least minTownHallMineDistance tiles away from townhall
-    local enemyMineSearchX = enemyThGridX - minTownHallMineDistance - buildingSize - 2
-    local enemyMineSearchY = enemyThGridY + 2
-    local m2X, m2Y = map:findClearArea(buildingSize, buildingSize, enemyMineSearchX, enemyMineSearchY, 10)
+    -- Gold mine near enemy (to the left of town hall)
+    -- Place mine far enough away that even with search radius it can't get too close
+    local enemyMineSearchX = enemyThGridX - mineOffsetX - buildingSize
+    local enemyMineSearchY = enemyThGridY
+    local m2X, m2Y = map:findClearArea(buildingSize, buildingSize, enemyMineSearchX, enemyMineSearchY, mineSearchRadius)
     
-    -- Verify mine is far enough from townhall, adjust if needed
-    if m2X then
-        local distX = math.abs(m2X - enemyThGridX)
-        local distY = math.abs(m2Y - enemyThGridY)
-        -- If too close, search further away
-        if distX < minTownHallMineDistance and distY < minTownHallMineDistance then
-            m2X, m2Y = map:findClearArea(buildingSize, buildingSize, enemyThGridX - minTownHallMineDistance - 5, enemyThGridY, 15)
-        end
+    -- Verify mine placement - if still too close or nil, try further out
+    if not m2X or getEdgeGap(enemyThGridX, enemyThGridY, buildingSize, m2X, m2Y, buildingSize) < minTownHallMineGap then
+        m2X, m2Y = map:findClearArea(buildingSize, buildingSize, enemyThGridX - mineOffsetX - 5 - buildingSize, enemyThGridY, mineSearchRadius)
+    end
+    
+    -- Final fallback - just place it at a fixed position if all else fails
+    if not m2X or getEdgeGap(enemyThGridX, enemyThGridY, buildingSize, m2X, m2Y, buildingSize) < minTownHallMineGap then
+        m2X = enemyThGridX - buildingSize - minTownHallMineGap - 2 - buildingSize
+        m2Y = enemyThGridY
+        map:clearArea(m2X, m2Y, buildingSize, buildingSize)
     end
     
     table.insert(goldMines, GoldMine.new({gridX = m2X, gridY = m2Y, gold = 50000, map = map}))

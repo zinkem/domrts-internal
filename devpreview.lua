@@ -363,8 +363,9 @@ end
 function DevPreview.keypressed(key)
     if key == "escape" then
         -- Return to title screen
-        local SceneManager = require("scenemanager")
-        SceneManager.switch("titlescreen")
+        if Game and Game.SceneManager then
+            Game.SceneManager.switch("title")
+        end
     elseif key == "r" then
         -- Toggle redo flag on selected entities
         for _, e in ipairs(entities) do
