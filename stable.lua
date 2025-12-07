@@ -292,92 +292,20 @@ function Stable:getUpgradeProgress()
 end
 
 function Stable:updateUI(resources, screenW, screenH, font)
-    if self.selected and self.completed and not self.hasPaladinUpgrade and not self.isUpgrading then
-        local panelX = screenW - 180
-        local buttonY = 70 + 145
-        
-        local selfRef = self
-        local canUpgrade = Requirements.canUpgradeToPaladin()
-        
-        if not self.paladinUpgradeButton then
-            self.paladinUpgradeButton = Button.new({
-                x = panelX + 10, y = buttonY, width = 150, height = 40,
-                text = "Paladin (100g)", font = font,
-                colors = {
-                    normal = {0.6, 0.55, 0.25, 1}, hover = {0.7, 0.65, 0.35, 1},
-                    pressed = {0.5, 0.45, 0.15, 1}, text = {1, 1, 1, 1}, border = {0.5, 0.45, 0.15, 1}
-                },
-                onClick = function()
-                    if canUpgrade and resources.gold >= Stable.PALADIN_UPGRADE_COST then
-                        resources.gold = resources.gold - Stable.PALADIN_UPGRADE_COST
-                        selfRef:startPaladinUpgrade()
-                    end
-                end
-            })
-        end
-        
-        self.paladinUpgradeButton:setEnabled(canUpgrade and resources.gold >= Stable.PALADIN_UPGRADE_COST)
-        self.paladinUpgradeButton:update(0)
-    else
-        self.paladinUpgradeButton = nil
-    end
+    -- UI now handled by command buttons in gameplay.lua
 end
 
 function Stable:drawUI()
-    if self.selected and self.completed then
-        if self.paladinUpgradeButton and not self.hasPaladinUpgrade and not self.isUpgrading then
-            self.paladinUpgradeButton:draw()
-            
-            if not Requirements.canUpgradeToPaladin() then
-                local screenW = love.graphics.getWidth()
-                love.graphics.setColor(1, 0.6, 0.4, 1)
-                love.graphics.setFont(Game.fonts.small)
-                love.graphics.print("Needs Siege Workshop", screenW - 170, 70 + 188)
-                love.graphics.setColor(1, 1, 1, 1)
-            end
-        elseif self.hasPaladinUpgrade then
-            local screenW = love.graphics.getWidth()
-            love.graphics.setColor(0.8, 0.7, 0.2, 1)
-            love.graphics.setFont(Game.fonts.small)
-            love.graphics.print("Paladin Upgrade", screenW - 170, 70 + 145)
-            love.graphics.print("COMPLETE", screenW - 170, 70 + 162)
-            love.graphics.setColor(1, 1, 1, 1)
-        elseif self.isUpgrading then
-            local screenW = love.graphics.getWidth()
-            love.graphics.setColor(0.8, 0.7, 0.2, 1)
-            love.graphics.setFont(Game.fonts.small)
-            love.graphics.print("Upgrading: " .. self:getUpgradeProgress() .. "%", screenW - 170, 70 + 145)
-            love.graphics.setColor(1, 1, 1, 1)
-        end
-    end
+    -- UI now handled by command buttons in gameplay.lua
 end
 
 function Stable:mousepressed(x, y, button)
-    if self.paladinUpgradeButton then self.paladinUpgradeButton:mousepressed(x, y, button) end
+    -- UI now handled by command buttons in gameplay.lua
 end
 
 function Stable:mousereleased(x, y, button)
-    if self.paladinUpgradeButton then self.paladinUpgradeButton:mousereleased(x, y, button) end
+    -- UI now handled by command buttons in gameplay.lua
 end
-
-function Stable:drawOnMinimap(mapX, mapY, scale)
-    if self.hasPaladinUpgrade then
-        love.graphics.setColor(0.7, 0.6, 0.25, 1)
-    elseif self.completed then
-        if Teams then
-            Teams.setColor(self.team, "minimapBuilding")
-        else
-            love.graphics.setColor(0.55, 0.45, 0.3, 1)
-        end
-    else
-        love.graphics.setColor(0.45, 0.38, 0.25, 0.6)
-    end
-    local x = mapX + (self.gridX - 1) * scale
-    local y = mapY + (self.gridY - 1) * scale
-    love.graphics.rectangle("fill", x, y, self.gridSize * scale, self.gridSize * scale)
-end
-
--- Combat Methods --
 
 function Stable:takeDamage(amount)
     self.hp = self.hp - amount
@@ -409,6 +337,19 @@ function Stable:drawHealthBar()
     love.graphics.setColor(0, 0, 0, 0.8)
     love.graphics.setLineWidth(1)
     love.graphics.rectangle("line", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
+end
+
+function Stable:drawOnMinimap(mapX, mapY, scale)
+    local Teams = require("teams")
+    if Teams then
+        local teamColor = Teams.getColor(self.team, "minimapBuilding")
+        love.graphics.setColor(teamColor[1], teamColor[2], teamColor[3], 1)
+    else
+        love.graphics.setColor(0.5, 0.4, 0.3, 1)
+    end
+    local x = mapX + (self.gridX - 1) * scale
+    local y = mapY + (self.gridY - 1) * scale
+    love.graphics.rectangle("fill", x, y, self.size * scale, self.size * scale)
 end
 
 return Stable

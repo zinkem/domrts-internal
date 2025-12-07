@@ -9,6 +9,10 @@ local GameConfig = {}
 local config = {
     mapSize = 64,        -- 64, 128, 192, 256
     tileset = "summer",  -- "summer", "winter"
+    treeDensity = 0.40,  -- 0.20 to 0.60 (sparse to dense)
+    riverEnabled = true,
+    numBridges = 2,      -- 1 to 4
+    riverWidth = 3,      -- 1 to 5
     enemies = {
         { name = "Blinky", personality = "blinky" }
     }
@@ -17,6 +21,15 @@ local config = {
 -- Available options
 local mapSizes = {64, 128, 192, 256}
 local tilesets = {"summer", "winter"}
+local bridgeCounts = {1, 2, 3, 4}
+local riverWidths = {1, 2, 3, 4, 5}
+local treeDensities = {
+    {value = 0.20, label = "Sparse"},
+    {value = 0.35, label = "Light"},
+    {value = 0.50, label = "Medium"},
+    {value = 0.65, label = "Dense"},
+    {value = 0.80, label = "Forest"},
+}
 local personalities = {
     { name = "Blinky", id = "blinky", desc = "Aggressive rusher" },
     { name = "Pinky", id = "pinky", desc = "Balanced builder" },
@@ -57,6 +70,10 @@ function GameConfig.load()
     config = {
         mapSize = 64,
         tileset = "summer",
+        treeDensity = 0.50,  -- Medium density
+        riverEnabled = true,
+        numBridges = 2,
+        riverWidth = 3,
         enemies = {
             { name = "Blinky", personality = "blinky" }
         }
@@ -72,7 +89,7 @@ function GameConfig.buildUI()
     enemyButtons = {}
     
     local screenW, screenH = love.graphics.getDimensions()
-    local panelW, panelH = 500, 520
+    local panelW, panelH = 500, 680  -- Increased height for all options
     local panelX = (screenW - panelW) / 2
     local panelY = (screenH - panelH) / 2
     
@@ -111,8 +128,72 @@ function GameConfig.buildUI()
         })
     end
     
+    -- Tree density buttons
+    local treesY = panelY + 250
+    for i, density in ipairs(treeDensities) do
+        table.insert(buttons, {
+            x = contentX + (i-1) * 75,
+            y = treesY,
+            w = 70,
+            h = btnH,
+            text = density.label,
+            action = function() config.treeDensity = density.value end,
+            isSelected = function() return config.treeDensity == density.value end,
+            category = "trees"
+        })
+    end
+    
+    -- River toggle button
+    local riverY = panelY + 330
+    table.insert(buttons, {
+        x = contentX,
+        y = riverY,
+        w = 60,
+        h = btnH,
+        text = config.riverEnabled and "On" or "Off",
+        action = function() 
+            config.riverEnabled = not config.riverEnabled 
+            GameConfig.buildUI()  -- Rebuild to update button text
+        end,
+        isSelected = function() return config.riverEnabled end,
+        category = "river"
+    })
+    
+    -- River width and bridge count buttons (only show if river enabled)
+    if config.riverEnabled then
+        -- River width
+        local widthX = contentX + 80
+        for i, width in ipairs(riverWidths) do
+            table.insert(buttons, {
+                x = widthX + (i-1) * 40,
+                y = riverY,
+                w = 35,
+                h = btnH,
+                text = tostring(width),
+                action = function() config.riverWidth = width end,
+                isSelected = function() return config.riverWidth == width end,
+                category = "riverWidth"
+            })
+        end
+        
+        -- Bridge count
+        local bridgeX = contentX + 310
+        for i, count in ipairs(bridgeCounts) do
+            table.insert(buttons, {
+                x = bridgeX + (i-1) * 40,
+                y = riverY,
+                w = 35,
+                h = btnH,
+                text = tostring(count),
+                action = function() config.numBridges = count end,
+                isSelected = function() return config.numBridges == count end,
+                category = "bridges"
+            })
+        end
+    end
+    
     -- Add/Remove enemy buttons
-    local enemyY = panelY + 260
+    local enemyY = panelY + 410
     table.insert(buttons, {
         x = contentX + 350,
         y = enemyY - 5,
@@ -192,6 +273,10 @@ function GameConfig.startGame()
     local gameOptions = {
         mapSize = config.mapSize,
         tileset = config.tileset,
+        treeDensity = config.treeDensity,
+        riverEnabled = config.riverEnabled,
+        numBridges = config.numBridges,
+        riverWidth = config.riverWidth,
         enemies = {}
     }
     
@@ -262,7 +347,7 @@ function GameConfig.draw()
     end
     
     -- Main panel
-    local panelW, panelH = 500, 520
+    local panelW, panelH = 500, 680
     local panelX = (screenW - panelW) / 2
     local panelY = (screenH - panelH) / 2
     
@@ -301,11 +386,25 @@ function GameConfig.draw()
     -- Section: Tileset
     love.graphics.print("Tileset", contentX, panelY + 155)
     
+    -- Section: Trees
+    love.graphics.print("Trees", contentX, panelY + 225)
+    
+    -- Section: River
+    love.graphics.print("River", contentX, panelY + 305)
+    if config.riverEnabled then
+        love.graphics.setFont(Game.fonts.small)
+        love.graphics.setColor(UI.textMuted)
+        love.graphics.print("Width:", contentX + 65, panelY + 335)
+        love.graphics.print("Bridges:", contentX + 280, panelY + 335)
+    end
+    
     -- Section: Enemies
-    love.graphics.print("Opponents", contentX, panelY + 235)
+    love.graphics.setFont(Game.fonts.medium)
+    love.graphics.setColor(UI.textLight)
+    love.graphics.print("Opponents", contentX, panelY + 385)
     love.graphics.setFont(Game.fonts.small)
     love.graphics.setColor(UI.textMuted)
-    love.graphics.print("(click name to change)", contentX + 100, panelY + 240)
+    love.graphics.print("(click name to change)", contentX + 100, panelY + 390)
     
     -- Draw all buttons
     for _, btn in ipairs(buttons) do

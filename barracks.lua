@@ -23,6 +23,12 @@ Barracks.FOOTMAN_TIME = 8.0
 Barracks.KNIGHT_COST_GOLD = 300
 Barracks.KNIGHT_COST_LUMBER = 100
 Barracks.KNIGHT_TIME = 12.0
+Barracks.ARCHER_COST_GOLD = 150
+Barracks.ARCHER_COST_LUMBER = 50
+Barracks.ARCHER_TIME = 10.0
+Barracks.BALLISTA_COST_GOLD = 500
+Barracks.BALLISTA_COST_LUMBER = 200
+Barracks.BALLISTA_TIME = 18.0
 
 function Barracks.new(params)
     local self = setmetatable({}, Barracks)
@@ -109,7 +115,14 @@ function Barracks:update(dt)
     end
     
     if self.isProducing then
-        local productionTime = self.producingUnit == "knight" and Barracks.KNIGHT_TIME or Barracks.FOOTMAN_TIME
+        local productionTime = Barracks.FOOTMAN_TIME
+        if self.producingUnit == "knight" then
+            productionTime = Barracks.KNIGHT_TIME
+        elseif self.producingUnit == "archer" then
+            productionTime = Barracks.ARCHER_TIME
+        elseif self.producingUnit == "ballista" then
+            productionTime = Barracks.BALLISTA_TIME
+        end
         self.productionTimer = self.productionTimer + dt
         if self.productionTimer >= productionTime then
             local unitType = self.producingUnit
@@ -261,16 +274,20 @@ function Barracks:draw()
     
     -- Production progress bar
     if self.completed and self.isProducing then
-        local productionTime = self.producingUnit == "knight" and Barracks.KNIGHT_TIME or Barracks.FOOTMAN_TIME
+        local productionTime = self:getProductionTime(self.producingUnit)
         local barW = size - 10
         local progress = self.productionTimer / productionTime
         love.graphics.setColor(0.2, 0.2, 0.2, 1)
         love.graphics.rectangle("fill", x + 5, y + size + 5, barW, 8, 2)
-        -- Different color for knight vs footman
+        -- Different color for each unit type
         if self.producingUnit == "knight" then
-            love.graphics.setColor(0.6, 0.5, 0.2, 1)
+            love.graphics.setColor(0.6, 0.5, 0.2, 1)  -- Gold
+        elseif self.producingUnit == "archer" then
+            love.graphics.setColor(0.3, 0.6, 0.3, 1)  -- Green
+        elseif self.producingUnit == "ballista" then
+            love.graphics.setColor(0.5, 0.4, 0.3, 1)  -- Brown
         else
-            love.graphics.setColor(0.8, 0.3, 0.3, 1)
+            love.graphics.setColor(0.8, 0.3, 0.3, 1)  -- Red (footman)
         end
         love.graphics.rectangle("fill", x + 5, y + size + 5, barW * progress, 8, 2)
     end
@@ -333,9 +350,20 @@ function Barracks:canProduce()
     return self.completed and #self.productionQueue < self.maxQueueSize
 end
 
+function Barracks:getProductionTime(unitType)
+    if unitType == "knight" then
+        return Barracks.KNIGHT_TIME
+    elseif unitType == "archer" then
+        return Barracks.ARCHER_TIME
+    elseif unitType == "ballista" then
+        return Barracks.BALLISTA_TIME
+    end
+    return Barracks.FOOTMAN_TIME
+end
+
 function Barracks:getProductionProgress()
     if self.isProducing then
-        local productionTime = self.producingUnit == "knight" and Barracks.KNIGHT_TIME or Barracks.FOOTMAN_TIME
+        local productionTime = self:getProductionTime(self.producingUnit)
         return math.floor((self.productionTimer / productionTime) * 100)
     end
     return 0
@@ -349,162 +377,20 @@ function Barracks:getBuildProgress()
 end
 
 function Barracks:updateUI(resources, screenW, screenH, font, currentPop, maxPop)
-    currentPop = currentPop or 0
-    maxPop = maxPop or 999
-    self.currentPop = currentPop
-    self.maxPop = maxPop
-    
-    -- Don't show UI for enemy buildings
-    local playerTeam = Teams and Teams.PLAYER or 1
-    if self.team ~= playerTeam then return end
-    
-    if self.selected and self.completed then
-        -- New bottom panel positioning
-        local panelX = screenW - 288
-        local panelY = screenH - 188
-        local buttonY = panelY + 55
-        local buttonW = 125
-        local buttonH = 36
-        
-        -- Train Footman button
-        if not self.actionButton then
-            local selfRef = self
-            self.actionButton = Button.new({
-                x = panelX + 12,
-                y = buttonY,
-                width = buttonW,
-                height = buttonH,
-                text = "Footman (135/0)",
-                font = font,
-                colors = {
-                    normal = {0.5, 0.35, 0.35, 1},
-                    hover = {0.6, 0.45, 0.45, 1},
-                    pressed = {0.4, 0.25, 0.25, 1},
-                    text = {0.95, 0.92, 0.85, 1},
-                    border = {0.6, 0.35, 0.35, 1}
-                },
-                onClick = function()
-                    if resources.gold >= Barracks.FOOTMAN_COST and 
-                       selfRef:canProduce() and 
-                       selfRef.currentPop < selfRef.maxPop then
-                        if selfRef:startProduction("footman") then
-                            resources.gold = resources.gold - Barracks.FOOTMAN_COST
-                        end
-                    end
-                end
-            })
-        else
-            self.actionButton.x = panelX + 12
-            self.actionButton.y = buttonY
-        end
-        
-        self.actionButton:setEnabled(resources.gold >= Barracks.FOOTMAN_COST and currentPop < maxPop and self:canProduce())
-        
-        -- Set disabled reason for hover tooltip
-        local reason = nil
-        if self.isProducing then
-            reason = "Already training"
-        elseif resources.gold < Barracks.FOOTMAN_COST then
-            reason = "Need more gold"
-        elseif currentPop >= maxPop then
-            reason = "Need more farms"
-        end
-        self.actionButton:setDisabledReason(reason)
-        
-        self.actionButton:update(0)
-        
-        -- Train Knight button (only if Stable exists)
-        if Requirements.canProduceKnight() then
-            if not self.knightButton then
-                local selfRef = self
-                self.knightButton = Button.new({
-                    x = panelX + 12 + buttonW + 8,
-                    y = buttonY,
-                    width = buttonW,
-                    height = buttonH,
-                    text = "Knight (300/100)",
-                    font = font,
-                    colors = {
-                        normal = {0.55, 0.45, 0.25, 1},
-                        hover = {0.65, 0.55, 0.35, 1},
-                        pressed = {0.45, 0.35, 0.15, 1},
-                        text = {0.95, 0.92, 0.85, 1},
-                        border = {0.7, 0.55, 0.25, 1}
-                    },
-                    onClick = function()
-                        if resources.gold >= Barracks.KNIGHT_COST_GOLD and 
-                           resources.lumber >= Barracks.KNIGHT_COST_LUMBER and
-                           selfRef:canProduce() and 
-                           selfRef.currentPop < selfRef.maxPop then
-                            if selfRef:startProduction("knight") then
-                                resources.gold = resources.gold - Barracks.KNIGHT_COST_GOLD
-                                resources.lumber = resources.lumber - Barracks.KNIGHT_COST_LUMBER
-                            end
-                        end
-                    end
-                })
-            else
-                self.knightButton.x = panelX + 12 + buttonW + 8
-                self.knightButton.y = buttonY
-            end
-            
-            local canAffordKnight = resources.gold >= Barracks.KNIGHT_COST_GOLD and resources.lumber >= Barracks.KNIGHT_COST_LUMBER
-            self.knightButton:setEnabled(canAffordKnight and currentPop < maxPop and self:canProduce())
-            
-            -- Set disabled reason for hover tooltip
-            local knightReason = nil
-            if self.isProducing then
-                knightReason = "Already training"
-            elseif not canAffordKnight then
-                if resources.gold < Barracks.KNIGHT_COST_GOLD and resources.lumber < Barracks.KNIGHT_COST_LUMBER then
-                    knightReason = "Need gold & lumber"
-                elseif resources.gold < Barracks.KNIGHT_COST_GOLD then
-                    knightReason = "Need more gold"
-                else
-                    knightReason = "Need more lumber"
-                end
-            elseif currentPop >= maxPop then
-                knightReason = "Need more farms"
-            end
-            self.knightButton:setDisabledReason(knightReason)
-            
-            self.knightButton:update(0)
-        else
-            self.knightButton = nil
-        end
-    else
-        self.actionButton = nil
-        self.knightButton = nil
-    end
+    -- UI now handled by command buttons in gameplay.lua
 end
 
 function Barracks:drawUI()
-    -- Don't show UI for enemy buildings
-    local playerTeam = Teams and Teams.PLAYER or 1
-    if self.team ~= playerTeam then return end
-    
-    if self.selected and self.completed then
-        if self.actionButton then
-            self.actionButton:draw()
-        end
-        
-        if self.knightButton then
-            self.knightButton:draw()
-        end
-    end
+    -- UI now handled by command buttons in gameplay.lua
 end
 
 function Barracks:mousepressed(x, y, button)
-    if self.actionButton then self.actionButton:mousepressed(x, y, button) end
-    if self.knightButton then self.knightButton:mousepressed(x, y, button) end
+    -- UI now handled by command buttons in gameplay.lua
 end
 
 function Barracks:mousereleased(x, y, button)
-    if self.actionButton then self.actionButton:mousereleased(x, y, button) end
-    if self.knightButton then self.knightButton:mousereleased(x, y, button) end
+    -- UI now handled by command buttons in gameplay.lua
 end
-
--- Combat Methods --
 
 function Barracks:takeDamage(amount)
     self.hp = self.hp - amount

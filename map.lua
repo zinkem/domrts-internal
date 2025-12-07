@@ -18,6 +18,8 @@ Map.__index = Map
 Map.TILE_GRASS = 1
 Map.TILE_TREE = 2
 Map.TILE_STUMP = 3
+Map.TILE_WATER = 4
+Map.TILE_BRIDGE = 5
 
 -- Fog of war states
 Map.FOG_UNEXPLORED = 0  -- Black, never seen
@@ -40,9 +42,20 @@ function Map.new(options)
     self.height = options.height or options.mapSize or Map.DEFAULT_SIZE
     self.tileset = options.tileset or "summer"  -- "summer" or "winter"
     
+    -- Store options for terrain generation
+    self.options = {
+        treeDensity = options.treeDensity or 0.35,
+        riverEnabled = options.riverEnabled ~= false,  -- Default true
+        numBridges = options.numBridges or 2,
+        riverWidth = options.riverWidth or 3,  -- Base river width (1-5)
+    }
+    
     -- Computed grid dimensions (for fog and pathfinding)
     self.gridWidth = self.width
     self.gridHeight = self.height
+    
+    -- Bridge locations (populated during terrain generation)
+    self.bridges = {}
     
     -- Camera position (top-left in world pixels)
     self.cameraX = 0
@@ -91,30 +104,179 @@ function Map.new(options)
     return self
 end
 
--- Simple perlin-like noise using sine waves
-function Map:noise2D(x, y)
+-- Multi-octave Perlin-like noise for natural terrain
+function Map:noise2D(x, y, octaves, persistence, scale)
+    octaves = octaves or 4
+    persistence = persistence or 0.5
+    scale = scale or 0.1
+    
     local seed = self.noiseSeed
-    local n = math.sin(x * 0.1 + seed) * math.cos(y * 0.1 + seed * 0.7)
-    n = n + math.sin(x * 0.05 + y * 0.08 + seed * 1.3) * 0.5
-    n = n + math.sin(x * 0.2 - y * 0.15 + seed * 0.3) * 0.25
-    return (n + 1.75) / 3.5  -- Normalize to 0-1
+    local total = 0
+    local frequency = scale
+    local amplitude = 1
+    local maxValue = 0
+    
+    for i = 1, octaves do
+        -- Layer multiple sine waves at different frequencies
+        local nx = x * frequency
+        local ny = y * frequency
+        local seedOffset = seed * i * 0.7
+        
+        local n = math.sin(nx + seedOffset) * math.cos(ny + seedOffset * 0.6)
+        n = n + math.sin(nx * 1.3 + ny * 0.8 + seedOffset * 1.2) * 0.5
+        n = n + math.cos(nx * 0.7 - ny * 1.1 + seedOffset * 0.9) * 0.3
+        n = (n + 1.8) / 3.6  -- Normalize to roughly 0-1
+        
+        total = total + n * amplitude
+        maxValue = maxValue + amplitude
+        amplitude = amplitude * persistence
+        frequency = frequency * 2
+    end
+    
+    return total / maxValue
+end
+
+-- Generate a river path using midpoint displacement
+function Map:generateRiverPath()
+    local riverPath = {}
+    local baseRiverWidth = self.options.riverWidth or 3  -- Use option, default 3
+    
+    -- River flows from one side to the other
+    local vertical = math.random() > 0.5
+    
+    if vertical then
+        -- River flows top to bottom with horizontal meandering
+        local currentX = math.random(math.floor(self.width * 0.3), math.floor(self.width * 0.7))
+        for y = 1, self.height do
+            -- Meander using noise
+            local meander = self:noise2D(y * 0.5, self.noiseSeed * 3, 2, 0.5, 0.15)
+            local offset = (meander - 0.5) * 20
+            currentX = currentX + offset * 0.1
+            currentX = math.max(5, math.min(self.width - 5, currentX))
+            
+            -- Add width variation based on base width
+            local widthVar = self:noise2D(y * 0.3, self.noiseSeed * 5, 1, 0.5, 0.1)
+            local width = math.floor(baseRiverWidth + widthVar * baseRiverWidth * 0.5)
+            
+            table.insert(riverPath, {x = math.floor(currentX), y = y, width = width})
+        end
+    else
+        -- River flows left to right with vertical meandering
+        local currentY = math.random(math.floor(self.height * 0.3), math.floor(self.height * 0.7))
+        for x = 1, self.width do
+            local meander = self:noise2D(self.noiseSeed * 3, x * 0.5, 2, 0.5, 0.15)
+            local offset = (meander - 0.5) * 20
+            currentY = currentY + offset * 0.1
+            currentY = math.max(5, math.min(self.height - 5, currentY))
+            
+            local widthVar = self:noise2D(self.noiseSeed * 5, x * 0.3, 1, 0.5, 0.1)
+            local width = math.floor(baseRiverWidth + widthVar * baseRiverWidth * 0.5)
+            
+            table.insert(riverPath, {x = x, y = math.floor(currentY), width = width})
+        end
+    end
+    
+    return riverPath, vertical
+end
+
+-- Place bridges across the river
+function Map:placeBridges(riverPath, vertical, numBridges)
+    numBridges = numBridges or 2
+    self.bridges = {}
+    
+    local pathLen = #riverPath
+    local spacing = math.floor(pathLen / (numBridges + 1))
+    
+    for i = 1, numBridges do
+        local idx = spacing * i
+        if idx >= 1 and idx <= pathLen then
+            local point = riverPath[idx]
+            local bridgeWidth = 3
+            
+            if vertical then
+                -- Horizontal bridge across vertical river
+                for bx = point.x - point.width - 1, point.x + point.width + 1 do
+                    for by = point.y - 1, point.y + 1 do
+                        if bx >= 1 and bx <= self.width and by >= 1 and by <= self.height then
+                            if self.tiles[by][bx] == Map.TILE_WATER then
+                                self.tiles[by][bx] = Map.TILE_BRIDGE
+                            end
+                        end
+                    end
+                end
+            else
+                -- Vertical bridge across horizontal river
+                for by = point.y - point.width - 1, point.y + point.width + 1 do
+                    for bx = point.x - 1, point.x + 1 do
+                        if bx >= 1 and bx <= self.width and by >= 1 and by <= self.height then
+                            if self.tiles[by][bx] == Map.TILE_WATER then
+                                self.tiles[by][bx] = Map.TILE_BRIDGE
+                            end
+                        end
+                    end
+                end
+            end
+            
+            table.insert(self.bridges, {x = point.x, y = point.y, vertical = not vertical})
+        end
+    end
 end
 
 function Map:generateTerrain()
-    local treeThreshold = 0.65  -- Higher = fewer trees
+    -- Tree density based on options (default 0.35 means 35% tree coverage in forested areas)
+    local treeDensity = self.options.treeDensity or 0.35
+    local treeThreshold = 1.0 - treeDensity  -- Higher threshold = fewer trees
     
+    -- First pass: Generate base terrain with trees using layered noise
     for y = 1, self.height do
         self.treeHealth[y] = {}
         for x = 1, self.width do
-            local n = self:noise2D(x, y)
-            if n > treeThreshold then
+            -- Use multi-octave noise for natural clustering
+            local n = self:noise2D(x, y, 3, 0.5, 0.08)
+            
+            -- Add some larger-scale variation for forest patches
+            local forestNoise = self:noise2D(x, y, 2, 0.6, 0.03)
+            
+            -- Combine noises - trees appear where both noises are high
+            local combined = n * 0.6 + forestNoise * 0.4
+            
+            if combined > treeThreshold then
                 self.tiles[y][x] = Map.TILE_TREE
-                self.treeHealth[y][x] = 10  -- 10 harvests per tree
+                self.treeHealth[y][x] = 10
             else
+                self.tiles[y][x] = Map.TILE_GRASS
                 self.treeHealth[y][x] = 0
             end
         end
     end
+    
+    -- Second pass: Generate river if enabled
+    if self.options.riverEnabled ~= false then
+        local riverPath, vertical = self:generateRiverPath()
+        
+        -- Carve the river
+        for _, point in ipairs(riverPath) do
+            for dx = -point.width, point.width do
+                local tx = point.x + dx
+                if tx >= 1 and tx <= self.width then
+                    -- Make river edges slightly irregular
+                    local edgeDist = math.abs(dx)
+                    local edgeNoise = self:noise2D(tx, point.y, 1, 0.5, 0.3)
+                    if edgeDist <= point.width - 0.5 + edgeNoise * 0.5 then
+                        self.tiles[point.y][tx] = Map.TILE_WATER
+                        self.treeHealth[point.y][tx] = 0
+                    end
+                end
+            end
+        end
+        
+        -- Place bridges
+        local numBridges = self.options.numBridges or 2
+        self:placeBridges(riverPath, vertical, numBridges)
+    end
+    
+    -- Store river info for later reference
+    self.hasRiver = self.options.riverEnabled ~= false
 end
 
 function Map:clearArea(gridX, gridY, gridW, gridH)
@@ -133,7 +295,9 @@ function Map:isAreaClear(gridX, gridY, gridW, gridH)
             if x < 1 or x > self.width or y < 1 or y > self.height then
                 return false
             end
-            if self.tiles[y][x] == Map.TILE_TREE then
+            local tile = self.tiles[y][x]
+            -- Can't build on trees or water
+            if tile == Map.TILE_TREE or tile == Map.TILE_WATER then
                 return false
             end
         end
@@ -230,6 +394,12 @@ function Map:screenToWorld(screenX, screenY)
     return screenX + self.cameraX - self.viewportX, screenY + self.cameraY - self.viewportY
 end
 
+-- Convert screen pixels directly to grid coords
+function Map:screenToGrid(screenX, screenY)
+    local worldX, worldY = self:screenToWorld(screenX, screenY)
+    return self:worldToGrid(worldX, worldY)
+end
+
 function Map:isInViewport(screenX, screenY)
     return screenX >= self.viewportX and screenX <= self.viewportX + self.viewportW and
            screenY >= self.viewportY and screenY <= self.viewportY + self.viewportH
@@ -239,7 +409,23 @@ function Map:isTilePassable(gridX, gridY)
     if gridX < 1 or gridX > self.width or gridY < 1 or gridY > self.height then
         return false
     end
-    return self.tiles[gridY][gridX] ~= Map.TILE_TREE
+    local tile = self.tiles[gridY][gridX]
+    -- Trees and water are impassable, bridges are passable
+    return tile ~= Map.TILE_TREE and tile ~= Map.TILE_WATER
+end
+
+function Map:isTileWater(gridX, gridY)
+    if gridX < 1 or gridX > self.width or gridY < 1 or gridY > self.height then
+        return false
+    end
+    return self.tiles[gridY][gridX] == Map.TILE_WATER
+end
+
+function Map:isTileBridge(gridX, gridY)
+    if gridX < 1 or gridX > self.width or gridY < 1 or gridY > self.height then
+        return false
+    end
+    return self.tiles[gridY][gridX] == Map.TILE_BRIDGE
 end
 
 function Map:isTileTree(gridX, gridY)
@@ -389,9 +575,24 @@ function Map:updateFog(units, buildings, playerTeam)
             else
                 sightRadius = building.sightRadius or 5
             end
-            local cx, cy = building:getWorldCenter()
-            local gridX, gridY = self:worldToGrid(cx, cy)
-            self:revealArea(gridX, gridY, sightRadius)
+            
+            -- Get building footprint
+            local gridX = building.gridX or 1
+            local gridY = building.gridY or 1
+            local buildingW = building.gridW or building.size or 3
+            local buildingH = building.gridH or building.size or 3
+            
+            -- Reveal from each tile along the building perimeter for accurate edge-based vision
+            -- Top and bottom edges
+            for bx = gridX, gridX + buildingW - 1 do
+                self:revealArea(bx, gridY, sightRadius)  -- Top edge
+                self:revealArea(bx, gridY + buildingH - 1, sightRadius)  -- Bottom edge
+            end
+            -- Left and right edges (skip corners already done)
+            for by = gridY + 1, gridY + buildingH - 2 do
+                self:revealArea(gridX, by, sightRadius)  -- Left edge
+                self:revealArea(gridX + buildingW - 1, by, sightRadius)  -- Right edge
+            end
         end
     end
 end
@@ -497,6 +698,70 @@ function Map:draw()
                 love.graphics.circle("fill", screenX + 16, screenY + 16, 5)
                 love.graphics.setColor(0.30, 0.22, 0.12, 1)
                 love.graphics.circle("fill", screenX + 16, screenY + 16, 3)
+                
+            elseif tile == Map.TILE_WATER then
+                -- Water tile with animated waves
+                local waveTime = Map.animTime or 0
+                local waveOffset = math.sin(waveTime * 2 + x * 0.5 + y * 0.3) * 0.03
+                
+                -- Base water color (darker for winter)
+                local waterR, waterG, waterB
+                if self.tileset == "winter" then
+                    waterR, waterG, waterB = 0.25 + waveOffset, 0.35 + waveOffset, 0.45
+                else
+                    waterR, waterG, waterB = 0.15 + waveOffset, 0.30 + waveOffset, 0.50
+                end
+                
+                love.graphics.setColor(waterR, waterG, waterB, 1)
+                love.graphics.rectangle("fill", screenX, screenY, self.tileSize, self.tileSize)
+                
+                -- Wave highlights
+                love.graphics.setColor(waterR + 0.1, waterG + 0.12, waterB + 0.1, 0.4)
+                local waveX = (math.sin(waveTime * 3 + x + y * 0.7) + 1) * 0.5
+                local waveY = (math.cos(waveTime * 2.5 + y + x * 0.5) + 1) * 0.5
+                love.graphics.ellipse("fill", 
+                    screenX + waveX * self.tileSize, 
+                    screenY + waveY * self.tileSize, 
+                    8, 4)
+                
+                -- Dark ripples
+                love.graphics.setColor(waterR - 0.05, waterG - 0.05, waterB - 0.02, 0.3)
+                local rippleX = (math.sin(waveTime * 1.5 + x * 2 + y) + 1) * 0.5
+                love.graphics.ellipse("fill",
+                    screenX + rippleX * self.tileSize,
+                    screenY + 16 + math.sin(waveTime + x) * 4,
+                    6, 2)
+                
+            elseif tile == Map.TILE_BRIDGE then
+                -- Draw water underneath first
+                local waveTime = Map.animTime or 0
+                local waterR, waterG, waterB = 0.15, 0.28, 0.45
+                love.graphics.setColor(waterR, waterG, waterB, 1)
+                love.graphics.rectangle("fill", screenX, screenY, self.tileSize, self.tileSize)
+                
+                -- Wooden bridge planks
+                local plankColor = {0.45, 0.32, 0.18}
+                local plankDark = {0.35, 0.24, 0.12}
+                local plankLight = {0.55, 0.42, 0.28}
+                
+                -- Main bridge surface
+                love.graphics.setColor(plankColor[1], plankColor[2], plankColor[3], 1)
+                love.graphics.rectangle("fill", screenX + 2, screenY + 2, self.tileSize - 4, self.tileSize - 4)
+                
+                -- Plank lines (horizontal)
+                love.graphics.setColor(plankDark[1], plankDark[2], plankDark[3], 1)
+                for py = 0, 3 do
+                    love.graphics.rectangle("fill", screenX + 2, screenY + 2 + py * 8, self.tileSize - 4, 1)
+                end
+                
+                -- Edge highlights
+                love.graphics.setColor(plankLight[1], plankLight[2], plankLight[3], 0.6)
+                love.graphics.rectangle("fill", screenX + 2, screenY + 2, self.tileSize - 4, 2)
+                
+                -- Railing posts at edges
+                love.graphics.setColor(plankDark[1], plankDark[2], plankDark[3], 1)
+                love.graphics.rectangle("fill", screenX, screenY + 4, 3, 24)
+                love.graphics.rectangle("fill", screenX + self.tileSize - 3, screenY + 4, 3, 24)
             end
         end
     end
@@ -809,17 +1074,24 @@ function Map:drawMinimap(x, y, size)
                 
                 -- Dim explored tiles, full brightness for visible
                 local brightness = fogState == Map.FOG_VISIBLE and 1 or 0.5
+                local tile = self.tiles[ty][tx]
                 
-                if self.tileset == "winter" then
+                -- Water tiles (blue)
+                if tile == Map.TILE_WATER then
+                    love.graphics.setColor(0.15 * brightness, 0.3 * brightness, 0.5 * brightness, 1)
+                -- Bridge tiles (brown)
+                elseif tile == Map.TILE_BRIDGE then
+                    love.graphics.setColor(0.4 * brightness, 0.3 * brightness, 0.15 * brightness, 1)
+                elseif self.tileset == "winter" then
                     -- Winter colors (desaturated/cold)
-                    if self.tiles[ty][tx] == Map.TILE_TREE then
+                    if tile == Map.TILE_TREE then
                         love.graphics.setColor(0.15 * brightness, 0.18 * brightness, 0.2 * brightness, 1)
                     else
                         love.graphics.setColor(0.25 * brightness, 0.28 * brightness, 0.3 * brightness, 1)
                     end
                 else
                     -- Summer colors (green)
-                    if self.tiles[ty][tx] == Map.TILE_TREE then
+                    if tile == Map.TILE_TREE then
                         love.graphics.setColor(0.1 * brightness, 0.3 * brightness, 0.1 * brightness, 1)
                     else
                         love.graphics.setColor(0.1 * brightness, 0.2 * brightness, 0.1 * brightness, 1)

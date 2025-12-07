@@ -202,7 +202,7 @@ Game = {
 -- Scene manager
 local SceneManager = {}
 
-function SceneManager.switch(sceneName)
+function SceneManager.switch(sceneName, options)
     if Game.scenes[sceneName] then
         -- Unload current scene if it has an unload function
         if Game.currentScene and Game.currentScene.unload then
@@ -210,7 +210,7 @@ function SceneManager.switch(sceneName)
         end
         Game.currentScene = Game.scenes[sceneName]
         if Game.currentScene.load then
-            Game.currentScene.load()
+            Game.currentScene.load(options)  -- Pass options to scene
         end
     else
         error("Scene not found: " .. sceneName)

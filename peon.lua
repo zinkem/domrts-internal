@@ -29,6 +29,7 @@ Peon.STATE_HARVESTING = "Harvesting"
 Peon.STATE_RETURNING = "Returning"
 Peon.STATE_CHOPPING = "Chopping"
 Peon.STATE_BUILDING = "Building"
+Peon.STATE_GATHER_MOVING = "GatherMoving"  -- Move toward destination, auto-gather nearby resources
 
 Peon.RADIUS = 14  -- Fits inside 1 tile (32x32 pixels)
 
@@ -101,6 +102,17 @@ function Peon.new(params)
     self.buildCostLumber = 0
     self.buildEntryX = nil  -- Position when entering building site
     self.buildEntryY = nil
+    
+    -- Sight radius for gather-move (tiles)
+    self.sightRadius = 5
+    
+    -- Gather-move destination
+    self.gatherMoveDestX = nil
+    self.gatherMoveDestY = nil
+    
+    -- Reference to resources (set by gameplay for gather-move)
+    self.resourcesRef = nil
+    self.goldMinesRef = nil
     
     -- Notification callback (set by gameplay)
     self.onNotify = nil
@@ -216,6 +228,8 @@ end
 
 -- Advance to next waypoint if we've reached current one AND can see the next one
 function Peon:updateWaypoint(buildings)
+    if not self.path then return end
+    
     if Pathfinding.reachedWaypoint(self.worldX, self.worldY, self.path, self.currentWaypoint, 12) then
         local nextWp = self.currentWaypoint + 1
         if nextWp <= #self.path then
@@ -354,6 +368,8 @@ function Peon:update(dt, buildings, townHall, goldMine, resources)
     
     if self.state == Peon.STATE_MOVING then
         self:updateMoving(dt, buildings, goldMine)
+    elseif self.state == Peon.STATE_GATHER_MOVING then
+        self:updateGatherMoving(dt, buildings)
     elseif self.state == Peon.STATE_HARVESTING then
         self:updateHarvesting(dt, resources)
     elseif self.state == Peon.STATE_RETURNING then
@@ -481,12 +497,48 @@ function Peon:updateHarvesting(dt, resources)
 end
 
 function Peon:updateReturning(dt, buildings, townHall, resources)
-    if not townHall then
+    -- Find nearest drop-off point
+    -- For gold: town hall only
+    -- For lumber: town hall or lumber mill (whichever is closer)
+    local dropOffTarget = nil
+    local dropOffDist = math.huge
+    
+    if self.carryingGold > 0 then
+        -- Gold can only go to town hall
+        if townHall then
+            dropOffTarget = townHall
+        end
+    elseif self.carryingLumber > 0 then
+        -- Lumber can go to town hall or lumber mill
+        if townHall then
+            local cx, cy = townHall:getWorldCenter()
+            local dx, dy = cx - self.worldX, cy - self.worldY
+            dropOffDist = dx*dx + dy*dy
+            dropOffTarget = townHall
+        end
+        
+        -- Check lumber mills for closer option
+        if buildings then
+            for _, b in ipairs(buildings) do
+                if b.type == "lumbermill" and b.completed then
+                    local cx, cy = b:getWorldCenter()
+                    local dx, dy = cx - self.worldX, cy - self.worldY
+                    local dist = dx*dx + dy*dy
+                    if dist < dropOffDist then
+                        dropOffDist = dist
+                        dropOffTarget = b
+                    end
+                end
+            end
+        end
+    end
+    
+    if not dropOffTarget then
         self.state = Peon.STATE_IDLE
         return
     end
     
-    if self:isTouchingBuilding(townHall, 4) then
+    if self:isTouchingBuilding(dropOffTarget, 4) then
         if self.carryingGold > 0 then
             resources.gold = resources.gold + self.carryingGold
             self.carryingGold = 0
@@ -532,7 +584,7 @@ function Peon:updateReturning(dt, buildings, townHall, resources)
         return
     end
     
-    local targetX, targetY = townHall:getWorldCenter()
+    local targetX, targetY = dropOffTarget:getWorldCenter()
     local dx = targetX - self.worldX
     local dy = targetY - self.worldY
     local dist = math.sqrt(dx * dx + dy * dy)
@@ -704,7 +756,7 @@ function Peon:draw()
     if self.state == Peon.STATE_CHOPPING then
         -- Jump up and down rapidly when chopping
         jumpOffset = math.abs(math.sin(self.animTimer * 12)) * 6
-    elseif self.state == Peon.STATE_MOVING or self.state == Peon.STATE_RETURNING then
+    elseif self.state == Peon.STATE_MOVING or self.state == Peon.STATE_RETURNING or self.state == Peon.STATE_GATHER_MOVING then
         -- Bouncy walk
         walkBob = math.abs(math.sin(self.animTimer * 10)) * 2
     elseif self.state == Peon.STATE_IDLE then
@@ -767,7 +819,7 @@ function Peon:draw()
         
         -- Arms - with slight swing when walking
         local armSwing = 0
-        if self.state == Peon.STATE_MOVING or self.state == Peon.STATE_RETURNING then
+        if self.state == Peon.STATE_MOVING or self.state == Peon.STATE_RETURNING or self.state == Peon.STATE_GATHER_MOVING then
             armSwing = math.sin(self.animTimer * 10) * 2
         end
         love.graphics.setColor(0.55, 0.45, 0.35, 1)
@@ -970,8 +1022,151 @@ function Peon:goToBuild(gridX, gridY, buildingType, callback, costGold, costLumb
     self.state = Peon.STATE_MOVING
 end
 
+-- Gather-move: move toward destination, auto-gather closest resource in sight
+function Peon:gatherMoveTo(worldX, worldY, goldMines, resources)
+    self.gatherMoveDestX = worldX
+    self.gatherMoveDestY = worldY
+    self.goldMinesRef = goldMines
+    self.resourcesRef = resources
+    self.targetX = worldX
+    self.targetY = worldY
+    self.targetMine = nil
+    self.targetTreeX = nil
+    self.targetTreeY = nil
+    self.returnToStumpX = nil
+    self.returnToStumpY = nil
+    self.goIdleAtTarget = nil
+    self.buildTargetX = nil
+    self.buildTargetY = nil
+    self.buildCallback = nil
+    self.path = nil
+    self.currentWaypoint = 1
+    self.state = Peon.STATE_GATHER_MOVING
+end
+
+-- Find closest resource (tree or mine) within sight radius
+function Peon:findClosestResource()
+    if not self.map then return nil, nil end
+    
+    local myGridX, myGridY = self.map:worldToGrid(self.worldX, self.worldY)
+    local sightRange = self.sightRadius or 5
+    local closestDist = math.huge
+    local closestMine = nil
+    local closestTreeX, closestTreeY = nil, nil
+    
+    -- Check for gold mines in sight
+    if self.goldMinesRef then
+        for _, mine in ipairs(self.goldMinesRef) do
+            if not mine.depleted then
+                local mx, my = mine:getWorldCenter()
+                local mineGridX, mineGridY = self.map:worldToGrid(mx, my)
+                local dx = mineGridX - myGridX
+                local dy = mineGridY - myGridY
+                local dist = math.sqrt(dx*dx + dy*dy)
+                if dist <= sightRange and dist < closestDist then
+                    closestDist = dist
+                    closestMine = mine
+                    closestTreeX, closestTreeY = nil, nil
+                end
+            end
+        end
+    end
+    
+    -- Check for trees in sight
+    for dy = -sightRange, sightRange do
+        for dx = -sightRange, sightRange do
+            local dist = math.sqrt(dx*dx + dy*dy)
+            if dist <= sightRange then
+                local tx, ty = myGridX + dx, myGridY + dy
+                if self.map:isTileTree(tx, ty) then
+                    if dist < closestDist then
+                        closestDist = dist
+                        closestMine = nil
+                        closestTreeX, closestTreeY = tx, ty
+                    end
+                end
+            end
+        end
+    end
+    
+    return closestMine, closestTreeX, closestTreeY
+end
+
+-- Update gather-move state
+function Peon:updateGatherMoving(dt, buildings)
+    -- First, check for nearby resources to gather
+    local closestMine, treeX, treeY = self:findClosestResource()
+    
+    if closestMine then
+        -- Found a mine, go gather from it
+        self:goToMine(closestMine)
+        return
+    elseif treeX and treeY then
+        -- Found a tree, go chop it
+        self:goToTree(treeX, treeY)
+        return
+    end
+    
+    -- No resources in sight, continue moving toward destination
+    if not self.targetX or not self.targetY then
+        self.state = Peon.STATE_IDLE
+        return
+    end
+    
+    -- Check if we've reached the destination
+    local dx = self.targetX - self.worldX
+    local dy = self.targetY - self.worldY
+    local dist = math.sqrt(dx * dx + dy * dy)
+    
+    if dist < 8 then
+        -- Reached destination, go idle
+        self.state = Peon.STATE_IDLE
+        self.gatherMoveDestX = nil
+        self.gatherMoveDestY = nil
+        return
+    end
+    
+    -- Move toward destination (reuse moving logic)
+    self:moveTowardTarget(dt, buildings)
+end
+
+-- Helper: move toward current target (shared by moving and gather-moving)
+function Peon:moveTowardTarget(dt, buildings)
+    if not self.targetX or not self.targetY then return end
+    
+    local dx = self.targetX - self.worldX
+    local dy = self.targetY - self.worldY
+    local dist = math.sqrt(dx * dx + dy * dy)
+    
+    if dist > 1 then
+        local moveX = (dx / dist) * self.speed * dt
+        local moveY = (dy / dist) * self.speed * dt
+        
+        local newX = self.worldX + moveX
+        local newY = self.worldY + moveY
+        
+        -- Check building collisions
+        local canMove = true
+        if buildings then
+            for _, building in ipairs(buildings) do
+                if self:wouldCollideWithBuilding(newX, newY, building) then
+                    canMove = false
+                    break
+                end
+            end
+        end
+        
+        if canMove then
+            self.worldX = newX
+            self.worldY = newY
+        end
+    end
+end
+
 function Peon:getStateText()
-    if self.state == Peon.STATE_RETURNING then
+    if self.state == Peon.STATE_GATHER_MOVING then
+        return "Gather Move"
+    elseif self.state == Peon.STATE_RETURNING then
         if self.carryingGold > 0 then return "Carrying Gold"
         elseif self.carryingLumber > 0 then return "Carrying Lumber" end
     elseif self.state == Peon.STATE_CHOPPING then
@@ -983,291 +1178,20 @@ function Peon:getStateText()
 end
 
 -- Building definitions for UI
-local function getBuildingDefs()
-    local Farm = require("farm")
-    local Barracks = require("barracks")
-    local LumberMill = require("lumbermill")
-    local Blacksmith = require("blacksmith")
-    local ScoutTower = require("scouttower")
-    local ArcheryRange = require("archeryrange")
-    local Stable = require("stable")
-    local SiegeWorkshop = require("siegeworkshop")
-    local TownHall = require("townhall")
-    
-    return {
-        -- Page 1: Basic buildings
-        {
-            type = "farm",
-            name = "Farm",
-            costGold = Farm.COST_GOLD,
-            costLumber = Farm.COST_LUMBER,
-            colors = {normal = {0.3, 0.5, 0.35, 1}, hover = {0.4, 0.6, 0.45, 1}, pressed = {0.2, 0.4, 0.25, 1}},
-            canBuild = function() return true end
-        },
-        {
-            type = "barracks",
-            name = "Barracks",
-            costGold = Barracks.COST_GOLD,
-            costLumber = Barracks.COST_LUMBER,
-            colors = {normal = {0.5, 0.35, 0.35, 1}, hover = {0.6, 0.45, 0.45, 1}, pressed = {0.4, 0.25, 0.25, 1}},
-            canBuild = function() return true end
-        },
-        {
-            type = "lumbermill",
-            name = "Lumber Mill",
-            costGold = LumberMill.COST_GOLD,
-            costLumber = LumberMill.COST_LUMBER,
-            colors = {normal = {0.45, 0.35, 0.25, 1}, hover = {0.55, 0.45, 0.35, 1}, pressed = {0.35, 0.25, 0.15, 1}},
-            canBuild = function() return Requirements.canBuild("lumbermill") end
-        },
-        {
-            type = "scouttower",
-            name = "Scout Tower",
-            costGold = ScoutTower.COST_GOLD,
-            costLumber = ScoutTower.COST_LUMBER,
-            colors = {normal = {0.4, 0.4, 0.45, 1}, hover = {0.5, 0.5, 0.55, 1}, pressed = {0.3, 0.3, 0.35, 1}},
-            canBuild = function() return Requirements.canBuild("scouttower") end
-        },
-        -- Page 2: Advanced buildings
-        {
-            type = "blacksmith",
-            name = "Blacksmith",
-            costGold = Blacksmith.COST_GOLD,
-            costLumber = Blacksmith.COST_LUMBER,
-            colors = {normal = {0.4, 0.38, 0.42, 1}, hover = {0.5, 0.48, 0.52, 1}, pressed = {0.3, 0.28, 0.32, 1}},
-            canBuild = function() return Requirements.canBuild("blacksmith") end,
-            requirement = "Barracks"
-        },
-        {
-            type = "archeryrange",
-            name = "Archery Range",
-            costGold = ArcheryRange.COST_GOLD,
-            costLumber = ArcheryRange.COST_LUMBER,
-            colors = {normal = {0.35, 0.45, 0.35, 1}, hover = {0.45, 0.55, 0.45, 1}, pressed = {0.25, 0.35, 0.25, 1}},
-            canBuild = function() return Requirements.canBuild("archeryrange") end,
-            requirement = "Barracks"
-        },
-        {
-            type = "stable",
-            name = "Stable",
-            costGold = Stable.COST_GOLD,
-            costLumber = Stable.COST_LUMBER,
-            colors = {normal = {0.5, 0.4, 0.3, 1}, hover = {0.6, 0.5, 0.4, 1}, pressed = {0.4, 0.3, 0.2, 1}},
-            canBuild = function() return Requirements.canBuild("stable") end,
-            requirement = "Hold"
-        },
-        {
-            type = "siegeworkshop",
-            name = "Siege Workshop",
-            costGold = SiegeWorkshop.COST_GOLD,
-            costLumber = SiegeWorkshop.COST_LUMBER,
-            colors = {normal = {0.45, 0.4, 0.35, 1}, hover = {0.55, 0.5, 0.45, 1}, pressed = {0.35, 0.3, 0.25, 1}},
-            canBuild = function() return Requirements.canBuild("siegeworkshop") end,
-            requirement = "Keep"
-        },
-        -- Page 3: Expansion
-        {
-            type = "townhall",
-            name = "Town Hall",
-            costGold = TownHall.COST_GOLD,
-            costLumber = TownHall.COST_LUMBER,
-            colors = {normal = {0.5, 0.4, 0.25, 1}, hover = {0.6, 0.5, 0.35, 1}, pressed = {0.4, 0.3, 0.15, 1}},
-            canBuild = function() return Requirements.canBuild("townhall") end,
-            requirement = "Hold"
-        },
-    }
-end
-
 function Peon:updateUI(resources, screenW, screenH, font, startBuildCallback)
-    if self.selected and self.state ~= Peon.STATE_BUILDING then
-        -- New bottom panel positioning
-        local panelX = screenW - 288
-        local panelY = screenH - 188
-        local buttonY = panelY + 55
-        local buttonW = 125
-        local buttonH = 32
-        local buttonSpacing = 36
-        local maxButtonsPerPage = 4
-        
-        local buildingDefs = getBuildingDefs()
-        
-        -- Calculate pages
-        local totalBuildings = #buildingDefs
-        local totalPages = math.ceil(totalBuildings / maxButtonsPerPage)
-        
-        -- Clamp page
-        if self.buildMenuPage > totalPages then self.buildMenuPage = totalPages end
-        if self.buildMenuPage < 1 then self.buildMenuPage = 1 end
-        
-        -- Get buildings for current page
-        local startIdx = (self.buildMenuPage - 1) * maxButtonsPerPage + 1
-        local endIdx = math.min(startIdx + maxButtonsPerPage - 1, totalBuildings)
-        
-        -- Check if page changed - only recreate buttons if page changed
-        local currentPageKey = self.buildMenuPage .. "_" .. startIdx .. "_" .. endIdx
-        if self.lastPageKey ~= currentPageKey then
-            self.lastPageKey = currentPageKey
-            self.buildButtons = {}
-            
-            local buttonIdx = 0
-            for i = startIdx, endIdx do
-                local def = buildingDefs[i]
-                local costText = string.format("%s (%d/%d)", def.name, def.costGold, def.costLumber)
-                
-                -- Two columns layout
-                local col = buttonIdx % 2
-                local row = math.floor(buttonIdx / 2)
-                
-                local btn = Button.new({
-                    x = panelX + 12 + col * (buttonW + 8), 
-                    y = buttonY + row * buttonSpacing, 
-                    width = buttonW, 
-                    height = buttonH,
-                    text = costText, 
-                    font = font,
-                    colors = {
-                        normal = def.colors.normal, 
-                        hover = def.colors.hover,
-                        pressed = def.colors.pressed, 
-                        text = {0.95, 0.92, 0.85, 1}, 
-                        border = {def.colors.normal[1] + 0.1, def.colors.normal[2] + 0.1, def.colors.normal[3] + 0.1, 1}
-                    },
-                    onClick = function()
-                        if startBuildCallback then startBuildCallback(self, def.type) end
-                    end
-                })
-                
-                table.insert(self.buildButtons, {button = btn, def = def})
-                buttonIdx = buttonIdx + 1
-            end
-        end
-        
-        -- Update button enabled state and positions (every frame)
-        local buttonIdx = 0
-        for _, btnData in ipairs(self.buildButtons) do
-            local def = btnData.def
-            local btn = btnData.button
-            
-            local canAfford = resources.gold >= def.costGold and resources.lumber >= def.costLumber
-            local canGiveOrders = self.state == Peon.STATE_IDLE or self.state == Peon.STATE_MOVING
-            local meetsReqs = def.canBuild()
-            
-            btn:setEnabled(canAfford and canGiveOrders and meetsReqs)
-            
-            -- Set disabled reason
-            local reason = nil
-            if not meetsReqs and def.requirement then
-                reason = "Need " .. def.requirement
-            elseif not canGiveOrders then
-                reason = "Peon busy"
-            elseif not canAfford then
-                if resources.gold < def.costGold and resources.lumber < def.costLumber then
-                    reason = "Need gold & lumber"
-                elseif resources.gold < def.costGold then
-                    reason = "Need gold"
-                else
-                    reason = "Need lumber"
-                end
-            end
-            btn:setDisabledReason(reason)
-            
-            -- Two columns layout
-            local col = buttonIdx % 2
-            local row = math.floor(buttonIdx / 2)
-            btn:setPosition(panelX + 12 + col * (buttonW + 8), buttonY + row * buttonSpacing)
-            btn:update(0)
-            buttonIdx = buttonIdx + 1
-        end
-        
-        -- Page navigation buttons
-        if totalPages > 1 then
-            -- With 2 columns, 4 buttons = 2 rows
-            local navY = buttonY + 2 * buttonSpacing + 5
-            
-            if not self.prevPageButton then
-                self.prevPageButton = Button.new({
-                    x = panelX + 12, y = navY, width = 60, height = 24,
-                    text = "< Prev", font = font,
-                    colors = {normal = {0.35, 0.32, 0.3, 1}, hover = {0.45, 0.42, 0.4, 1}, pressed = {0.25, 0.22, 0.2, 1}, text = {0.95,0.92,0.85,1}, border = {0.5,0.45,0.4,1}},
-                    onClick = function()
-                        self.buildMenuPage = self.buildMenuPage - 1
-                        if self.buildMenuPage < 1 then self.buildMenuPage = totalPages end
-                        self.lastPageKey = nil  -- Force button recreation
-                    end
-                })
-            end
-            
-            if not self.nextPageButton then
-                self.nextPageButton = Button.new({
-                    x = panelX + 12 + 68, y = navY, width = 60, height = 24,
-                    text = "Next >", font = font,
-                    colors = {normal = {0.35, 0.32, 0.3, 1}, hover = {0.45, 0.42, 0.4, 1}, pressed = {0.25, 0.22, 0.2, 1}, text = {0.95,0.92,0.85,1}, border = {0.5,0.45,0.4,1}},
-                    onClick = function()
-                        self.buildMenuPage = self.buildMenuPage + 1
-                        if self.buildMenuPage > totalPages then self.buildMenuPage = 1 end
-                        self.lastPageKey = nil  -- Force button recreation
-                    end
-                })
-            end
-            
-            -- Update positions
-            self.prevPageButton:setPosition(panelX + 12, navY)
-            self.nextPageButton:setPosition(panelX + 12 + 68, navY)
-            self.prevPageButton:setEnabled(true)
-            self.nextPageButton:setEnabled(true)
-            self.prevPageButton:update(0)
-            self.nextPageButton:update(0)
-        else
-            self.prevPageButton = nil
-            self.nextPageButton = nil
-        end
-    else
-        self.buildButtons = {}
-        self.prevPageButton = nil
-        self.nextPageButton = nil
-        self.lastPageKey = nil
-    end
+    -- UI now handled by command buttons in gameplay.lua
 end
 
 function Peon:drawUI()
-    if self.selected and self.state ~= Peon.STATE_BUILDING then
-        for _, btnData in ipairs(self.buildButtons) do
-            btnData.button:draw()
-        end
-        
-        if self.prevPageButton then self.prevPageButton:draw() end
-        if self.nextPageButton then self.nextPageButton:draw() end
-        
-        -- Page indicator
-        if self.prevPageButton then
-            local buildingDefs = getBuildingDefs()
-            local totalPages = math.ceil(#buildingDefs / 4)
-            local screenW = love.graphics.getWidth()
-            local screenH = love.graphics.getHeight()
-            local panelX = screenW - 288
-            local panelY = screenH - 188
-            love.graphics.setColor(0.7, 0.65, 0.55, 1)
-            love.graphics.setFont(Game.fonts.small)
-            love.graphics.print(string.format("%d/%d", self.buildMenuPage, totalPages), panelX + 150, panelY + 55 + 2 * 36 + 8)
-            love.graphics.setColor(1, 1, 1, 1)
-        end
-    end
+    -- UI now handled by command buttons in gameplay.lua
 end
 
 function Peon:mousepressed(x, y, button)
-    for _, btnData in ipairs(self.buildButtons) do
-        btnData.button:mousepressed(x, y, button)
-    end
-    if self.prevPageButton then self.prevPageButton:mousepressed(x, y, button) end
-    if self.nextPageButton then self.nextPageButton:mousepressed(x, y, button) end
+    -- UI now handled by command buttons in gameplay.lua
 end
 
 function Peon:mousereleased(x, y, button)
-    for _, btnData in ipairs(self.buildButtons) do
-        btnData.button:mousereleased(x, y, button)
-    end
-    if self.prevPageButton then self.prevPageButton:mousereleased(x, y, button) end
-    if self.nextPageButton then self.nextPageButton:mousereleased(x, y, button) end
+    -- UI now handled by command buttons in gameplay.lua
 end
 
 function Peon:drawOnMinimap(mapX, mapY, scale)

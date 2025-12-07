@@ -537,14 +537,24 @@ local function getCommandButtons()
     -- Peon build commands
     if selEntity.type == "peon" then
         local canBuild = selEntity.state ~= "Building"
+        local Farm = require("farm")
+        local Barracks = require("barracks")
+        local LumberMill = require("lumbermill")
+        local Blacksmith = require("blacksmith")
+        local ScoutTower = require("scouttower")
+        local Stable = require("stable")
+        local SiegeWorkshop = require("siegeworkshop")
+        local TownHall = require("townhall")
+        
+        -- Basic buildings (always available)
         table.insert(buttons, {
             hotkey = "F",
             text = "Farm",
             icon = "farm",
-            cost = "250/100",
-            enabled = canBuild and resources.gold >= 250 and resources.lumber >= 100,
+            cost = Farm.COST_GOLD .. "/" .. Farm.COST_LUMBER,
+            enabled = canBuild and resources.gold >= Farm.COST_GOLD and resources.lumber >= Farm.COST_LUMBER,
             action = function()
-                if resources.gold >= 250 and resources.lumber >= 100 then
+                if resources.gold >= Farm.COST_GOLD and resources.lumber >= Farm.COST_LUMBER then
                     startBuildingPlacement(selEntity, "farm")
                 end
             end
@@ -553,10 +563,10 @@ local function getCommandButtons()
             hotkey = "B",
             text = "Barracks",
             icon = "barracks",
-            cost = "500/200",
-            enabled = canBuild and resources.gold >= 500 and resources.lumber >= 200,
+            cost = Barracks.COST_GOLD .. "/" .. Barracks.COST_LUMBER,
+            enabled = canBuild and resources.gold >= Barracks.COST_GOLD and resources.lumber >= Barracks.COST_LUMBER,
             action = function()
-                if resources.gold >= 500 and resources.lumber >= 200 then
+                if resources.gold >= Barracks.COST_GOLD and resources.lumber >= Barracks.COST_LUMBER then
                     startBuildingPlacement(selEntity, "barracks")
                 end
             end
@@ -565,11 +575,76 @@ local function getCommandButtons()
             hotkey = "T",
             text = "Tower",
             icon = "tower",
-            cost = "200/100",
-            enabled = canBuild and resources.gold >= 200 and resources.lumber >= 100,
+            cost = ScoutTower.COST_GOLD .. "/" .. ScoutTower.COST_LUMBER,
+            enabled = canBuild and resources.gold >= ScoutTower.COST_GOLD and resources.lumber >= ScoutTower.COST_LUMBER,
             action = function()
-                if resources.gold >= 200 and resources.lumber >= 100 then
+                if resources.gold >= ScoutTower.COST_GOLD and resources.lumber >= ScoutTower.COST_LUMBER then
                     startBuildingPlacement(selEntity, "scouttower")
+                end
+            end
+        })
+        table.insert(buttons, {
+            hotkey = "L",
+            text = "Lumber Mill",
+            icon = "lumbermill",
+            cost = LumberMill.COST_GOLD .. "/" .. LumberMill.COST_LUMBER,
+            enabled = canBuild and Requirements.canBuild("lumbermill") and resources.gold >= LumberMill.COST_GOLD and resources.lumber >= LumberMill.COST_LUMBER,
+            requirement = not Requirements.canBuild("lumbermill") and "Barracks" or nil,
+            action = function()
+                if Requirements.canBuild("lumbermill") and resources.gold >= LumberMill.COST_GOLD and resources.lumber >= LumberMill.COST_LUMBER then
+                    startBuildingPlacement(selEntity, "lumbermill")
+                end
+            end
+        })
+        table.insert(buttons, {
+            hotkey = "K",
+            text = "Blacksmith",
+            icon = "blacksmith",
+            cost = Blacksmith.COST_GOLD .. "/" .. Blacksmith.COST_LUMBER,
+            enabled = canBuild and Requirements.canBuild("blacksmith") and resources.gold >= Blacksmith.COST_GOLD and resources.lumber >= Blacksmith.COST_LUMBER,
+            requirement = not Requirements.canBuild("blacksmith") and "Barracks" or nil,
+            action = function()
+                if Requirements.canBuild("blacksmith") and resources.gold >= Blacksmith.COST_GOLD and resources.lumber >= Blacksmith.COST_LUMBER then
+                    startBuildingPlacement(selEntity, "blacksmith")
+                end
+            end
+        })
+        table.insert(buttons, {
+            hotkey = "E",
+            text = "Stable",
+            icon = "stable",
+            cost = Stable.COST_GOLD .. "/" .. Stable.COST_LUMBER,
+            enabled = canBuild and Requirements.canBuild("stable") and resources.gold >= Stable.COST_GOLD and resources.lumber >= Stable.COST_LUMBER,
+            requirement = not Requirements.canBuild("stable") and "Hold" or nil,
+            action = function()
+                if Requirements.canBuild("stable") and resources.gold >= Stable.COST_GOLD and resources.lumber >= Stable.COST_LUMBER then
+                    startBuildingPlacement(selEntity, "stable")
+                end
+            end
+        })
+        table.insert(buttons, {
+            hotkey = "G",
+            text = "Siege",
+            icon = "siegeworkshop",
+            cost = SiegeWorkshop.COST_GOLD .. "/" .. SiegeWorkshop.COST_LUMBER,
+            enabled = canBuild and Requirements.canBuild("siegeworkshop") and resources.gold >= SiegeWorkshop.COST_GOLD and resources.lumber >= SiegeWorkshop.COST_LUMBER,
+            requirement = not Requirements.canBuild("siegeworkshop") and "Keep" or nil,
+            action = function()
+                if Requirements.canBuild("siegeworkshop") and resources.gold >= SiegeWorkshop.COST_GOLD and resources.lumber >= SiegeWorkshop.COST_LUMBER then
+                    startBuildingPlacement(selEntity, "siegeworkshop")
+                end
+            end
+        })
+        table.insert(buttons, {
+            hotkey = "H",
+            text = "Town Hall",
+            icon = "townhall",
+            cost = TownHall.COST_GOLD .. "/" .. TownHall.COST_LUMBER,
+            enabled = canBuild and Requirements.canBuild("townhall") and resources.gold >= TownHall.COST_GOLD and resources.lumber >= TownHall.COST_LUMBER,
+            requirement = not Requirements.canBuild("townhall") and "Hold" or nil,
+            action = function()
+                if Requirements.canBuild("townhall") and resources.gold >= TownHall.COST_GOLD and resources.lumber >= TownHall.COST_LUMBER then
+                    startBuildingPlacement(selEntity, "townhall")
                 end
             end
         })
@@ -577,6 +652,7 @@ local function getCommandButtons()
     
     -- Town Hall commands
     if selEntity.type == "townhall" and selEntity.completed then
+        local TownHall = require("townhall")
         local canTrain = selEntity:canProduce() and resources.gold >= selEntity.productionCost and currentPop < maxPop
         table.insert(buttons, {
             hotkey = "W",
@@ -584,7 +660,6 @@ local function getCommandButtons()
             icon = "peon",
             cost = tostring(selEntity.productionCost),
             enabled = canTrain,
-            primary = true,  -- Center this button
             action = function()
                 if selEntity:canProduce() and resources.gold >= selEntity.productionCost and currentPop < maxPop then
                     if selEntity:startProduction() then
@@ -593,19 +668,60 @@ local function getCommandButtons()
                 end
             end
         })
+        
+        -- Upgrade to Hold
+        if selEntity.tier == 1 and not selEntity.isUpgrading then
+            local canUpgrade = Requirements.canUpgradeToHold() and selEntity:canUpgrade()
+            local canAfford = resources.gold >= TownHall.HOLD_COST_GOLD and resources.lumber >= TownHall.HOLD_COST_LUMBER
+            table.insert(buttons, {
+                hotkey = "U",
+                text = "Hold",
+                icon = "upgrade",
+                cost = TownHall.HOLD_COST_GOLD .. "/" .. TownHall.HOLD_COST_LUMBER,
+                enabled = canUpgrade and canAfford,
+                requirement = not Requirements.hasBarracks() and "Barracks" or nil,
+                action = function()
+                    if canUpgrade and canAfford then
+                        resources.gold = resources.gold - TownHall.HOLD_COST_GOLD
+                        resources.lumber = resources.lumber - TownHall.HOLD_COST_LUMBER
+                        selEntity:startUpgrade()
+                    end
+                end
+            })
+        end
+        
+        -- Upgrade to Keep
+        if selEntity.tier == 2 and not selEntity.isUpgrading then
+            local canUpgrade = Requirements.canUpgradeToKeep() and selEntity:canUpgrade()
+            local canAfford = resources.gold >= TownHall.KEEP_COST_GOLD and resources.lumber >= TownHall.KEEP_COST_LUMBER
+            table.insert(buttons, {
+                hotkey = "U",
+                text = "Keep",
+                icon = "upgrade",
+                cost = TownHall.KEEP_COST_GOLD .. "/" .. TownHall.KEEP_COST_LUMBER,
+                enabled = canUpgrade and canAfford,
+                requirement = not Requirements.hasBlacksmith() and "Blacksmith" or nil,
+                action = function()
+                    if canUpgrade and canAfford then
+                        resources.gold = resources.gold - TownHall.KEEP_COST_GOLD
+                        resources.lumber = resources.lumber - TownHall.KEEP_COST_LUMBER
+                        selEntity:startUpgrade()
+                    end
+                end
+            })
+        end
     end
     
     -- Barracks commands
     if selEntity.type == "barracks" and selEntity.completed then
         local Barracks = require("barracks")
-        local canTrain = selEntity:canProduce() and resources.gold >= Barracks.FOOTMAN_COST and currentPop < maxPop
+        local canTrainFootman = selEntity:canProduce() and resources.gold >= Barracks.FOOTMAN_COST and currentPop < maxPop
         table.insert(buttons, {
             hotkey = "T",
             text = "Footman",
             icon = "footman",
             cost = tostring(Barracks.FOOTMAN_COST),
-            enabled = canTrain,
-            primary = true,  -- Center this button
+            enabled = canTrainFootman,
             action = function()
                 if selEntity:canProduce() and resources.gold >= Barracks.FOOTMAN_COST and currentPop < maxPop then
                     if selEntity:startProduction("footman") then
@@ -614,6 +730,190 @@ local function getCommandButtons()
                 end
             end
         })
+        
+        -- Archer training (requires Lumber Mill)
+        local hasLumberMill = Requirements.hasLumberMill and Requirements.hasLumberMill() or false
+        local archerCostGold = 150
+        local archerCostLumber = 50
+        local canTrainArcher = selEntity:canProduce() and hasLumberMill and 
+                              resources.gold >= archerCostGold and 
+                              resources.lumber >= archerCostLumber and 
+                              currentPop < maxPop
+        table.insert(buttons, {
+            hotkey = "A",
+            text = "Archer",
+            icon = "archer",
+            cost = archerCostGold .. "/" .. archerCostLumber,
+            enabled = canTrainArcher,
+            requirement = not hasLumberMill and "Lumber Mill" or nil,
+            action = function()
+                if selEntity:canProduce() and hasLumberMill and 
+                   resources.gold >= archerCostGold and 
+                   resources.lumber >= archerCostLumber and 
+                   currentPop < maxPop then
+                    if selEntity:startProduction("archer") then
+                        resources.gold = resources.gold - archerCostGold
+                        resources.lumber = resources.lumber - archerCostLumber
+                    end
+                end
+            end
+        })
+        
+        -- Knight training (requires Stable)
+        local hasStable = Requirements.hasStable and Requirements.hasStable() or false
+        local canTrainKnight = selEntity:canProduce() and hasStable and 
+                              resources.gold >= Barracks.KNIGHT_COST_GOLD and 
+                              resources.lumber >= Barracks.KNIGHT_COST_LUMBER and 
+                              currentPop < maxPop
+        table.insert(buttons, {
+            hotkey = "K",
+            text = "Knight",
+            icon = "knight",
+            cost = Barracks.KNIGHT_COST_GOLD .. "/" .. Barracks.KNIGHT_COST_LUMBER,
+            enabled = canTrainKnight,
+            requirement = not hasStable and "Stable" or nil,
+            action = function()
+                if selEntity:canProduce() and hasStable and 
+                   resources.gold >= Barracks.KNIGHT_COST_GOLD and 
+                   resources.lumber >= Barracks.KNIGHT_COST_LUMBER and 
+                   currentPop < maxPop then
+                    if selEntity:startProduction("knight") then
+                        resources.gold = resources.gold - Barracks.KNIGHT_COST_GOLD
+                        resources.lumber = resources.lumber - Barracks.KNIGHT_COST_LUMBER
+                    end
+                end
+            end
+        })
+        
+        -- Ballista training (requires Blacksmith)
+        local hasBlacksmith = Requirements.hasBlacksmith and Requirements.hasBlacksmith() or false
+        local ballistaCostGold = 500
+        local ballistaCostLumber = 200
+        local canTrainBallista = selEntity:canProduce() and hasBlacksmith and 
+                                resources.gold >= ballistaCostGold and 
+                                resources.lumber >= ballistaCostLumber and 
+                                currentPop < maxPop
+        table.insert(buttons, {
+            hotkey = "B",
+            text = "Ballista",
+            icon = "ballista",
+            cost = ballistaCostGold .. "/" .. ballistaCostLumber,
+            enabled = canTrainBallista,
+            requirement = not hasBlacksmith and "Blacksmith" or nil,
+            action = function()
+                if selEntity:canProduce() and hasBlacksmith and 
+                   resources.gold >= ballistaCostGold and 
+                   resources.lumber >= ballistaCostLumber and 
+                   currentPop < maxPop then
+                    if selEntity:startProduction("ballista") then
+                        resources.gold = resources.gold - ballistaCostGold
+                        resources.lumber = resources.lumber - ballistaCostLumber
+                    end
+                end
+            end
+        })
+    end
+    
+    -- Archery Range commands (legacy - building removed)
+    if selEntity.type == "archeryrange" and selEntity.completed then
+        local ArcheryRange = require("archeryrange")
+        local canTrain = selEntity:canProduce() and 
+                        resources.gold >= ArcheryRange.ARCHER_COST_GOLD and 
+                        resources.lumber >= ArcheryRange.ARCHER_COST_LUMBER and 
+                        currentPop < maxPop
+        table.insert(buttons, {
+            hotkey = "A",
+            text = "Archer",
+            icon = "archer",
+            cost = ArcheryRange.ARCHER_COST_GOLD .. "/" .. ArcheryRange.ARCHER_COST_LUMBER,
+            enabled = canTrain,
+            action = function()
+                if selEntity:canProduce() and 
+                   resources.gold >= ArcheryRange.ARCHER_COST_GOLD and 
+                   resources.lumber >= ArcheryRange.ARCHER_COST_LUMBER and 
+                   currentPop < maxPop then
+                    if selEntity:startProduction() then
+                        resources.gold = resources.gold - ArcheryRange.ARCHER_COST_GOLD
+                        resources.lumber = resources.lumber - ArcheryRange.ARCHER_COST_LUMBER
+                    end
+                end
+            end
+        })
+    end
+    
+    -- Siege Workshop commands
+    if selEntity.type == "siegeworkshop" and selEntity.completed then
+        local SiegeWorkshop = require("siegeworkshop")
+        
+        -- Flying Scout
+        local canTrainScout = selEntity:canProduce() and 
+                             resources.gold >= SiegeWorkshop.FLYINGSCOUT_COST_GOLD and 
+                             resources.lumber >= SiegeWorkshop.FLYINGSCOUT_COST_LUMBER and 
+                             currentPop < maxPop
+        table.insert(buttons, {
+            hotkey = "S",
+            text = "Scout",
+            icon = "flyingscout",
+            cost = SiegeWorkshop.FLYINGSCOUT_COST_GOLD .. "/" .. SiegeWorkshop.FLYINGSCOUT_COST_LUMBER,
+            enabled = canTrainScout,
+            action = function()
+                if selEntity:canProduce() and 
+                   resources.gold >= SiegeWorkshop.FLYINGSCOUT_COST_GOLD and 
+                   resources.lumber >= SiegeWorkshop.FLYINGSCOUT_COST_LUMBER and 
+                   currentPop < maxPop then
+                    if selEntity:startProduction("flyingscout") then
+                        resources.gold = resources.gold - SiegeWorkshop.FLYINGSCOUT_COST_GOLD
+                        resources.lumber = resources.lumber - SiegeWorkshop.FLYINGSCOUT_COST_LUMBER
+                    end
+                end
+            end
+        })
+        
+        -- Kamikaze
+        local canTrainKamikaze = selEntity:canProduce() and 
+                                resources.gold >= SiegeWorkshop.KAMIKAZE_COST_GOLD and 
+                                resources.lumber >= SiegeWorkshop.KAMIKAZE_COST_LUMBER and 
+                                currentPop < maxPop
+        table.insert(buttons, {
+            hotkey = "K",
+            text = "Kamikaze",
+            icon = "kamikaze",
+            cost = SiegeWorkshop.KAMIKAZE_COST_GOLD .. "/" .. SiegeWorkshop.KAMIKAZE_COST_LUMBER,
+            enabled = canTrainKamikaze,
+            action = function()
+                if selEntity:canProduce() and 
+                   resources.gold >= SiegeWorkshop.KAMIKAZE_COST_GOLD and 
+                   resources.lumber >= SiegeWorkshop.KAMIKAZE_COST_LUMBER and 
+                   currentPop < maxPop then
+                    if selEntity:startProduction("kamikaze") then
+                        resources.gold = resources.gold - SiegeWorkshop.KAMIKAZE_COST_GOLD
+                        resources.lumber = resources.lumber - SiegeWorkshop.KAMIKAZE_COST_LUMBER
+                    end
+                end
+            end
+        })
+    end
+    
+    -- Stable commands (Paladin upgrade)
+    if selEntity.type == "stable" and selEntity.completed then
+        local Stable = require("stable")
+        local canUpgrade = not selEntity.paladinUpgradeComplete and resources.gold >= Stable.PALADIN_UPGRADE_COST
+        if not selEntity.paladinUpgradeComplete then
+            table.insert(buttons, {
+                hotkey = "P",
+                text = "Paladin",
+                icon = "upgrade",
+                cost = tostring(Stable.PALADIN_UPGRADE_COST),
+                enabled = canUpgrade,
+                action = function()
+                    if not selEntity.paladinUpgradeComplete and resources.gold >= Stable.PALADIN_UPGRADE_COST then
+                        resources.gold = resources.gold - Stable.PALADIN_UPGRADE_COST
+                        selEntity.paladinUpgradeComplete = true
+                        addNotification("Paladin upgrade complete!")
+                    end
+                end
+            })
+        end
     end
     
     return buttons
@@ -1908,7 +2208,11 @@ function Gameplay.load(options)
     -- Create map with options from game config
     local mapOptions = {
         mapSize = options.mapSize or 64,
-        tileset = options.tileset or "summer"
+        tileset = options.tileset or "summer",
+        treeDensity = options.treeDensity or 0.50,
+        riverEnabled = options.riverEnabled ~= false,  -- Default true
+        numBridges = options.numBridges or 2,
+        riverWidth = options.riverWidth or 3
     }
     map = Map.new(mapOptions)
     map:setViewport(0, UI.topBarHeight, screenW, screenH - UI.topBarHeight - 70)  -- 70 = command bar height
@@ -1937,21 +2241,20 @@ function Gameplay.load(options)
     map:clearArea(thGridX - clearRadius, thGridY - clearRadius, 
                   buildingSize + clearRadius * 2, buildingSize + clearRadius * 2)
     
-    -- Gold mine near player
+    -- Gold mine near player (to the right of town hall)
     local m1X, m1Y = map:findClearArea(buildingSize, buildingSize, thGridX + 8, thGridY + 5, 10)
     table.insert(goldMines, GoldMine.new({gridX = m1X, gridY = m1Y, gold = 50000, map = map}))
     
-    -- Player starting farms (2 already built) - place them further from town hall to avoid overlap
-    -- Town hall is 3x3, so farm at thGridX + 4 ensures no overlap
-    local farmX, farmY = map:findClearArea(2, 2, thGridX + 4, thGridY, 8)
+    -- Player starting farms (2 already built) - place on opposite side from mine (left of town hall)
+    local farmX, farmY = map:findClearArea(2, 2, thGridX - 4, thGridY, 8)
     if farmX then
         local startFarm = Farm.new({gridX = farmX, gridY = farmY, map = map, isBuilding = false, team = playerTeam})
         startFarm.completed = true
         table.insert(farms, startFarm)
     end
     
-    -- Second starting farm
-    local farm2X, farm2Y = map:findClearArea(2, 2, thGridX + 4, thGridY + 3, 8)
+    -- Second starting farm (also on left side)
+    local farm2X, farm2Y = map:findClearArea(2, 2, thGridX - 4, thGridY + 3, 8)
     if farm2X then
         local startFarm2 = Farm.new({gridX = farm2X, gridY = farm2Y, map = map, isBuilding = false, team = playerTeam})
         startFarm2.completed = true
@@ -2080,8 +2383,8 @@ function Gameplay.load(options)
         end
     end
     
-    -- Enemy starting farm (already built) - place it further from town hall to avoid overlap
-    local enemyFarmX, enemyFarmY = map:findClearArea(2, 2, enemyThGridX - 4, enemyThGridY, 8)
+    -- Enemy starting farm (already built) - place on opposite side from mine (right of town hall)
+    local enemyFarmX, enemyFarmY = map:findClearArea(2, 2, enemyThGridX + 4, enemyThGridY, 8)
     if enemyFarmX then
         local enemyFarm = Farm.new({gridX = enemyFarmX, gridY = enemyFarmY, map = map, isBuilding = false, team = enemyTeam})
         enemyFarm.completed = true
@@ -2297,6 +2600,14 @@ function Gameplay.update(dt)
                 end
                 pushUnitOutOfBuildings(newUnit)
                 table.insert(knights, newUnit)
+            elseif unitType == "archer" then
+                local newUnit = Archer.new({worldX = spawnX, worldY = spawnY, map = map, team = barrack.team})
+                pushUnitOutOfBuildings(newUnit)
+                table.insert(archers, newUnit)
+            elseif unitType == "ballista" then
+                local newUnit = Ballista.new({worldX = spawnX, worldY = spawnY, map = map, team = barrack.team})
+                pushUnitOutOfBuildings(newUnit)
+                table.insert(ballistas, newUnit)
             end
             calculatePopulation()
         end
@@ -2664,6 +2975,12 @@ function Gameplay.draw()
     drawMinimap(screenW)
     drawCommandBar(screenW, screenH)
     
+    -- Draw selected entity's UI (buttons, etc.)
+    local selEntity = selectedEntities[1]
+    if selEntity and selEntity.drawUI then
+        selEntity:drawUI()
+    end
+    
     -- Draw notifications (slide in from left, stack up)
     love.graphics.setFont(Game.fonts.medium)
     local notifBaseY = screenH - 100  -- Above command bar
@@ -2880,20 +3197,20 @@ function Gameplay.mousepressed(x, y, button)
             -- Only issue commands to player-owned units
             if not isPlayerOwned(entity) then
                 -- Skip enemy units - can't command them
-            -- Special handling for peons - attack-move on resources = gather
+            -- Special handling for peons - attack-move = gather-move
             elseif entity.type == "peon" then
                 if clickedMine then
-                    -- Peon attack-move on gold mine = gather gold
-                    entity:goToGather(clickedMine, resources)
+                    -- Peon attack-move on gold mine = go directly to that mine
+                    entity:goToMine(clickedMine)
                 elseif clickedTreeX and clickedTreeY then
-                    -- Peon attack-move on tree = chop lumber
-                    entity:goToChop(clickedTreeX, clickedTreeY, resources)
+                    -- Peon attack-move on tree = go directly to that tree
+                    entity:goToTree(clickedTreeX, clickedTreeY)
                 elseif clickedEnemy and entity.setAttackTarget then
+                    -- Attack an enemy
                     entity:setAttackTarget(clickedEnemy)
-                elseif entity.attackMoveTo then
-                    entity:attackMoveTo(worldX, worldY)
-                elseif entity.moveTo then
-                    entity:moveTo(worldX, worldY)
+                else
+                    -- Gather-move: move toward location, auto-gather nearby resources
+                    entity:gatherMoveTo(worldX, worldY, goldMines, resources)
                 end
             elseif clickedEnemy and entity.setAttackTarget then
                 -- Direct attack on clicked enemy
@@ -2952,6 +3269,12 @@ function Gameplay.mousemoved(x, y, dx, dy)
 end
 
 function Gameplay.mousereleased(x, y, button)
+    -- Forward to selected entity UI first
+    local selEntity = selectedEntities[1]
+    if selEntity and selEntity.mousereleased then 
+        selEntity:mousereleased(x, y, button) 
+    end
+    
     -- Check victory/defeat button click
     if (victory or defeat) and not tutorialMode and button == 1 and endScreenButton then
         if x >= endScreenButton.x and x <= endScreenButton.x + endScreenButton.w and

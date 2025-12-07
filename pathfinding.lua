@@ -138,10 +138,12 @@ function Pathfinding.rebuildNavGrid(map, buildings)
         end
     end
     
-    -- Mark trees as blocked
+    -- Mark impassable tiles (trees, water) as blocked
+    -- TILE_TREE = 2, TILE_WATER = 4
     for tileY = 1, map.height do
         for tileX = 1, map.width do
-            if map.tiles[tileY] and map.tiles[tileY][tileX] == 2 then  -- TILE_TREE = 2
+            local tile = map.tiles[tileY] and map.tiles[tileY][tileX]
+            if tile == 2 or tile == 4 then  -- Tree or Water
                 -- Each tile maps to 2x2 nav cells
                 local baseNavX = (tileX - 1) * 2 + 1
                 local baseNavY = (tileY - 1) * 2 + 1

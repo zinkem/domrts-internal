@@ -279,107 +279,20 @@ function ArcheryRange:getBuildProgress()
 end
 
 function ArcheryRange:updateUI(resources, screenW, screenH, font, currentPop, maxPop)
-    currentPop = currentPop or 0
-    maxPop = maxPop or 999
-    self.currentPop = currentPop
-    self.maxPop = maxPop
-    
-    -- Don't show UI for enemy buildings
-    local playerTeam = Teams and Teams.PLAYER or 1
-    if self.team ~= playerTeam then return end
-    
-    if self.selected and self.completed then
-        -- New bottom panel positioning (matches barracks layout)
-        local panelX = screenW - 288
-        local panelY = screenH - 188
-        local buttonY = panelY + 55
-        local buttonW = 125
-        local buttonH = 36
-        
-        if not self.actionButton then
-            local selfRef = self
-            self.actionButton = Button.new({
-                x = panelX + 12,
-                y = buttonY,
-                width = buttonW,
-                height = buttonH,
-                text = "Train Archer",
-                font = font,
-                colors = {
-                    normal = {0.3, 0.5, 0.35, 1},
-                    hover = {0.4, 0.6, 0.45, 1},
-                    pressed = {0.2, 0.4, 0.25, 1},
-                    text = {0.95, 0.92, 0.85, 1},
-                    border = {0.3, 0.5, 0.35, 1}
-                },
-                onClick = function()
-                    if resources.gold >= ArcheryRange.ARCHER_COST_GOLD and
-                       resources.lumber >= ArcheryRange.ARCHER_COST_LUMBER and
-                       selfRef:canProduce() and 
-                       selfRef.currentPop < selfRef.maxPop then
-                        if selfRef:startProduction() then
-                            resources.gold = resources.gold - ArcheryRange.ARCHER_COST_GOLD
-                            resources.lumber = resources.lumber - ArcheryRange.ARCHER_COST_LUMBER
-                        end
-                    end
-                end
-            })
-        else
-            self.actionButton.x = panelX + 12
-            self.actionButton.y = buttonY
-        end
-        
-        local costText = string.format("Archer (%d/%d)", ArcheryRange.ARCHER_COST_GOLD, ArcheryRange.ARCHER_COST_LUMBER)
-        self.actionButton:setText(costText)
-        
-        local canAfford = resources.gold >= ArcheryRange.ARCHER_COST_GOLD and 
-                         resources.lumber >= ArcheryRange.ARCHER_COST_LUMBER
-        self.actionButton:setEnabled(canAfford and currentPop < maxPop and self:canProduce())
-        self.actionButton:update(0)
-    else
-        self.actionButton = nil
-    end
+    -- UI now handled by command buttons in gameplay.lua
 end
 
 function ArcheryRange:drawUI()
-    if self.selected and self.completed and self.actionButton then
-        self.actionButton:draw()
-        
-        if self.currentPop >= self.maxPop then
-            local screenW = love.graphics.getWidth()
-            local screenH = love.graphics.getHeight()
-            love.graphics.setColor(1, 0.4, 0.4, 1)
-            love.graphics.setFont(Game.fonts.small)
-            love.graphics.print("Need more farms!", screenW - 276, screenH - 188 + 95)
-            love.graphics.setColor(1, 1, 1, 1)
-        end
-    end
+    -- UI now handled by command buttons in gameplay.lua
 end
 
 function ArcheryRange:mousepressed(x, y, button)
-    if self.actionButton then self.actionButton:mousepressed(x, y, button) end
+    -- UI now handled by command buttons in gameplay.lua
 end
 
 function ArcheryRange:mousereleased(x, y, button)
-    if self.actionButton then self.actionButton:mousereleased(x, y, button) end
+    -- UI now handled by command buttons in gameplay.lua
 end
-
-function ArcheryRange:drawOnMinimap(mapX, mapY, scale)
-    if self.completed then
-        if Teams then
-            Teams.setColor(self.team, "minimapBuilding")
-        else
-            love.graphics.setColor(0.3, 0.55, 0.35, 1)
-        end
-    else
-        love.graphics.setColor(0.25, 0.4, 0.28, 0.6)
-    end
-    local x = mapX + (self.gridX - 1) * scale
-    local y = mapY + (self.gridY - 1) * scale
-    love.graphics.rectangle("fill", x, y, self.gridSize * scale, self.gridSize * scale)
-end
-
--- Combat Methods --
 
 function ArcheryRange:takeDamage(amount)
     self.hp = self.hp - amount
@@ -411,6 +324,19 @@ function ArcheryRange:drawHealthBar()
     love.graphics.setColor(0, 0, 0, 0.8)
     love.graphics.setLineWidth(1)
     love.graphics.rectangle("line", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
+end
+
+function ArcheryRange:drawOnMinimap(mapX, mapY, scale)
+    local Teams = require("teams")
+    if Teams then
+        local teamColor = Teams.getColor(self.team, "minimapBuilding")
+        love.graphics.setColor(teamColor[1], teamColor[2], teamColor[3], 1)
+    else
+        love.graphics.setColor(0.35, 0.5, 0.35, 1)
+    end
+    local x = mapX + (self.gridX - 1) * scale
+    local y = mapY + (self.gridY - 1) * scale
+    love.graphics.rectangle("fill", x, y, self.size * scale, self.size * scale)
 end
 
 return ArcheryRange
