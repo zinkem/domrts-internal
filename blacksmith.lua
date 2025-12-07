@@ -166,7 +166,7 @@ end
 
 -- Initialize palette renderer
 local function initPaletteRenderer()
-    local canvasSize = 96  -- 2x2 building but needs larger canvas for 2x scale isometric
+    local canvasSize = 96  -- 2x2 building needs room for 2x scale isometric
     
     if paletteRenderer then
         local canvas = paletteRenderer:getCanvas()
@@ -360,25 +360,42 @@ function Blacksmith:draw()
         return
     end
     
-    -- Use palette shader if enabled
+    -- Use palette shader if enabled, with 2x scaling
     if usePaletteShader and PaletteShader then
         initPaletteRenderer()
         if paletteRenderer then
             paletteRenderer:beginCapture()
-            -- Offset to center the 64px building in 96px canvas
-            self:drawBlacksmithIso(16, 16, size)
+            -- Draw at offset in 96px canvas
+            self:drawBlacksmithIso(16, 16, 64)
             paletteRenderer:endCapture()
-            paletteRenderer:draw(x - 16, y - 16, 1)
+            
+            -- Draw at 2x scale
+            local drawScale = 2
+            local canvasSize = 96
+            local scaledSize = canvasSize * drawScale
+            local offsetX = x + (size - scaledSize) / 2
+            local offsetY = y + size - scaledSize
+            paletteRenderer:draw(offsetX, offsetY, drawScale)
         end
     else
-        self:drawBlacksmithIso(x, y, size)
+        -- Draw directly at 2x scale
+        love.graphics.push()
+        local drawScale = 2
+        local canvasSize = 96
+        local scaledSize = canvasSize * drawScale
+        local offsetX = x + (size - scaledSize) / 2
+        local offsetY = y + size - scaledSize
+        love.graphics.translate(offsetX, offsetY)
+        love.graphics.scale(drawScale, drawScale)
+        self:drawBlacksmithIso(16, 16, 64)
+        love.graphics.pop()
     end
     
     -- Draw smoke above the chimney (outside shader for better effect)
     if self.completed then
         local smokeX, smokeY = self:getScreenPos()
-        -- Chimney is roughly at top-right of building
-        drawSmokeParticles(self.uniqueId, smokeX + size * 0.7, smokeY - 5)
+        -- Chimney is roughly at top-right of building (adjusted for 2x scale)
+        drawSmokeParticles(self.uniqueId, smokeX + size * 0.65, smokeY - 15)
     end
     
     -- Damage flash

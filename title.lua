@@ -13,7 +13,9 @@ pcall(function() Audio = require("audio") end)
 -- Local state
 local animTimer = 0
 local particles = {}
+local medallionSparks = {}
 local buttons = {}
+local devButton = nil  -- Small icon button in corner
 local checkboxes = {}
 
 -- Background image state
@@ -99,6 +101,160 @@ local function spawnParticle()
         alpha = 0.2 + math.random() * 0.3,
         type = math.random() > 0.8 and "spark" or "dust"
     })
+end
+
+-- Spawn sparks/embers from behind the medallion
+local function spawnMedallionSpark(cx, cy, radius)
+    -- Spawn from edge of medallion
+    local angle = math.random() * math.pi * 2
+    local spawnRadius = radius * (0.85 + math.random() * 0.3)
+    local sparkType = math.random()
+    
+    local spark = {
+        x = cx + math.cos(angle) * spawnRadius,
+        y = cy + math.sin(angle) * spawnRadius,
+        vx = math.cos(angle) * (10 + math.random() * 30) + (math.random() - 0.5) * 20,
+        vy = -40 - math.random() * 60,  -- Float upward
+        size = 1.5 + math.random() * 3,
+        life = 1.5 + math.random() * 2,
+        maxLife = 1.5 + math.random() * 2,
+        rotation = math.random() * math.pi * 2,
+        rotSpeed = (math.random() - 0.5) * 4,
+    }
+    
+    -- Different spark types
+    if sparkType < 0.4 then
+        -- Orange ember
+        spark.color = {1.0, 0.5 + math.random() * 0.3, 0.1, 1}
+        spark.type = "ember"
+    elseif sparkType < 0.7 then
+        -- Gold spark
+        spark.color = {1.0, 0.85, 0.3, 1}
+        spark.type = "spark"
+        spark.size = spark.size * 0.7
+    else
+        -- Red flame bit
+        spark.color = {1.0, 0.25, 0.1, 1}
+        spark.type = "flame"
+        spark.size = spark.size * 1.2
+    end
+    
+    table.insert(medallionSparks, spark)
+end
+
+-- Draw the stone/metal medallion frame
+local function drawMedallion(cx, cy, radius)
+    -- Outer glow (fire glow from behind) - extended to fill corners
+    for i = 30, 1, -1 do
+        local glowRadius = radius + i * 6
+        local alpha = (1 - i / 30) * 0.18
+        local flicker = 0.9 + math.sin(animTimer * 8 + i) * 0.1
+        love.graphics.setColor(1.0, 0.4, 0.1, alpha * flicker)
+        love.graphics.circle("fill", cx, cy, glowRadius)
+    end
+    
+    -- Dark stone base
+    love.graphics.setColor(0.08, 0.07, 0.06, 1)
+    love.graphics.circle("fill", cx, cy, radius)
+    
+    -- Stone texture rings
+    for i = 1, 5 do
+        local ringRadius = radius * (0.3 + i * 0.14)
+        local shade = 0.12 + i * 0.02
+        love.graphics.setColor(shade, shade * 0.9, shade * 0.8, 0.5)
+        love.graphics.setLineWidth(2)
+        love.graphics.circle("line", cx, cy, ringRadius)
+    end
+    
+    -- Inner gradient (darker center)
+    for i = 0, radius * 0.6, 2 do
+        local t = i / (radius * 0.6)
+        local alpha = (1 - t) * 0.4
+        love.graphics.setColor(0, 0, 0, alpha)
+        love.graphics.circle("fill", cx, cy, radius * 0.6 - i)
+    end
+    
+    -- Outer bronze ring
+    love.graphics.setLineWidth(12)
+    love.graphics.setColor(Colors.goldDark[1] * 0.7, Colors.goldDark[2] * 0.7, Colors.goldDark[3] * 0.7, 1)
+    love.graphics.circle("line", cx, cy, radius - 6)
+    
+    -- Bronze ring highlight
+    love.graphics.setLineWidth(3)
+    love.graphics.setColor(Colors.goldMid[1], Colors.goldMid[2], Colors.goldMid[3], 0.6)
+    love.graphics.arc("line", "open", cx, cy, radius - 6, -math.pi * 0.8, -math.pi * 0.2)
+    
+    -- Inner bronze ring
+    love.graphics.setLineWidth(6)
+    love.graphics.setColor(Colors.goldDark[1] * 0.6, Colors.goldDark[2] * 0.6, Colors.goldDark[3] * 0.6, 1)
+    love.graphics.circle("line", cx, cy, radius * 0.75)
+    
+    -- Decorative rivets around the edge
+    local numRivets = 16
+    for i = 1, numRivets do
+        local angle = (i / numRivets) * math.pi * 2 - math.pi / 2
+        local rx = cx + math.cos(angle) * (radius - 20)
+        local ry = cy + math.sin(angle) * (radius - 20)
+        
+        -- Rivet base
+        love.graphics.setColor(Colors.goldDark)
+        love.graphics.circle("fill", rx, ry, 6)
+        -- Rivet highlight
+        love.graphics.setColor(Colors.goldLight[1], Colors.goldLight[2], Colors.goldLight[3], 0.7)
+        love.graphics.circle("fill", rx - 1.5, ry - 1.5, 2.5)
+        -- Rivet shadow
+        love.graphics.setColor(0, 0, 0, 0.4)
+        love.graphics.arc("fill", rx, ry, 5, math.pi * 0.2, math.pi * 0.8)
+    end
+    
+    -- Center emblem (abstract symbol)
+    love.graphics.setColor(Colors.goldMid[1], Colors.goldMid[2], Colors.goldMid[3], 0.8)
+    love.graphics.setLineWidth(4)
+    -- Diamond shape
+    local emblemSize = radius * 0.25
+    love.graphics.polygon("line",
+        cx, cy - emblemSize,
+        cx + emblemSize, cy,
+        cx, cy + emblemSize,
+        cx - emblemSize, cy
+    )
+    -- Inner diamond
+    love.graphics.setLineWidth(2)
+    love.graphics.setColor(Colors.goldLight[1], Colors.goldLight[2], Colors.goldLight[3], 0.5)
+    local innerSize = emblemSize * 0.5
+    love.graphics.polygon("line",
+        cx, cy - innerSize,
+        cx + innerSize, cy,
+        cx, cy + innerSize,
+        cx - innerSize, cy
+    )
+end
+
+-- Draw sparks (called after medallion so they appear in front)
+local function drawMedallionSparks()
+    for _, spark in ipairs(medallionSparks) do
+        local alpha = (spark.life / spark.maxLife)
+        local flickerAlpha = alpha * (0.7 + math.sin(animTimer * 20 + spark.rotation) * 0.3)
+        
+        love.graphics.setColor(spark.color[1], spark.color[2], spark.color[3], flickerAlpha)
+        
+        if spark.type == "ember" then
+            -- Glowing ember with soft edge
+            love.graphics.circle("fill", spark.x, spark.y, spark.size)
+            love.graphics.setColor(1, 0.9, 0.5, flickerAlpha * 0.5)
+            love.graphics.circle("fill", spark.x, spark.y, spark.size * 0.5)
+        elseif spark.type == "spark" then
+            -- Sharp bright spark
+            love.graphics.circle("fill", spark.x, spark.y, spark.size)
+        else
+            -- Flame wisp (elongated)
+            love.graphics.push()
+            love.graphics.translate(spark.x, spark.y)
+            love.graphics.rotate(spark.rotation)
+            love.graphics.ellipse("fill", 0, 0, spark.size * 0.6, spark.size * 1.5)
+            love.graphics.pop()
+        end
+    end
 end
 
 -- Draw a stylized button
@@ -251,7 +407,7 @@ end
 local function drawVignette(screenW, screenH)
     local cx, cy = screenW / 2, screenH / 2
     local maxDist = math.sqrt(cx * cx + cy * cy)
-    local gridSize = 16  -- Size of each cell
+    local gridSize = 12  -- Smaller cells for smoother gradient
     
     -- Draw grid cells with distance-based alpha (no overlapping)
     for y = 0, screenH, gridSize do
@@ -264,21 +420,14 @@ local function drawVignette(screenW, screenH)
             local dist = math.sqrt(dx * dx + dy * dy)
             local t = dist / maxDist  -- 0 at center, 1 at corners
             
-            -- Alpha increases toward edges (vignette effect)
-            local alpha = math.max(0, (t - 0.25) / 0.75) ^ 1.6 * 0.75
+            -- Harsher vignette - kicks in earlier and stronger
+            local alpha = math.max(0, (t - 0.15) / 0.85) ^ 1.4 * 0.9
             
             if alpha > 0.01 then
-                love.graphics.setColor(0.05, 0.08, 0.12, alpha)
+                love.graphics.setColor(0.02, 0.03, 0.05, alpha)
                 love.graphics.rectangle("fill", x, y, gridSize, gridSize)
             end
         end
-    end
-    
-    -- Extra darkening on left for panel readability
-    for i = 0, 350 do
-        local alpha = (1 - i / 350) * 0.35
-        love.graphics.setColor(0.05, 0.08, 0.12, alpha)
-        love.graphics.rectangle("fill", i, 0, 1, screenH)
     end
 end
 
@@ -296,8 +445,8 @@ local function drawBackgroundImage()
     
     -- Offset to right side so warrior is visible (panel will be on left)
     -- Shift down to show her face and flowing hair
-    local drawX = (screenW - drawW) / 2 + 80
-    local drawY = (screenH - drawH) / 2 + 60  -- Shift down to show head
+    local drawX = (screenW - drawW) / 2 + 100
+    local drawY = (screenH - drawH) / 2 + 140  -- Shift down more to show head
     
     -- Canvas for shader
     if not bgCanvas or bgCanvas:getWidth() ~= screenW or bgCanvas:getHeight() ~= screenH then
@@ -327,6 +476,7 @@ end
 function Title.load()
     animTimer = 0
     particles = {}
+    medallionSparks = {}
     jiggleTime = 0
     jiggleActive = false
     
@@ -360,7 +510,7 @@ function Title.load()
     -- Layout
     local screenW, screenH = love.graphics.getDimensions()
     local panelW = 280
-    local panelX = 40
+    local panelX = 100
     local panelY = 80
     local panelH = screenH - 160
     
@@ -398,13 +548,15 @@ function Title.load()
             text = "Exit Game",
             x = btnX, y = btnStartY + btnSpacing * 4 + 20, w = btnW, h = btnH,
             action = function() love.event.quit() end
-        },
-        {
-            text = "DEV PREVIEW",
-            x = btnX, y = btnStartY + btnSpacing * 5 + 30, w = btnW, h = btnH,
-            action = function() Game.SceneManager.switch("devpreview") end,
-            dev = true  -- Special styling for dev button
         }
+    }
+    
+    -- Small dev button in bottom-right corner (icon only)
+    devButton = {
+        x = screenW - 50,
+        y = screenH - 50,
+        size = 36,
+        action = function() Game.SceneManager.switch("devpreview") end
     }
     
     -- Checkboxes for audio
@@ -464,6 +616,30 @@ function Title.update(dt)
         end
     end
     
+    -- Medallion sparks
+    local screenW, screenH = love.graphics.getDimensions()
+    local medallionX = 120
+    local medallionY = screenH / 2 - 100
+    local medallionRadius = 340
+    
+    -- Spawn new sparks
+    if math.random() < dt * 12 then  -- ~12 sparks per second
+        spawnMedallionSpark(medallionX, medallionY, medallionRadius)
+    end
+    
+    -- Update medallion sparks
+    for i = #medallionSparks, 1, -1 do
+        local s = medallionSparks[i]
+        s.x = s.x + s.vx * dt
+        s.y = s.y + s.vy * dt
+        s.vy = s.vy - 20 * dt  -- Slow down upward movement (gravity-ish but upward)
+        s.rotation = s.rotation + s.rotSpeed * dt
+        s.life = s.life - dt
+        if s.life <= 0 then
+            table.remove(medallionSparks, i)
+        end
+    end
+    
     -- Sync checkboxes with settings
     if checkboxes[1] then checkboxes[1].checked = Game.settings.musicEnabled end
     if checkboxes[2] then checkboxes[2].checked = Game.settings.soundEnabled end
@@ -489,6 +665,15 @@ function Title.draw()
     -- Vignette
     drawVignette(screenW, screenH)
     
+    -- Medallion (behind panel, offset up and left)
+    local medallionX = 120  -- Further left
+    local medallionY = screenH / 2 - 100  -- Up from center
+    local medallionRadius = 340
+    drawMedallion(medallionX, medallionY, medallionRadius)
+    
+    -- Medallion sparks (in front of medallion, behind panel)
+    drawMedallionSparks()
+    
     -- Dust particles
     for _, p in ipairs(particles) do
         local alpha = (p.life / p.maxLife) * p.alpha
@@ -502,7 +687,7 @@ function Title.draw()
     
     -- Side panel
     local panelW = 280
-    local panelX = 40
+    local panelX = 100
     local panelY = 80
     local panelH = screenH - 160
     
@@ -580,6 +765,56 @@ function Title.draw()
         drawCheckbox(cb, mx, my)
     end
     
+    -- Small dev button in corner (gear/wrench icon)
+    if devButton then
+        local db = devButton
+        local dbHovered = mx >= db.x and mx <= db.x + db.size and my >= db.y and my <= db.y + db.size
+        
+        -- Button background
+        love.graphics.setColor(Colors.tealDark[1], Colors.tealDark[2], Colors.tealDark[3], dbHovered and 0.9 or 0.6)
+        love.graphics.rectangle("fill", db.x, db.y, db.size, db.size, 6)
+        
+        -- Border
+        if dbHovered then
+            love.graphics.setColor(Colors.tealBright)
+        else
+            love.graphics.setColor(Colors.tealLight[1], Colors.tealLight[2], Colors.tealLight[3], 0.4)
+        end
+        love.graphics.setLineWidth(1)
+        love.graphics.rectangle("line", db.x, db.y, db.size, db.size, 6)
+        
+        -- Gear icon (simplified)
+        local cx, cy = db.x + db.size/2, db.y + db.size/2
+        local outerR = db.size * 0.32
+        local innerR = db.size * 0.18
+        local toothH = db.size * 0.12
+        
+        if dbHovered then
+            love.graphics.setColor(Colors.goldLight)
+        else
+            love.graphics.setColor(Colors.textLight[1], Colors.textLight[2], Colors.textLight[3], 0.7)
+        end
+        
+        -- Center circle
+        love.graphics.circle("fill", cx, cy, innerR)
+        
+        -- Gear teeth
+        love.graphics.setLineWidth(3)
+        local numTeeth = 6
+        for i = 1, numTeeth do
+            local angle = (i / numTeeth) * math.pi * 2 + animTimer * 0.5
+            local x1 = cx + math.cos(angle) * innerR
+            local y1 = cy + math.sin(angle) * innerR
+            local x2 = cx + math.cos(angle) * (outerR + toothH)
+            local y2 = cy + math.sin(angle) * (outerR + toothH)
+            love.graphics.line(x1, y1, x2, y2)
+        end
+        
+        -- Inner hole
+        love.graphics.setColor(Colors.tealDark[1], Colors.tealDark[2], Colors.tealDark[3], 1)
+        love.graphics.circle("fill", cx, cy, innerR * 0.4)
+    end
+    
     -- Version in corner
     love.graphics.setColor(Colors.textLight[1], Colors.textLight[2], Colors.textLight[3], 0.3)
     love.graphics.print("v0.1 - Made with LÖVE", screenW - 150, screenH - 25)
@@ -621,6 +856,16 @@ function Title.mousepressed(x, y, button)
         if x >= cb.x and x <= cb.x + size + 80 and
            y >= cb.y and y <= cb.y + size then
             if cb.toggle then cb.toggle(cb) end
+            return
+        end
+    end
+    
+    -- Check dev button
+    if devButton then
+        local db = devButton
+        if x >= db.x and x <= db.x + db.size and
+           y >= db.y and y <= db.y + db.size then
+            if db.action then db.action() end
             return
         end
     end

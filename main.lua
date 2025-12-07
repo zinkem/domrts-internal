@@ -357,11 +357,34 @@ function love.load()
         vsync = true
     })
     
+    -- Helper to load custom fonts with fallback
+    local function loadFont(path, size)
+        local success, font = pcall(function()
+            return love.graphics.newFont(path, size)
+        end)
+        if success then
+            return font
+        else
+            print("Could not load font: " .. path .. ", using default")
+            return love.graphics.newFont(size)
+        end
+    end
+    
     Game.fonts = {
+        -- Basic sizes (fallback)
         small = love.graphics.newFont(14),
-        medium = love.graphics.newFont(20),
-        large = love.graphics.newFont(32),
-        title = love.graphics.newFont(64)
+        medium = love.graphics.newFont(18),
+        
+        -- Headers and emphasis
+        large = loadFont("fonts/empire-crown/empirecrown.ttf", 28),
+        title = loadFont("fonts/morris-roman-black/MorrisRoman-Black.ttf", 72),
+        subtitle = loadFont("fonts/empire-crown/empirecrown.ttf", 24),
+        button = loadFont("fonts/empire-crown/empirecrown.ttf", 20),
+        
+        -- Stats screen - using default for reliability
+        stats = love.graphics.newFont(18),
+        statsLarge = love.graphics.newFont(28),
+        header = loadFont("fonts/knights-templar/Knight2.ttf", 24),
     }
     
     -- Load and register scenes
