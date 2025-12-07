@@ -233,11 +233,14 @@ end
 
 -- Initialize the palette renderer (called once)
 local function initPaletteRenderer()
+    -- Town hall is 4x4 = 128px
+    local canvasSize = 128
+    
     if paletteRenderer then
         local canvas = paletteRenderer:getCanvas()
         if canvas then
             local w, h = canvas:getDimensions()
-            if w ~= 96 or h ~= 96 then
+            if w ~= canvasSize or h ~= canvasSize then
                 paletteRenderer = nil
             end
         end
@@ -245,11 +248,11 @@ local function initPaletteRenderer()
     
     if paletteRenderer or not PaletteShader then return end
     
-    -- Full size canvas (96x96) - same as building
+    -- Full size canvas for 4x4 building (128x128)
     -- Shader provides palette quantization for retro look
     paletteRenderer = PaletteShader.new({
-        width = 96,
-        height = 96,
+        width = canvasSize,
+        height = canvasSize,
         palette = PaletteShader.PALETTES.FANTASY,
         dithering = false,
         ditherStrength = 0
@@ -370,7 +373,7 @@ end
 local TownHall = {}
 TownHall.__index = TownHall
 
-TownHall.GRID_SIZE = 3
+TownHall.GRID_SIZE = 4
 
 -- Build costs for new Town Hall
 TownHall.COST_GOLD = 1200
@@ -600,36 +603,52 @@ function TownHall:draw()
         return
     end
     
-    -- Use palette shader if enabled
+    -- Use palette shader if enabled, with 2x scaling
     if usePaletteShader and PaletteShader then
         initPaletteRenderer()
         if paletteRenderer then
-            -- Full size canvas (96x96) matches building size
-            -- Draw at (0,0) with full size, canvas captures it
+            -- Draw at (0,0) in the 128px canvas
             paletteRenderer:beginCapture()
             
             if self.tier == 1 then
-                self:drawTownHallIso(0, 0, size)
+                self:drawTownHallIso(0, 0, 128)  -- Original size in canvas
             elseif self.tier == 2 then
-                self:drawHoldIso(0, 0, size)
+                self:drawHoldIso(0, 0, 128)
             else
-                self:drawKeepIso(0, 0, size)
+                self:drawKeepIso(0, 0, 128)
             end
             
             paletteRenderer:endCapture()
             
-            -- Draw canvas at tile position, scale=1 (already full size)
-            paletteRenderer:draw(x, y, 1)
+            -- Draw at 2x scale, offset to align bottom edge with tile
+            -- Canvas is 128px, scaled to 256px. Building needs to align with bottom of tile area.
+            local drawScale = 2
+            local canvasSize = 128
+            local scaledSize = canvasSize * drawScale  -- 256
+            local offsetX = x + (size - scaledSize) / 2  -- Center horizontally
+            local offsetY = y + size - scaledSize  -- Align bottom edge
+            paletteRenderer:draw(offsetX, offsetY, drawScale)
         end
     else
-        -- Draw directly without shader
+        -- Draw directly without shader (also at 2x scale)
+        love.graphics.push()
+        local drawScale = 2
+        local canvasSize = 128
+        local scaledSize = canvasSize * drawScale
+        local offsetX = x + (size - scaledSize) / 2
+        local offsetY = y + size - scaledSize
+        love.graphics.translate(offsetX, offsetY)
+        love.graphics.scale(drawScale, drawScale)
+        
         if self.tier == 1 then
-            self:drawTownHallIso(x, y, size)
+            self:drawTownHallIso(0, 0, 128)
         elseif self.tier == 2 then
-            self:drawHoldIso(x, y, size)
+            self:drawHoldIso(0, 0, 128)
         else
-            self:drawKeepIso(x, y, size)
+            self:drawKeepIso(0, 0, 128)
         end
+        
+        love.graphics.pop()
     end
     
     -- Selection highlight (always drawn without shader)
@@ -963,9 +982,9 @@ end
 -- Town Hall (Tier 1) - Mud brick gathering hall with central fire pit
 function TownHall:drawTownHallIso(x, y, size)
     -- True isometric town hall using 2:1 projection
-    -- Origin point for iso projection (center-bottom of tile)
+    -- Origin point for iso projection (adjusted to fit 128px canvas)
     local originX = x + size/2
-    local originY = y + size - 10
+    local originY = y + size - 24  -- Moved up to prevent bottom clipping
     
     -- Color palette
     local stoneTop = {0.70, 0.67, 0.62}
@@ -1174,7 +1193,7 @@ function TownHall:drawHoldIso(x, y, size)
     self:drawTownHallIso(x, y, size)
     
     local originX = x + size/2
-    local originY = y + size - 10
+    local originY = y + size - 24  -- Match base origin
     
     -- Colors for towers
     local stoneTop = {0.70, 0.67, 0.62}
@@ -1251,7 +1270,7 @@ function TownHall:drawKeepIso(x, y, size)
     self:drawHoldIso(x, y, size)
     
     local originX = x + size/2
-    local originY = y + size - 10
+    local originY = y + size - 24  -- Match base origin
     
     -- Gold colors
     local goldLight = {0.92, 0.78, 0.38}

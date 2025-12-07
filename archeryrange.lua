@@ -336,7 +336,7 @@ function ArcheryRange:drawOnMinimap(mapX, mapY, scale)
     end
     local x = mapX + (self.gridX - 1) * scale
     local y = mapY + (self.gridY - 1) * scale
-    love.graphics.rectangle("fill", x, y, self.size * scale, self.size * scale)
+    love.graphics.rectangle("fill", x, y, self.gridSize * scale, self.gridSize * scale)
 end
 
 return ArcheryRange

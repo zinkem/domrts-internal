@@ -12,7 +12,7 @@ pcall(function() Teams = require("teams") end)
 local LumberMill = {}
 LumberMill.__index = LumberMill
 
-LumberMill.GRID_SIZE = 2
+LumberMill.GRID_SIZE = 3
 LumberMill.COST_GOLD = 250
 LumberMill.COST_LUMBER = 0
 LumberMill.BUILD_TIME = 12.0

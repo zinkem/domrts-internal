@@ -690,17 +690,28 @@ local function getCommandButtons()
             })
         end
         
-        -- Upgrade to Keep
+        -- Upgrade to Keep (requires Stable, Blacksmith, Lumber Mill)
         if selEntity.tier == 2 and not selEntity.isUpgrading then
-            local canUpgrade = Requirements.canUpgradeToKeep() and selEntity:canUpgrade()
+            local hasStable = Requirements.hasStable and Requirements.hasStable() or false
+            local hasBlacksmith = Requirements.hasBlacksmith and Requirements.hasBlacksmith() or false
+            local hasLumberMill = Requirements.hasLumberMill and Requirements.hasLumberMill() or false
+            local canUpgrade = hasStable and hasBlacksmith and hasLumberMill and selEntity:canUpgrade()
             local canAfford = resources.gold >= TownHall.KEEP_COST_GOLD and resources.lumber >= TownHall.KEEP_COST_LUMBER
+            
+            -- Determine which requirement to show
+            local missingReq = nil
+            if not hasStable then missingReq = "Stable"
+            elseif not hasBlacksmith then missingReq = "Blacksmith"
+            elseif not hasLumberMill then missingReq = "Lumber Mill"
+            end
+            
             table.insert(buttons, {
                 hotkey = "U",
                 text = "Keep",
                 icon = "upgrade",
                 cost = TownHall.KEEP_COST_GOLD .. "/" .. TownHall.KEEP_COST_LUMBER,
                 enabled = canUpgrade and canAfford,
-                requirement = not Requirements.hasBlacksmith() and "Blacksmith" or nil,
+                requirement = missingReq,
                 action = function()
                     if canUpgrade and canAfford then
                         resources.gold = resources.gold - TownHall.KEEP_COST_GOLD
@@ -2875,8 +2886,6 @@ function Gameplay.draw()
     love.graphics.setColor(UI.stoneDark)
     love.graphics.rectangle("fill", 0, 0, screenW, screenH)
     
-    map:draw()
-    
     love.graphics.setScissor(map.viewportX, map.viewportY, map.viewportW, map.viewportH)
     
     local playerTeam = Teams and Teams.PLAYER or 1
@@ -2898,68 +2907,140 @@ function Gameplay.draw()
         local gx, gy = map:worldToGrid(wx, wy)
         
         if requireVisible then
-            -- Units require full visibility
             return map:isTileVisible(gx, gy)
         else
-            -- Buildings just need to be explored
             return map:isTileExplored(gx, gy)
         end
     end
     
-    -- Draw all buildings (visible if explored)
-    for _, farm in ipairs(farms) do 
-        if isEntityVisible(farm, false) then farm:draw() end
-    end
-    for _, barrack in ipairs(barracks) do 
-        if isEntityVisible(barrack, false) then barrack:draw() end
-    end
-    for _, building in ipairs(lumberMills) do 
-        if isEntityVisible(building, false) then building:draw() end
-    end
-    for _, building in ipairs(blacksmiths) do 
-        if isEntityVisible(building, false) then building:draw() end
-    end
-    for _, building in ipairs(scoutTowers) do 
-        if isEntityVisible(building, false) then building:draw() end
-    end
-    for _, building in ipairs(archeryRanges) do 
-        if isEntityVisible(building, false) then building:draw() end
-    end
-    for _, building in ipairs(stables) do 
-        if isEntityVisible(building, false) then building:draw() end
-    end
-    for _, building in ipairs(siegeWorkshops) do 
-        if isEntityVisible(building, false) then building:draw() end
-    end
-    for _, building in ipairs(townHalls) do 
-        if isEntityVisible(building, false) then building:draw() end
-    end
-    townHall:draw()  -- Player's town hall always visible
-    for _, mine in ipairs(goldMines) do 
-        if isEntityVisible(mine, false) then mine:draw() end
+    -- =========================================================================
+    -- ROW-BY-ROW ISOMETRIC RENDERING
+    -- Draw from top to bottom, deferring buildings to their bottom row
+    -- Order per row: ground/trees -> buildings -> units
+    -- =========================================================================
+    
+    -- Build lookup tables for buildings by their bottom row
+    local buildingsByBottomY = {}
+    
+    local function registerBuilding(building)
+        if not isEntityVisible(building, false) then return end
+        local bottomY = building.gridY + (building.gridSize or 1) - 1
+        if not buildingsByBottomY[bottomY] then
+            buildingsByBottomY[bottomY] = {}
+        end
+        table.insert(buildingsByBottomY[bottomY], building)
     end
     
-    -- Draw all units (enemy units require visible, player units always shown)
-    for _, peon in ipairs(peons) do 
-        if isEntityVisible(peon, true) then peon:draw() end
+    -- Register all buildings
+    for _, farm in ipairs(farms) do registerBuilding(farm) end
+    for _, barrack in ipairs(barracks) do registerBuilding(barrack) end
+    for _, building in ipairs(lumberMills) do registerBuilding(building) end
+    for _, building in ipairs(blacksmiths) do registerBuilding(building) end
+    for _, building in ipairs(scoutTowers) do registerBuilding(building) end
+    for _, building in ipairs(archeryRanges) do registerBuilding(building) end
+    for _, building in ipairs(stables) do registerBuilding(building) end
+    for _, building in ipairs(siegeWorkshops) do registerBuilding(building) end
+    for _, building in ipairs(townHalls) do registerBuilding(building) end
+    registerBuilding(townHall)  -- Player's main town hall
+    for _, mine in ipairs(goldMines) do registerBuilding(mine) end
+    
+    -- Build lookup for units by their grid Y (floored from world position)
+    local unitsByY = {}
+    
+    local function registerUnit(unit)
+        if not isEntityVisible(unit, true) then return end
+        local gridY = math.floor((unit.worldY or 0) / 32) + 1
+        if not unitsByY[gridY] then
+            unitsByY[gridY] = {}
+        end
+        table.insert(unitsByY[gridY], unit)
     end
-    for _, footman in ipairs(footmen) do 
-        if isEntityVisible(footman, true) then footman:draw() end
+    
+    -- Register all units
+    for _, peon in ipairs(peons) do registerUnit(peon) end
+    for _, footman in ipairs(footmen) do registerUnit(footman) end
+    for _, archer in ipairs(archers) do registerUnit(archer) end
+    for _, knight in ipairs(knights) do registerUnit(knight) end
+    for _, unit in ipairs(flyingScouts) do registerUnit(unit) end
+    for _, unit in ipairs(ballistas) do registerUnit(unit) end
+    for _, unit in ipairs(kamikazes) do registerUnit(unit) end
+    
+    -- Sort units within each row by X for consistent ordering
+    for y, units in pairs(unitsByY) do
+        table.sort(units, function(a, b)
+            return (a.worldX or 0) < (b.worldX or 0)
+        end)
     end
-    for _, archer in ipairs(archers) do 
-        if isEntityVisible(archer, true) then archer:draw() end
+    
+    -- Sort buildings within each row by X (by gridX)
+    for y, buildings in pairs(buildingsByBottomY) do
+        table.sort(buildings, function(a, b)
+            return a.gridX < b.gridX
+        end)
     end
-    for _, knight in ipairs(knights) do 
-        if isEntityVisible(knight, true) then knight:draw() end
-    end
-    for _, unit in ipairs(flyingScouts) do 
-        if isEntityVisible(unit, true) then unit:draw() end
-    end
-    for _, unit in ipairs(ballistas) do 
-        if isEntityVisible(unit, true) then unit:draw() end
-    end
-    for _, unit in ipairs(kamikazes) do 
-        if isEntityVisible(unit, true) then unit:draw() end
+    
+    -- Check if map supports row-by-row rendering
+    if map.drawRow then
+        -- Row-by-row rendering with proper depth
+        for y = 1, map.gridHeight do
+            -- Draw ground and trees for this row
+            map:drawRow(y)
+            
+            -- Draw buildings whose bottom edge is at this Y
+            if buildingsByBottomY[y] then
+                for _, building in ipairs(buildingsByBottomY[y]) do
+                    building:draw()
+                end
+            end
+            
+            -- Draw units at this Y
+            if unitsByY[y] then
+                for _, unit in ipairs(unitsByY[y]) do
+                    unit:draw()
+                end
+            end
+        end
+    else
+        -- Fallback: draw map first, then buildings/units sorted by bottom Y
+        map:draw()
+        
+        -- Collect and sort all buildings by bottom Y, then X
+        local sortedBuildings = {}
+        for bottomY, buildings in pairs(buildingsByBottomY) do
+            for _, building in ipairs(buildings) do
+                table.insert(sortedBuildings, {building = building, bottomY = bottomY})
+            end
+        end
+        table.sort(sortedBuildings, function(a, b)
+            if a.bottomY ~= b.bottomY then
+                return a.bottomY < b.bottomY
+            end
+            return a.building.gridX < b.building.gridX
+        end)
+        
+        -- Draw buildings in sorted order
+        for _, entry in ipairs(sortedBuildings) do
+            entry.building:draw()
+        end
+        
+        -- Collect and sort all units by Y, then X
+        local sortedUnits = {}
+        for gridY, units in pairs(unitsByY) do
+            for _, unit in ipairs(units) do
+                table.insert(sortedUnits, {unit = unit, gridY = gridY})
+            end
+        end
+        table.sort(sortedUnits, function(a, b)
+            if a.gridY ~= b.gridY then
+                return a.gridY < b.gridY
+            end
+            return (a.unit.worldX or 0) < (b.unit.worldX or 0)
+        end)
+        
+        -- Draw units in sorted order
+        for _, entry in ipairs(sortedUnits) do
+            entry.unit:draw()
+        end
     end
     
     -- Draw particle effects (dust, sparks, etc)

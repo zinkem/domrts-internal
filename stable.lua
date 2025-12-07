@@ -16,7 +16,7 @@ pcall(function() Teams = require("teams") end)
 local Stable = {}
 Stable.__index = Stable
 
-Stable.GRID_SIZE = 2
+Stable.GRID_SIZE = 3
 Stable.COST_GOLD = 500
 Stable.COST_LUMBER = 200
 Stable.BUILD_TIME = 20.0
@@ -349,7 +349,7 @@ function Stable:drawOnMinimap(mapX, mapY, scale)
     end
     local x = mapX + (self.gridX - 1) * scale
     local y = mapY + (self.gridY - 1) * scale
-    love.graphics.rectangle("fill", x, y, self.size * scale, self.size * scale)
+    love.graphics.rectangle("fill", x, y, self.gridSize * scale, self.gridSize * scale)
 end
 
 return Stable
