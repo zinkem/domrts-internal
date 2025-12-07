@@ -1497,11 +1497,16 @@ local function drawDefeatScreen()
 end
 
 local function getBuildingSize(buildingType)
-    if buildingType == "farm" or buildingType == "lumbermill" or buildingType == "blacksmith"
-       or buildingType == "scouttower" or buildingType == "stable" then
-        return 2
-    else
-        return 3  -- barracks, archeryrange, siegeworkshop
+    if buildingType == "farm" then return Farm.GRID_SIZE or 2
+    elseif buildingType == "lumbermill" and LumberMill then return LumberMill.GRID_SIZE or 2
+    elseif buildingType == "blacksmith" and Blacksmith then return Blacksmith.GRID_SIZE or 2
+    elseif buildingType == "scouttower" then return ScoutTower.GRID_SIZE or 2
+    elseif buildingType == "stable" and Stable then return Stable.GRID_SIZE or 2
+    elseif buildingType == "barracks" then return Barracks.GRID_SIZE or 3
+    elseif buildingType == "archeryrange" and ArcheryRange then return ArcheryRange.GRID_SIZE or 3
+    elseif buildingType == "siegeworkshop" and SiegeWorkshop then return SiegeWorkshop.GRID_SIZE or 3
+    elseif buildingType == "townhall" then return TownHall.GRID_SIZE or 3
+    else return 3
     end
 end
 

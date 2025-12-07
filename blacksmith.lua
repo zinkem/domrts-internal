@@ -1,7 +1,7 @@
 --[[
     Blacksmith
     Upgrade building for weapons and armor research
-    Size: 2x2 tiles, grid-aligned
+    Size: 3x3 tiles, grid-aligned
     Style: Stone forge with anvil, bellows, smoking chimney, and weapon displays
 ]]
 
@@ -166,7 +166,7 @@ end
 
 -- Initialize palette renderer
 local function initPaletteRenderer()
-    local canvasSize = 96  -- 2x2 building needs room for 2x scale isometric
+    local canvasSize = 128  -- 3x3 building needs room for isometric rendering
     
     if paletteRenderer then
         local canvas = paletteRenderer:getCanvas()
@@ -192,7 +192,7 @@ end
 local Blacksmith = {}
 Blacksmith.__index = Blacksmith
 
-Blacksmith.GRID_SIZE = 2
+Blacksmith.GRID_SIZE = 3
 
 -- Build costs
 Blacksmith.COST_GOLD = 800
@@ -360,41 +360,36 @@ function Blacksmith:draw()
         return
     end
     
-    -- Use palette shader if enabled, with 2x scaling
+    -- Use palette shader if enabled
     if usePaletteShader and PaletteShader then
         initPaletteRenderer()
         if paletteRenderer then
             paletteRenderer:beginCapture()
-            -- Draw at offset in 96px canvas
-            self:drawBlacksmithIso(16, 16, 64)
+            -- Draw at offset in 128px canvas
+            self:drawBlacksmithIso(32, 32, 64)
             paletteRenderer:endCapture()
             
-            -- Draw at 2x scale
-            local drawScale = 2
-            local canvasSize = 96
-            local scaledSize = canvasSize * drawScale
-            local offsetX = x + (size - scaledSize) / 2
-            local offsetY = y + size - scaledSize
-            paletteRenderer:draw(offsetX, offsetY, drawScale)
+            -- Draw at 1x scale (no additional scaling)
+            local canvasSize = 128
+            local offsetX = x + (size - canvasSize) / 2
+            local offsetY = y + size - canvasSize
+            paletteRenderer:draw(offsetX, offsetY, 1)
         end
     else
-        -- Draw directly at 2x scale
+        -- Draw directly at 1x scale
         love.graphics.push()
-        local drawScale = 2
-        local canvasSize = 96
-        local scaledSize = canvasSize * drawScale
-        local offsetX = x + (size - scaledSize) / 2
-        local offsetY = y + size - scaledSize
+        local canvasSize = 128
+        local offsetX = x + (size - canvasSize) / 2
+        local offsetY = y + size - canvasSize
         love.graphics.translate(offsetX, offsetY)
-        love.graphics.scale(drawScale, drawScale)
-        self:drawBlacksmithIso(16, 16, 64)
+        self:drawBlacksmithIso(32, 32, 64)
         love.graphics.pop()
     end
     
-    -- Draw smoke above the chimney (outside shader for better effect)
+    -- Draw smoke above the chimney
     if self.completed then
         local smokeX, smokeY = self:getScreenPos()
-        -- Chimney is roughly at top-right of building (adjusted for 2x scale)
+        -- Chimney is roughly at top-right of building
         drawSmokeParticles(self.uniqueId, smokeX + size * 0.65, smokeY - 15)
     end
     
@@ -430,7 +425,7 @@ function Blacksmith:draw()
     love.graphics.setColor(1, 1, 1, 1)
 end
 
--- Isometric Blacksmith drawing (2x scale)
+-- Isometric Blacksmith drawing
 function Blacksmith:drawBlacksmithIso(x, y, size)
     local originX = x + size/2
     local originY = y + size - 6  -- Bottom edge stays in place
