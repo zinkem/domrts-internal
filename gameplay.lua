@@ -296,11 +296,11 @@ end
 
 local function separateUnits()
     local allUnits = getAllUnits()
-    local buildings = getAllBuildings()
+    local allBuildings = getAllBuildings()
 
     -- Helper to check if position collides with any building
     local function collidesWithBuilding(x, y, radius)
-        for _, b in ipairs(buildings) do
+        for _, b in ipairs(allBuildings) do
             if b.getWorldBounds then
                 local bx1, by1, bx2, by2 = b:getWorldBounds()
                 local closestX = math.max(bx1, math.min(x, bx2))
@@ -365,6 +365,7 @@ local function separateUnits()
             end
         end
     end
+    return allUnits, allBuildings
 end
 
 -- Helper: Draw stone panel background (using UIDraw module)
@@ -2672,8 +2673,6 @@ function Gameplay.update(dt)
     calculatePopulation()
     updateRequirementsState()
 
-    local buildings = getAllBuildings()
-
     -- Town hall
     local peonReady, upgradeComplete, _ = townHall:update(gameDt)
     if peonReady and currentPop < maxPop then
@@ -3034,11 +3033,10 @@ function Gameplay.update(dt)
     -- Check victory/defeat conditions
     checkVictoryConditions()
 
-    -- Separate overlapping units
-    separateUnits()
+    -- Separate overlapping units (returns fresh lists after dead removal)
+    local allUnits, allBuildings = separateUnits()
 
     -- Ensure no units are inside buildings (safety check)
-    local allUnits = getAllUnits()
     for _, unit in ipairs(allUnits) do
         pushUnitOutOfBuildings(unit)
     end

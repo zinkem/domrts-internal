@@ -410,7 +410,16 @@ end
 Game.SceneManager = SceneManager
 
 -- Love2D callbacks
-function love.load()
+function love.load(arg)
+    -- Check for benchmark mode
+    for _, a in ipairs(arg or {}) do
+        if a == "--benchmark" then
+            local Benchmark = require("benchmark_getAllUnits")
+            Benchmark.run()
+            return
+        end
+    end
+
     love.window.setTitle("Love2D Game")
     love.window.setMode(1280, 720, {
         resizable = false,
