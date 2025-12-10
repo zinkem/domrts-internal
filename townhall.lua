@@ -16,6 +16,9 @@ pcall(function() Teams = require("teams") end)
 local BuildingRenderer
 pcall(function() BuildingRenderer = require("building_renderer") end)
 
+-- Shared isometric utilities
+local IsoUtils = require("iso_utils")
+
 --============================================================================
 -- ISOMETRIC RENDERING SYSTEM
 -- True 2:1 isometric projection with pre-rendered texture caching
@@ -929,389 +932,449 @@ end
 
 -- Town Hall (Tier 1) - Mud brick gathering hall with central fire pit
 function TownHall:drawTownHallIso(x, y, size)
-    -- True isometric town hall using 2:1 projection
-    -- Origin point for iso projection (adjusted to fit 128px canvas)
+    -- Single large octagonal building
     local originX = x + size/2
-    local originY = y + size - 24  -- Moved up to prevent bottom clipping
-    
+    local originY = y + size - 24
+
     -- Color palette
     local stoneTop = {0.70, 0.67, 0.62}
     local stoneLeft = {0.50, 0.48, 0.44}
     local stoneRight = {0.58, 0.55, 0.50}
     local stoneDark = {0.35, 0.33, 0.30}
     local roofLeft = {0.15, 0.28, 0.45}
-    local roofRight = {0.25, 0.40, 0.58}
-    local roofFront = {0.18, 0.32, 0.50}
-    local dirtColor = {0.38, 0.30, 0.22}
-    local dirtDark = {0.28, 0.22, 0.16}
     local woodColor = {0.35, 0.25, 0.18}
     local doorColor = {0.12, 0.10, 0.08}
-    
-    -- === DIRT GROUND (isometric ellipse) ===
-    -- Draw as layered iso diamonds
-    for layer = 0, 3 do
-        local t = layer / 3
-        local r = dirtDark[1] + (dirtColor[1] - dirtDark[1]) * t
-        local g = dirtDark[2] + (dirtColor[2] - dirtDark[2]) * t
-        local b = dirtDark[3] + (dirtColor[3] - dirtDark[3]) * t
-        love.graphics.setColor(r, g, b, 1)
-        local dirtW = 80 - layer * 8
-        local dirtD = 40 - layer * 4
-        isoQuad(
-            {-dirtW/2, -dirtD/2, -2 + layer * 0.5},
-            {dirtW/2, -dirtD/2, -2 + layer * 0.5},
-            {dirtW/2, dirtD/2, -2 + layer * 0.5},
-            {-dirtW/2, dirtD/2, -2 + layer * 0.5},
-            originX, originY, {r, g, b}
-        )
-    end
-    
-    -- === MAIN BUILDING - Back section (taller) ===
-    local backW = 50
-    local backD = 30
-    local backH = 45
-    local backX = -backW/2
-    local backY = -backD - 5
-    
-    -- Back building walls using isoBox
-    isoBox(backX, backY, 0, backW, backD, backH, originX, originY, 
-           stoneTop, stoneLeft, stoneRight)
-    
-    -- Stone texture lines on back left wall
+
+    -- === GROUND SHADOW ===
+    love.graphics.setColor(0, 0, 0, 0.25)
+    local gx, gy = isoProject(0, 0, 0, originX, originY)
+    love.graphics.ellipse("fill", gx, gy + 3, 40, 16)
+
+    -- === MAIN BUILDING (single large octagonal hall) ===
+    local mainR = 30
+    local mainH = 40
+    local mainCX = 0
+    local mainCY = 0
+
+    local wallColors = {
+        {stoneRight[1], stoneRight[2], stoneRight[3]},
+        {0.54, 0.52, 0.47},
+        {stoneLeft[1], stoneLeft[2], stoneLeft[3]},
+        {0.45, 0.43, 0.40},
+    }
+
+    IsoUtils.octagonalPrism(mainCX, mainCY, 0, mainR, mainH, originX, originY, stoneTop, wallColors)
+
+    -- Stone brick texture on front face
+    local frontFaceY = mainCY + mainR
     love.graphics.setColor(stoneDark[1], stoneDark[2], stoneDark[3], 0.4)
-    for row = 1, 4 do
-        local z = row * 10
-        local sx1, sy1 = isoProject(backX, backY + backD, z, originX, originY)
-        local sx2, sy2 = isoProject(backX + backW, backY + backD, z, originX, originY)
-        love.graphics.line(sx1, sy1, sx2, sy2)
+    for row = 0, 5 do
+        for col = 0, 3 do
+            local offsetX = (row % 2) * 8
+            local bx = -mainR + 6 + col * 14 + offsetX
+            local bz = 3 + row * 6
+            if bz < mainH - 2 then
+                local b1x, b1y = isoProject(bx, frontFaceY, bz, originX, originY)
+                local b2x, b2y = isoProject(bx + 12, frontFaceY, bz, originX, originY)
+                local b3x, b3y = isoProject(bx + 12, frontFaceY, bz + 5, originX, originY)
+                local b4x, b4y = isoProject(bx, frontFaceY, bz + 5, originX, originY)
+                love.graphics.polygon("line", b1x, b1y, b2x, b2y, b3x, b3y, b4x, b4y)
+            end
+        end
     end
-    
-    -- Back right wall texture
-    for row = 1, 4 do
-        local z = row * 10
-        local sx1, sy1 = isoProject(backX + backW, backY, z, originX, originY)
-        local sx2, sy2 = isoProject(backX + backW, backY + backD, z, originX, originY)
-        love.graphics.line(sx1, sy1, sx2, sy2)
+
+    -- Stone brick texture on right face
+    local rightFaceX = mainCX + mainR
+    for row = 0, 5 do
+        for col = 0, 2 do
+            local offsetY = (row % 2) * 8
+            local by = -mainR + 10 + col * 14 + offsetY
+            local bz = 3 + row * 6
+            if bz < mainH - 2 then
+                local b1x, b1y = isoProject(rightFaceX, by, bz, originX, originY)
+                local b2x, b2y = isoProject(rightFaceX, by + 12, bz, originX, originY)
+                local b3x, b3y = isoProject(rightFaceX, by + 12, bz + 5, originX, originY)
+                local b4x, b4y = isoProject(rightFaceX, by, bz + 5, originX, originY)
+                love.graphics.polygon("line", b1x, b1y, b2x, b2y, b3x, b3y, b4x, b4y)
+            end
+        end
     end
-    
-    -- === PEAKED ROOF on back section ===
-    local roofBase = backH
-    local roofPeak = 20
-    
-    -- Left roof slope
-    isoQuad(
-        {backX, backY, roofBase},
-        {backX, backY + backD, roofBase},
-        {0, backY + backD/2, roofBase + roofPeak},
-        {0, backY + backD/2, roofBase + roofPeak},
-        originX, originY, roofLeft
-    )
-    isoQuad(
-        {backX, backY, roofBase},
-        {0, backY + backD/2, roofBase + roofPeak},
-        {0, backY + backD/2, roofBase + roofPeak},
-        {backX, backY, roofBase},
-        originX, originY, roofLeft
-    )
-    
-    -- Right roof slope
-    isoQuad(
-        {backX + backW, backY, roofBase},
-        {backX + backW, backY + backD, roofBase},
-        {0, backY + backD/2, roofBase + roofPeak},
-        {0, backY + backD/2, roofBase + roofPeak},
-        originX, originY, roofRight
-    )
-    
-    -- Roof ridge line
-    love.graphics.setColor(0.30, 0.45, 0.62, 1)
-    local rx1, ry1 = isoProject(0, backY, roofBase + roofPeak, originX, originY)
-    local rx2, ry2 = isoProject(0, backY + backD, roofBase + roofPeak, originX, originY)
-    love.graphics.setLineWidth(2)
-    love.graphics.line(rx1, ry1, rx2, ry2)
-    love.graphics.setLineWidth(1)
-    
-    -- === FRONT BUILDING SECTION (shorter, closer) ===
-    local frontW = 60
-    local frontD = 25
-    local frontH = 30
-    local frontX = -frontW/2
-    local frontY = 5
-    
-    -- Front building walls
-    isoBox(frontX, frontY, 0, frontW, frontD, frontH, originX, originY,
-           stoneTop, stoneLeft, stoneRight)
-    
-    -- Stone texture on front walls
-    love.graphics.setColor(stoneDark[1], stoneDark[2], stoneDark[3], 0.35)
-    for row = 1, 3 do
-        local z = row * 9
-        local sx1, sy1 = isoProject(frontX, frontY + frontD, z, originX, originY)
-        local sx2, sy2 = isoProject(frontX + frontW, frontY + frontD, z, originX, originY)
-        love.graphics.line(sx1, sy1, sx2, sy2)
-    end
-    for row = 1, 3 do
-        local z = row * 9
-        local sx1, sy1 = isoProject(frontX + frontW, frontY, z, originX, originY)
-        local sx2, sy2 = isoProject(frontX + frontW, frontY + frontD, z, originX, originY)
-        love.graphics.line(sx1, sy1, sx2, sy2)
-    end
-    
+
+    -- === ROOF EAVES ===
+    local eaveR = mainR + 5
+    local eaveH = 3
+    local eaveDark = {roofLeft[1] * 0.85, roofLeft[2] * 0.85, roofLeft[3] * 0.85}
+    local eaveWallColors = {
+        {eaveDark[1] * 1.1, eaveDark[2] * 1.1, eaveDark[3] * 1.1},
+        {eaveDark[1], eaveDark[2], eaveDark[3]},
+        {eaveDark[1] * 0.9, eaveDark[2] * 0.9, eaveDark[3] * 0.9},
+        {eaveDark[1] * 0.8, eaveDark[2] * 0.8, eaveDark[3] * 0.8},
+    }
+    IsoUtils.octagonalPrism(mainCX, mainCY, mainH - 2, eaveR, eaveH, originX, originY, eaveDark, eaveWallColors)
+
+    -- === PEAKED ROOF (octagonal pyramid) ===
+    local roofBase = mainH
+    local roofPeak = 22
+
+    IsoUtils.pyramidRoof(mainCX, mainCY, roofBase, mainR + 3, roofPeak, originX, originY, roofLeft)
+
     -- === DOORWAY (on front face) ===
     local doorW = 14
-    local doorH = 20
-    local doorX = -doorW/2
-    local doorZ = 0
-    
-    -- Door frame (recessed)
-    isoQuad(
-        {doorX - 2, frontY + frontD, doorZ},
-        {doorX + doorW + 2, frontY + frontD, doorZ},
-        {doorX + doorW + 2, frontY + frontD, doorZ + doorH + 3},
-        {doorX - 2, frontY + frontD, doorZ + doorH + 3},
-        originX, originY, stoneDark
-    )
-    
-    -- Door opening
-    isoQuad(
-        {doorX, frontY + frontD + 0.5, doorZ},
-        {doorX + doorW, frontY + frontD + 0.5, doorZ},
-        {doorX + doorW, frontY + frontD + 0.5, doorZ + doorH},
-        {doorX, frontY + frontD + 0.5, doorZ + doorH},
-        originX, originY, doorColor
-    )
-    
-    -- Door arch (simplified as small triangle)
-    local archY = frontY + frontD + 0.5
-    local sx1, sy1 = isoProject(doorX, archY, doorZ + doorH, originX, originY)
-    local sx2, sy2 = isoProject(doorX + doorW, archY, doorZ + doorH, originX, originY)
-    local sx3, sy3 = isoProject(doorX + doorW/2, archY, doorZ + doorH + 4, originX, originY)
+    local doorH = 22
+
+    IsoUtils.door(0, frontFaceY, 0, doorW, doorH, originX, originY, stoneDark, doorColor)
+
+    -- Door arch
+    local archY = frontFaceY + 0.5
+    local sx1, sy1 = isoProject(-doorW/2, archY, doorH, originX, originY)
+    local sx2, sy2 = isoProject(doorW/2, archY, doorH, originX, originY)
+    local sx3, sy3 = isoProject(0, archY, doorH + 4, originX, originY)
     love.graphics.setColor(doorColor[1], doorColor[2], doorColor[3], 1)
     love.graphics.polygon("fill", sx1, sy1, sx2, sy2, sx3, sy3)
-    
-    -- === WINDOW SLITS on back building ===
-    love.graphics.setColor(0.15, 0.13, 0.11, 1)
-    -- Left window
-    isoQuad(
-        {backX + 8, backY + backD, 20},
-        {backX + 12, backY + backD, 20},
-        {backX + 12, backY + backD, 32},
-        {backX + 8, backY + backD, 32},
-        originX, originY, {0.15, 0.13, 0.11}
-    )
-    -- Right window
-    isoQuad(
-        {backX + backW - 12, backY + backD, 20},
-        {backX + backW - 8, backY + backD, 20},
-        {backX + backW - 8, backY + backD, 32},
-        {backX + backW - 12, backY + backD, 32},
-        originX, originY, {0.15, 0.13, 0.11}
-    )
-    
+
+    -- === WINDOW SLITS on front face ===
+    IsoUtils.windowSlit(-12, frontFaceY, 14, 3, 10, originX, originY)
+    IsoUtils.windowSlit(12, frontFaceY, 14, 3, 10, originX, originY)
+
     -- === TEAM BANNER ===
     local bannerColor = Teams and Teams.getColor(self.team, "banner") or {0.20, 0.35, 0.55, 1}
     local emblemColor = Teams and Teams.getColor(self.team, "emblem") or {0.8, 0.7, 0.3, 1}
-    
-    -- Banner pole
-    local poleX = frontX + frontW - 8
-    local poleY = frontY + frontD
+
+    local poleX = mainR - 8
+    local poleY = mainCY
     love.graphics.setColor(woodColor[1], woodColor[2], woodColor[3], 1)
-    local px1, py1 = isoProject(poleX, poleY, frontH, originX, originY)
-    local px2, py2 = isoProject(poleX, poleY, frontH + 20, originX, originY)
+    local px1, py1 = isoProject(poleX, poleY, roofBase + roofPeak - 5, originX, originY)
+    local px2, py2 = isoProject(poleX, poleY, roofBase + roofPeak + 16, originX, originY)
     love.graphics.setLineWidth(2)
     love.graphics.line(px1, py1, px2, py2)
     love.graphics.setLineWidth(1)
-    
-    -- Banner cloth
-    local bx, by = isoProject(poleX + 2, poleY, frontH + 18, originX, originY)
+
+    local bx, by = isoProject(poleX + 2, poleY, roofBase + roofPeak + 14, originX, originY)
     love.graphics.setColor(bannerColor[1], bannerColor[2], bannerColor[3], 1)
+    local wave = math.sin((self.animTimer or 0) * 3) * 1.5
     love.graphics.polygon("fill",
         bx, by,
-        bx + 12, by + 2,
-        bx + 10, by + 10,
+        bx + 12 + wave, by + 2,
+        bx + 10 + wave, by + 10,
         bx, by + 8)
-    -- Emblem
     love.graphics.setColor(emblemColor[1], emblemColor[2], emblemColor[3], 1)
-    love.graphics.circle("fill", bx + 6, by + 5, 2.5)
+    love.graphics.circle("fill", bx + 6 + wave * 0.5, by + 5, 2.5)
 end
 
--- Isometric Hold (Tier 2) - Larger, with corner towers
+-- Hold (Tier 2) - Main building + 2 front corner columns + roof eaves
 function TownHall:drawHoldIso(x, y, size)
-    -- Draw base building first
-    self:drawTownHallIso(x, y, size)
-    
     local originX = x + size/2
-    local originY = y + size - 24  -- Match base origin
-    
-    -- Colors for towers
+    local originY = y + size - 24
+
+    -- Colors
     local stoneTop = {0.70, 0.67, 0.62}
     local stoneLeft = {0.50, 0.48, 0.44}
     local stoneRight = {0.58, 0.55, 0.50}
+    local stoneDark = {0.35, 0.33, 0.30}
     local roofLeft = {0.15, 0.28, 0.45}
-    local roofRight = {0.25, 0.40, 0.58}
-    
-    -- === CORNER TOWERS (isometric) ===
-    local towerW = 16
-    local towerD = 16
-    local towerH = 55
-    
-    -- Left tower (front-left corner)
-    local ltX = -38
-    local ltY = 8
-    isoBox(ltX, ltY, 0, towerW, towerD, towerH, originX, originY,
-           stoneTop, stoneLeft, stoneRight)
-    
-    -- Left tower peaked roof
-    local ltRoofBase = towerH
-    local ltRoofPeak = 12
-    -- Left slope
-    isoQuad(
-        {ltX, ltY, ltRoofBase},
-        {ltX + towerW/2, ltY + towerD/2, ltRoofBase + ltRoofPeak},
-        {ltX + towerW/2, ltY + towerD/2, ltRoofBase + ltRoofPeak},
-        {ltX, ltY + towerD, ltRoofBase},
-        originX, originY, roofLeft
-    )
-    -- Right slope
-    isoQuad(
-        {ltX + towerW, ltY, ltRoofBase},
-        {ltX + towerW/2, ltY + towerD/2, ltRoofBase + ltRoofPeak},
-        {ltX + towerW/2, ltY + towerD/2, ltRoofBase + ltRoofPeak},
-        {ltX + towerW, ltY + towerD, ltRoofBase},
-        originX, originY, roofRight
-    )
-    
-    -- Right tower (front-right corner)
-    local rtX = 22
-    local rtY = 8
-    isoBox(rtX, rtY, 0, towerW, towerD, towerH, originX, originY,
-           stoneTop, stoneLeft, stoneRight)
-    
-    -- Right tower peaked roof
-    isoQuad(
-        {rtX, rtY, ltRoofBase},
-        {rtX + towerW/2, rtY + towerD/2, ltRoofBase + ltRoofPeak},
-        {rtX + towerW/2, rtY + towerD/2, ltRoofBase + ltRoofPeak},
-        {rtX, rtY + towerD, ltRoofBase},
-        originX, originY, roofLeft
-    )
-    isoQuad(
-        {rtX + towerW, rtY, ltRoofBase},
-        {rtX + towerW/2, rtY + towerD/2, ltRoofBase + ltRoofPeak},
-        {rtX + towerW/2, rtY + towerD/2, ltRoofBase + ltRoofPeak},
-        {rtX + towerW, rtY + towerD, ltRoofBase},
-        originX, originY, roofRight
-    )
-    
-    -- === CAMPFIRE in courtyard ===
-    local fireX, fireY = isoProject(0, 15, 1, originX, originY)
-    drawFire(fireX, fireY, self.animTimer or 0, 1.2)
-    
-    -- === RISING SMOKE ===
-    local smokeX, smokeY = isoProject(0, 15, 15, originX, originY)
-    drawSmokeParticles(self.uniqueId, smokeX, smokeY)
+    local roofDark = {0.10, 0.20, 0.35}
+    local woodColor = {0.35, 0.25, 0.18}
+    local doorColor = {0.12, 0.10, 0.08}
+
+    -- Main building dimensions
+    local mainR = 30
+    local mainH = 40
+    local roofPeak = 22
+
+    local wallColors = {
+        {stoneRight[1], stoneRight[2], stoneRight[3]},
+        {0.54, 0.52, 0.47},
+        {stoneLeft[1], stoneLeft[2], stoneLeft[3]},
+        {0.45, 0.43, 0.40},
+    }
+
+    -- Column dimensions
+    local colW = 6
+    local colD = 6
+    local colH = mainH + 8
+
+    -- === GROUND SHADOW ===
+    love.graphics.setColor(0, 0, 0, 0.25)
+    local gx, gy = isoProject(0, 0, 0, originX, originY)
+    love.graphics.ellipse("fill", gx, gy + 3, 42, 17)
+
+    -- === MAIN BUILDING ===
+    IsoUtils.octagonalPrism(0, 0, 0, mainR, mainH, originX, originY, stoneTop, wallColors)
+
+    -- Stone brick texture on front face
+    local frontFaceY = mainR
+    love.graphics.setColor(stoneDark[1], stoneDark[2], stoneDark[3], 0.4)
+    for row = 0, 5 do
+        for col = 0, 3 do
+            local offsetX = (row % 2) * 8
+            local bx = -mainR + 6 + col * 14 + offsetX
+            local bz = 3 + row * 6
+            if bz < mainH - 2 then
+                local b1x, b1y = isoProject(bx, frontFaceY, bz, originX, originY)
+                local b2x, b2y = isoProject(bx + 12, frontFaceY, bz, originX, originY)
+                local b3x, b3y = isoProject(bx + 12, frontFaceY, bz + 5, originX, originY)
+                local b4x, b4y = isoProject(bx, frontFaceY, bz + 5, originX, originY)
+                love.graphics.polygon("line", b1x, b1y, b2x, b2y, b3x, b3y, b4x, b4y)
+            end
+        end
+    end
+
+    -- Stone brick texture on right face
+    local rightFaceX = mainR
+    for row = 0, 5 do
+        for col = 0, 2 do
+            local offsetY = (row % 2) * 8
+            local by = -mainR + 10 + col * 14 + offsetY
+            local bz = 3 + row * 6
+            if bz < mainH - 2 then
+                local b1x, b1y = isoProject(rightFaceX, by, bz, originX, originY)
+                local b2x, b2y = isoProject(rightFaceX, by + 12, bz, originX, originY)
+                local b3x, b3y = isoProject(rightFaceX, by + 12, bz + 5, originX, originY)
+                local b4x, b4y = isoProject(rightFaceX, by, bz + 5, originX, originY)
+                love.graphics.polygon("line", b1x, b1y, b2x, b2y, b3x, b3y, b4x, b4y)
+            end
+        end
+    end
+
+    -- === ROOF EAVES ===
+    local eaveR = mainR + 6
+    local eaveH = 3
+    IsoUtils.octagonalPrism(0, 0, mainH - 2, eaveR, eaveH, originX, originY, roofDark, {
+        {roofDark[1] * 1.1, roofDark[2] * 1.1, roofDark[3] * 1.1},
+        {roofDark[1], roofDark[2], roofDark[3]},
+        {roofDark[1] * 0.9, roofDark[2] * 0.9, roofDark[3] * 0.9},
+        {roofDark[1] * 0.8, roofDark[2] * 0.8, roofDark[3] * 0.8},
+    })
+
+    -- === PEAKED ROOF ===
+    IsoUtils.pyramidRoof(0, 0, mainH + 1, mainR + 4, roofPeak, originX, originY, roofLeft)
+
+    -- === FRONT CORNER COLUMNS ===
+    -- Left front column
+    local lfColX = -mainR - 2
+    local lfColY = mainR - 2
+    IsoUtils.box(lfColX, lfColY, 0, colW, colD, colH, originX, originY, stoneTop, stoneLeft, stoneRight)
+    IsoUtils.box(lfColX - 1, lfColY - 1, colH, colW + 2, colD + 2, 3, originX, originY, stoneDark, stoneDark, stoneDark)
+
+    -- Right front column
+    local rfColX = mainR - colW + 2
+    local rfColY = mainR - 2
+    IsoUtils.box(rfColX, rfColY, 0, colW, colD, colH, originX, originY, stoneTop, stoneLeft, stoneRight)
+    IsoUtils.box(rfColX - 1, rfColY - 1, colH, colW + 2, colD + 2, 3, originX, originY, stoneDark, stoneDark, stoneDark)
+
+    -- === DOORWAY ===
+    local doorW = 14
+    local doorH = 22
+
+    IsoUtils.door(0, frontFaceY, 0, doorW, doorH, originX, originY, stoneDark, doorColor)
+
+    -- Door arch
+    local archY = frontFaceY + 0.5
+    local sx1, sy1 = isoProject(-doorW/2, archY, doorH, originX, originY)
+    local sx2, sy2 = isoProject(doorW/2, archY, doorH, originX, originY)
+    local sx3, sy3 = isoProject(0, archY, doorH + 4, originX, originY)
+    love.graphics.setColor(doorColor[1], doorColor[2], doorColor[3], 1)
+    love.graphics.polygon("fill", sx1, sy1, sx2, sy2, sx3, sy3)
+
+    -- === WINDOW SLITS ===
+    IsoUtils.windowSlit(-12, frontFaceY, 14, 3, 10, originX, originY)
+    IsoUtils.windowSlit(12, frontFaceY, 14, 3, 10, originX, originY)
+
+    -- === TEAM BANNER ===
+    local bannerColor = Teams and Teams.getColor(self.team, "banner") or {0.20, 0.35, 0.55, 1}
+    local emblemColor = Teams and Teams.getColor(self.team, "emblem") or {0.8, 0.7, 0.3, 1}
+
+    local poleX = mainR - 8
+    local poleY = 0
+    love.graphics.setColor(woodColor[1], woodColor[2], woodColor[3], 1)
+    local px1, py1 = isoProject(poleX, poleY, mainH + roofPeak - 5, originX, originY)
+    local px2, py2 = isoProject(poleX, poleY, mainH + roofPeak + 16, originX, originY)
+    love.graphics.setLineWidth(2)
+    love.graphics.line(px1, py1, px2, py2)
+    love.graphics.setLineWidth(1)
+
+    local bx, by = isoProject(poleX + 2, poleY, mainH + roofPeak + 14, originX, originY)
+    love.graphics.setColor(bannerColor[1], bannerColor[2], bannerColor[3], 1)
+    local wave = math.sin((self.animTimer or 0) * 3) * 1.5
+    love.graphics.polygon("fill",
+        bx, by,
+        bx + 12 + wave, by + 2,
+        bx + 10 + wave, by + 10,
+        bx, by + 8)
+    love.graphics.setColor(emblemColor[1], emblemColor[2], emblemColor[3], 1)
+    love.graphics.circle("fill", bx + 6 + wave * 0.5, by + 5, 2.5)
 end
 
--- Keep (Tier 3) - Grand castle with golden trim and flags
+-- Keep (Tier 3) - Main building + 3 front columns + golden accents
 function TownHall:drawKeepIso(x, y, size)
-    -- Draw Hold (includes base and towers)
-    self:drawHoldIso(x, y, size)
-    
     local originX = x + size/2
-    local originY = y + size - 24  -- Match base origin
-    
-    -- Gold colors
+    local originY = y + size - 24
+
+    -- Colors
+    local stoneTop = {0.70, 0.67, 0.62}
+    local stoneLeft = {0.50, 0.48, 0.44}
+    local stoneRight = {0.58, 0.55, 0.50}
+    local stoneDark = {0.35, 0.33, 0.30}
+    local roofLeft = {0.15, 0.28, 0.45}
+    local roofDark = {0.10, 0.20, 0.35}
+    local woodColor = {0.35, 0.25, 0.18}
+    local doorColor = {0.12, 0.10, 0.08}
     local goldLight = {0.92, 0.78, 0.38}
     local goldMid = {0.78, 0.62, 0.25}
-    local goldDark = {0.58, 0.45, 0.18}
-    
-    -- === GOLDEN FLAGS on tower peaks ===
-    -- Left tower flag
-    local ltFlagX, ltFlagY = isoProject(-38 + 8, 8 + 8, 72, originX, originY)
-    -- Flag pole
-    love.graphics.setColor(goldDark[1], goldDark[2], goldDark[3], 1)
-    love.graphics.setLineWidth(2)
-    love.graphics.line(ltFlagX, ltFlagY, ltFlagX, ltFlagY - 18)
-    love.graphics.setLineWidth(1)
-    -- Flag cloth (waving)
-    local wave = math.sin((self.animTimer or 0) * 4) * 2
-    love.graphics.setColor(goldLight[1], goldLight[2], goldLight[3], 1)
-    love.graphics.polygon("fill",
-        ltFlagX, ltFlagY - 16,
-        ltFlagX + 14 + wave, ltFlagY - 14,
-        ltFlagX + 12 + wave, ltFlagY - 8,
-        ltFlagX, ltFlagY - 10)
-    -- Flag emblem
-    love.graphics.setColor(goldDark[1], goldDark[2], goldDark[3], 1)
-    love.graphics.circle("fill", ltFlagX + 7 + wave * 0.5, ltFlagY - 12, 2)
-    
-    -- Right tower flag
-    local rtFlagX, rtFlagY = isoProject(22 + 8, 8 + 8, 72, originX, originY)
-    love.graphics.setColor(goldDark[1], goldDark[2], goldDark[3], 1)
-    love.graphics.setLineWidth(2)
-    love.graphics.line(rtFlagX, rtFlagY, rtFlagX, rtFlagY - 18)
-    love.graphics.setLineWidth(1)
-    love.graphics.setColor(goldLight[1], goldLight[2], goldLight[3], 1)
-    love.graphics.polygon("fill",
-        rtFlagX, rtFlagY - 16,
-        rtFlagX + 14 + wave, rtFlagY - 14,
-        rtFlagX + 12 + wave, rtFlagY - 8,
-        rtFlagX, rtFlagY - 10)
-    love.graphics.setColor(goldDark[1], goldDark[2], goldDark[3], 1)
-    love.graphics.circle("fill", rtFlagX + 7 + wave * 0.5, rtFlagY - 12, 2)
-    
-    -- === GOLDEN CROWN above door ===
-    local crownX, crownY = isoProject(0, 30, 28, originX, originY)
-    
-    -- Crown base
+    local goldDark = {0.55, 0.45, 0.20}
+
+    -- Main building dimensions
+    local mainR = 30
+    local mainH = 40
+    local roofPeak = 22
+
+    local wallColors = {
+        {stoneRight[1], stoneRight[2], stoneRight[3]},
+        {0.54, 0.52, 0.47},
+        {stoneLeft[1], stoneLeft[2], stoneLeft[3]},
+        {0.45, 0.43, 0.40},
+    }
+
+    -- Column dimensions
+    local colW = 6
+    local colD = 6
+    local colH = mainH + 12
+
+    -- === GROUND SHADOW ===
+    love.graphics.setColor(0, 0, 0, 0.25)
+    local gx, gy = isoProject(0, 0, 0, originX, originY)
+    love.graphics.ellipse("fill", gx, gy + 3, 44, 18)
+
+    -- === MAIN BUILDING ===
+    IsoUtils.octagonalPrism(0, 0, 0, mainR, mainH, originX, originY, stoneTop, wallColors)
+
+    -- Stone brick texture on front face
+    local frontFaceY = mainR
+    love.graphics.setColor(stoneDark[1], stoneDark[2], stoneDark[3], 0.4)
+    for row = 0, 5 do
+        for col = 0, 3 do
+            local offsetX = (row % 2) * 8
+            local bx = -mainR + 6 + col * 14 + offsetX
+            local bz = 3 + row * 6
+            if bz < mainH - 2 then
+                local b1x, b1y = isoProject(bx, frontFaceY, bz, originX, originY)
+                local b2x, b2y = isoProject(bx + 12, frontFaceY, bz, originX, originY)
+                local b3x, b3y = isoProject(bx + 12, frontFaceY, bz + 5, originX, originY)
+                local b4x, b4y = isoProject(bx, frontFaceY, bz + 5, originX, originY)
+                love.graphics.polygon("line", b1x, b1y, b2x, b2y, b3x, b3y, b4x, b4y)
+            end
+        end
+    end
+
+    -- Stone brick texture on right face
+    local rightFaceX = mainR
+    for row = 0, 5 do
+        for col = 0, 2 do
+            local offsetY = (row % 2) * 8
+            local by = -mainR + 10 + col * 14 + offsetY
+            local bz = 3 + row * 6
+            if bz < mainH - 2 then
+                local b1x, b1y = isoProject(rightFaceX, by, bz, originX, originY)
+                local b2x, b2y = isoProject(rightFaceX, by + 12, bz, originX, originY)
+                local b3x, b3y = isoProject(rightFaceX, by + 12, bz + 5, originX, originY)
+                local b4x, b4y = isoProject(rightFaceX, by, bz + 5, originX, originY)
+                love.graphics.polygon("line", b1x, b1y, b2x, b2y, b3x, b3y, b4x, b4y)
+            end
+        end
+    end
+
+    -- === ROOF EAVES ===
+    local eaveR = mainR + 8
+    local eaveH = 4
+    IsoUtils.octagonalPrism(0, 0, mainH - 2, eaveR, eaveH, originX, originY, roofDark, {
+        {roofDark[1] * 1.1, roofDark[2] * 1.1, roofDark[3] * 1.1},
+        {roofDark[1], roofDark[2], roofDark[3]},
+        {roofDark[1] * 0.9, roofDark[2] * 0.9, roofDark[3] * 0.9},
+        {roofDark[1] * 0.8, roofDark[2] * 0.8, roofDark[3] * 0.8},
+    })
+
+    -- === PEAKED ROOF ===
+    IsoUtils.pyramidRoof(0, 0, mainH + 2, mainR + 5, roofPeak, originX, originY, roofLeft)
+
+    -- === 3 FRONT COLUMNS ===
+    -- Left front column
+    local lfColX = -mainR - 2
+    local lfColY = mainR - 2
+    IsoUtils.box(lfColX, lfColY, 0, colW, colD, colH, originX, originY, stoneTop, stoneLeft, stoneRight)
+    IsoUtils.box(lfColX - 1, lfColY - 1, colH, colW + 2, colD + 2, 3, originX, originY, goldMid, goldDark, goldMid)
+
+    -- Center column
+    local cfColX = -colW/2
+    local cfColY = mainR + 2
+    IsoUtils.box(cfColX, cfColY, 0, colW, colD, colH - 4, originX, originY, stoneTop, stoneLeft, stoneRight)
+    IsoUtils.box(cfColX - 1, cfColY - 1, colH - 4, colW + 2, colD + 2, 3, originX, originY, goldMid, goldDark, goldMid)
+
+    -- Right front column
+    local rfColX = mainR - colW + 2
+    local rfColY = mainR - 2
+    IsoUtils.box(rfColX, rfColY, 0, colW, colD, colH, originX, originY, stoneTop, stoneLeft, stoneRight)
+    IsoUtils.box(rfColX - 1, rfColY - 1, colH, colW + 2, colD + 2, 3, originX, originY, goldMid, goldDark, goldMid)
+
+    -- === DOORWAY ===
+    local doorW = 14
+    local doorH = 22
+
+    IsoUtils.door(0, frontFaceY, 0, doorW, doorH, originX, originY, stoneDark, doorColor)
+
+    -- Door arch with gold trim
+    local archY = frontFaceY + 0.5
+    local sx1, sy1 = isoProject(-doorW/2, archY, doorH, originX, originY)
+    local sx2, sy2 = isoProject(doorW/2, archY, doorH, originX, originY)
+    local sx3, sy3 = isoProject(0, archY, doorH + 4, originX, originY)
+    love.graphics.setColor(doorColor[1], doorColor[2], doorColor[3], 1)
+    love.graphics.polygon("fill", sx1, sy1, sx2, sy2, sx3, sy3)
     love.graphics.setColor(goldMid[1], goldMid[2], goldMid[3], 1)
-    love.graphics.rectangle("fill", crownX - 10, crownY, 20, 4)
-    
-    -- Crown points
+    love.graphics.setLineWidth(2)
+    love.graphics.line(sx1, sy1, sx3, sy3)
+    love.graphics.line(sx3, sy3, sx2, sy2)
+    love.graphics.setLineWidth(1)
+
+    -- === WINDOW SLITS ===
+    IsoUtils.windowSlit(-14, frontFaceY, 14, 3, 10, originX, originY)
+    IsoUtils.windowSlit(14, frontFaceY, 14, 3, 10, originX, originY)
+
+    -- === TEAM BANNER ===
+    local bannerColor = Teams and Teams.getColor(self.team, "banner") or {0.20, 0.35, 0.55, 1}
+    local emblemColor = Teams and Teams.getColor(self.team, "emblem") or {0.8, 0.7, 0.3, 1}
+
+    local poleX = mainR - 8
+    local poleY = 0
+    love.graphics.setColor(woodColor[1], woodColor[2], woodColor[3], 1)
+    local px1, py1 = isoProject(poleX, poleY, mainH + roofPeak - 5, originX, originY)
+    local px2, py2 = isoProject(poleX, poleY, mainH + roofPeak + 16, originX, originY)
+    love.graphics.setLineWidth(2)
+    love.graphics.line(px1, py1, px2, py2)
+    love.graphics.setLineWidth(1)
+
+    local bx, by = isoProject(poleX + 2, poleY, mainH + roofPeak + 14, originX, originY)
+    love.graphics.setColor(bannerColor[1], bannerColor[2], bannerColor[3], 1)
+    local wave = math.sin((self.animTimer or 0) * 3) * 1.5
+    love.graphics.polygon("fill",
+        bx, by,
+        bx + 12 + wave, by + 2,
+        bx + 10 + wave, by + 10,
+        bx, by + 8)
+    love.graphics.setColor(emblemColor[1], emblemColor[2], emblemColor[3], 1)
+    love.graphics.circle("fill", bx + 6 + wave * 0.5, by + 5, 2.5)
+
+    -- === GOLDEN FLAG on roof peak ===
+    local flagX, flagY = isoProject(0, 0, mainH + roofPeak + 2, originX, originY)
+    love.graphics.setColor(goldMid[1], goldMid[2], goldMid[3], 1)
+    love.graphics.setLineWidth(2)
+    love.graphics.line(flagX, flagY, flagX, flagY - 20)
+    love.graphics.setLineWidth(1)
+    local flagWave = math.sin((self.animTimer or 0) * 3) * 1.5
     love.graphics.setColor(goldLight[1], goldLight[2], goldLight[3], 1)
     love.graphics.polygon("fill",
-        crownX - 8, crownY,
-        crownX - 6, crownY - 8,
-        crownX - 4, crownY)
-    love.graphics.polygon("fill",
-        crownX - 2, crownY,
-        crownX, crownY - 10,
-        crownX + 2, crownY)
-    love.graphics.polygon("fill",
-        crownX + 4, crownY,
-        crownX + 6, crownY - 8,
-        crownX + 8, crownY)
-    
-    -- Crown jewels
-    love.graphics.setColor(0.8, 0.2, 0.2, 1)
-    love.graphics.circle("fill", crownX, crownY - 8, 2)
-    love.graphics.setColor(0.2, 0.4, 0.8, 1)
-    love.graphics.circle("fill", crownX - 6, crownY - 5, 1.5)
-    love.graphics.circle("fill", crownX + 6, crownY - 5, 1.5)
-    
-    -- === GOLDEN TRIM on tower edges ===
-    love.graphics.setColor(goldMid[1], goldMid[2], goldMid[3], 0.8)
-    love.graphics.setLineWidth(2)
-    
-    -- Left tower vertical edges
-    local le1x, le1y = isoProject(-38, 8 + 16, 0, originX, originY)
-    local le2x, le2y = isoProject(-38, 8 + 16, 55, originX, originY)
-    love.graphics.line(le1x, le1y, le2x, le2y)
-    
-    local le3x, le3y = isoProject(-38 + 16, 8 + 16, 0, originX, originY)
-    local le4x, le4y = isoProject(-38 + 16, 8 + 16, 55, originX, originY)
-    love.graphics.line(le3x, le3y, le4x, le4y)
-    
-    -- Right tower vertical edges
-    local re1x, re1y = isoProject(22, 8 + 16, 0, originX, originY)
-    local re2x, re2y = isoProject(22, 8 + 16, 55, originX, originY)
-    love.graphics.line(re1x, re1y, re2x, re2y)
-    
-    local re3x, re3y = isoProject(22 + 16, 8 + 16, 0, originX, originY)
-    local re4x, re4y = isoProject(22 + 16, 8 + 16, 55, originX, originY)
-    love.graphics.line(re3x, re3y, re4x, re4y)
-    
-    love.graphics.setLineWidth(1)
+        flagX, flagY - 18,
+        flagX + 14 + flagWave, flagY - 15,
+        flagX + 12 + flagWave, flagY - 7,
+        flagX, flagY - 10)
 end
 
 function TownHall:drawHold(x, y, size)

@@ -15,57 +15,16 @@ pcall(function() Teams = require("teams") end)
 local BuildingRenderer
 pcall(function() BuildingRenderer = require("building_renderer") end)
 
+-- Shared isometric utilities
+local IsoUtils = require("iso_utils")
+local isoProject = IsoUtils.project
+local isoQuad = IsoUtils.quad
+local isoBox = IsoUtils.box
+local isoOctagonalPrism = IsoUtils.octagonalPrism
+local isoOctagon = IsoUtils.octagon
+
 -- Smoke particle system
 local smokeParticles = {}
-
---============================================================================
--- ISOMETRIC RENDERING SYSTEM
---============================================================================
-
-local function isoProject(x, y, z, originX, originY)
-    local screenX = originX + (x - y) * 0.5
-    local screenY = originY + (x + y) * 0.25 - z * 0.5
-    return screenX, screenY
-end
-
-local function isoQuad(p1, p2, p3, p4, originX, originY, color)
-    local sx1, sy1 = isoProject(p1[1], p1[2], p1[3], originX, originY)
-    local sx2, sy2 = isoProject(p2[1], p2[2], p2[3], originX, originY)
-    local sx3, sy3 = isoProject(p3[1], p3[2], p3[3], originX, originY)
-    local sx4, sy4 = isoProject(p4[1], p4[2], p4[3], originX, originY)
-    
-    love.graphics.setColor(color[1], color[2], color[3], color[4] or 1)
-    love.graphics.polygon("fill", sx1, sy1, sx2, sy2, sx3, sy3, sx4, sy4)
-end
-
-local function isoBox(x, y, z, w, d, h, originX, originY, topColor, leftColor, rightColor)
-    -- Top face
-    isoQuad(
-        {x, y, z + h},
-        {x + w, y, z + h},
-        {x + w, y + d, z + h},
-        {x, y + d, z + h},
-        originX, originY, topColor
-    )
-    
-    -- Left face
-    isoQuad(
-        {x, y + d, z},
-        {x, y + d, z + h},
-        {x + w, y + d, z + h},
-        {x + w, y + d, z},
-        originX, originY, leftColor
-    )
-    
-    -- Right face
-    isoQuad(
-        {x + w, y, z},
-        {x + w, y, z + h},
-        {x + w, y + d, z + h},
-        {x + w, y + d, z},
-        originX, originY, rightColor
-    )
-end
 
 -- Helper functions
 local function gradientRect(rx, ry, rw, rh, c1, c2, weathering)
@@ -426,89 +385,83 @@ function Blacksmith:drawBlacksmithIso(x, y, size)
         )
     end
     
-    -- === MAIN BUILDING (open workshop) ===
-    local mainW = 40 * scale
-    local mainD = 28 * scale
+    -- === MAIN BUILDING (open workshop, octagonal) ===
+    local mainR = 20 * scale  -- radius for octagonal shape
     local mainH = 22 * scale
-    local mainX = -mainW/2 - 3 * scale
-    local mainY = -mainD/2
-    
-    isoBox(mainX, mainY, 0, mainW, mainD, mainH, originX, originY,
-           stoneTop, stoneLeft, stoneRight)
-    
-    -- Stone texture
-    love.graphics.setColor(stoneDark[1], stoneDark[2], stoneDark[3], 0.3)
+    local mainCX = -3 * scale
+    local mainCY = 0
+
+    -- Wall colors for octagonal faces
+    local mainWallColors = {
+        {stoneRight[1], stoneRight[2], stoneRight[3]},
+        {0.42, 0.39, 0.35},
+        {stoneLeft[1], stoneLeft[2], stoneLeft[3]},
+        {0.35, 0.32, 0.29},
+    }
+
+    isoOctagonalPrism(mainCX, mainCY, 0, mainR, mainH, originX, originY, stoneTop, mainWallColors)
+
+    -- Stone texture bands
     for row = 1, 2 do
         local z = row * 8 * scale
-        local sx1, sy1 = isoProject(mainX, mainY + mainD, z, originX, originY)
-        local sx2, sy2 = isoProject(mainX + mainW, mainY + mainD, z, originX, originY)
-        love.graphics.line(sx1, sy1, sx2, sy2)
+        isoOctagon(mainCX, mainCY, z, mainR + 0.3, originX, originY, {stoneDark[1], stoneDark[2], stoneDark[3], 0.25})
     end
-    
-    -- === SLOPED ROOF (lean-to style) ===
+
+    -- === ROOF EAVES ===
+    local eaveR = mainR + 5*scale
+    local eaveH = 2*scale
+    local eaveDark = {roofLeft[1] * 0.8, roofLeft[2] * 0.8, roofLeft[3] * 0.8}
+    local eaveWallColors = {
+        {eaveDark[1] * 1.1, eaveDark[2] * 1.1, eaveDark[3] * 1.1},
+        {eaveDark[1], eaveDark[2], eaveDark[3]},
+        {eaveDark[1] * 0.9, eaveDark[2] * 0.9, eaveDark[3] * 0.9},
+        {eaveDark[1] * 0.8, eaveDark[2] * 0.8, eaveDark[3] * 0.8},
+    }
+    isoOctagonalPrism(mainCX, mainCY, mainH - 1*scale, eaveR, eaveH, originX, originY, eaveDark, eaveWallColors)
+
+    -- === SLOPED ROOF (lean-to style, octagonal pyramid) ===
     local roofBase = mainH
     local roofHeight = 10 * scale
-    
-    -- Roof surface (angled)
-    isoQuad(
-        {mainX - 2*scale, mainY - 2*scale, roofBase + roofHeight},
-        {mainX + mainW + 2*scale, mainY - 2*scale, roofBase},
-        {mainX + mainW + 2*scale, mainY + mainD + 2*scale, roofBase},
-        {mainX - 2*scale, mainY + mainD + 2*scale, roofBase + roofHeight},
-        originX, originY, roofLeft
-    )
-    
-    -- Roof edge
-    isoQuad(
-        {mainX - 2*scale, mainY + mainD + 2*scale, roofBase + roofHeight},
-        {mainX + mainW + 2*scale, mainY + mainD + 2*scale, roofBase},
-        {mainX + mainW + 2*scale, mainY + mainD + 2*scale, roofBase - 2*scale},
-        {mainX - 2*scale, mainY + mainD + 2*scale, roofBase + roofHeight - 2*scale},
-        originX, originY, roofRight
-    )
-    
-    -- === FORGE (brick chimney structure) ===
-    local forgeW = 14 * scale
-    local forgeD = 14 * scale
+
+    IsoUtils.pyramidRoof(mainCX, mainCY, roofBase, mainR + 2*scale, roofHeight, originX, originY, roofLeft)
+
+    -- === FORGE (brick chimney structure, octagonal) ===
+    local forgeR = 8 * scale  -- radius for octagonal shape
     local forgeH = 35 * scale
-    local forgeX = mainX + mainW - forgeW - 2*scale
-    local forgeY = mainY + 4*scale
-    
-    isoBox(forgeX, forgeY, 0, forgeW, forgeD, forgeH, originX, originY,
-           brickTop, brickLeft, brickRight)
-    
-    -- Brick texture on chimney
-    love.graphics.setColor(0.25, 0.15, 0.10, 0.4)
+    local forgeCX = mainCX + mainR - 2*scale
+    local forgeCY = -8 * scale
+
+    -- Wall colors for forge octagonal faces
+    local forgeWallColors = {
+        {brickRight[1], brickRight[2], brickRight[3]},
+        {0.42, 0.25, 0.16},
+        {brickLeft[1], brickLeft[2], brickLeft[3]},
+        {0.35, 0.20, 0.13},
+    }
+
+    isoOctagonalPrism(forgeCX, forgeCY, 0, forgeR, forgeH, originX, originY, brickTop, forgeWallColors)
+
+    -- Brick texture bands on chimney
     for row = 1, 5 do
         local z = row * 6 * scale
-        local bx1, by1 = isoProject(forgeX, forgeY + forgeD, z, originX, originY)
-        local bx2, by2 = isoProject(forgeX + forgeW, forgeY + forgeD, z, originX, originY)
-        love.graphics.line(bx1, by1, bx2, by2)
-        local bx3, by3 = isoProject(forgeX + forgeW, forgeY, z, originX, originY)
-        local bx4, by4 = isoProject(forgeX + forgeW, forgeY + forgeD, z, originX, originY)
-        love.graphics.line(bx3, by3, bx4, by4)
+        isoOctagon(forgeCX, forgeCY, z, forgeR + 0.3, originX, originY, {0.25, 0.15, 0.10, 0.3})
     end
-    
-    -- Chimney opening (top)
+
+    -- Chimney opening (top) - smaller octagon
+    isoOctagon(forgeCX, forgeCY, forgeH, forgeR - 2*scale, originX, originY, {0.15, 0.12, 0.10})
+
+    -- Forge fire opening (front face)
+    local forgeFrontY = forgeCY + forgeR
     isoQuad(
-        {forgeX + 2*scale, forgeY + 2*scale, forgeH},
-        {forgeX + forgeW - 2*scale, forgeY + 2*scale, forgeH},
-        {forgeX + forgeW - 2*scale, forgeY + forgeD - 2*scale, forgeH},
-        {forgeX + 2*scale, forgeY + forgeD - 2*scale, forgeH},
-        originX, originY, {0.15, 0.12, 0.10}
-    )
-    
-    -- Forge fire opening (front)
-    isoQuad(
-        {forgeX + 2*scale, forgeY + forgeD, 2*scale},
-        {forgeX + forgeW - 2*scale, forgeY + forgeD, 2*scale},
-        {forgeX + forgeW - 2*scale, forgeY + forgeD, 12*scale},
-        {forgeX + 2*scale, forgeY + forgeD, 12*scale},
+        {forgeCX - 4*scale, forgeFrontY, 2*scale},
+        {forgeCX + 4*scale, forgeFrontY, 2*scale},
+        {forgeCX + 4*scale, forgeFrontY, 12*scale},
+        {forgeCX - 4*scale, forgeFrontY, 12*scale},
         originX, originY, {0.12, 0.08, 0.06}
     )
-    
+
     -- Forge fire glow
-    local fireX, fireY = isoProject(forgeX + forgeW/2, forgeY + forgeD + 1*scale, 7*scale, originX, originY)
+    local fireX, fireY = isoProject(forgeCX, forgeFrontY + 1*scale, 7*scale, originX, originY)
     drawForgeFire(fireX, fireY, self.animTimer or 0, 1.2)
     
     -- === ANVIL ===
@@ -533,7 +486,7 @@ function Blacksmith:drawBlacksmithIso(x, y, size)
     love.graphics.circle("fill", ahx + 4, ahy, 3)
     
     -- === BELLOWS ===
-    local bellowsX, bellowsY = forgeX - 10*scale, forgeY + 5*scale
+    local bellowsX, bellowsY = forgeCX - forgeR - 4*scale, forgeCY + 2*scale
     -- Bellows body (leather)
     love.graphics.setColor(0.45, 0.32, 0.22, 1)
     local bl1x, bl1y = isoProject(bellowsX, bellowsY, 3*scale, originX, originY)
@@ -550,7 +503,7 @@ function Blacksmith:drawBlacksmithIso(x, y, size)
     love.graphics.setLineWidth(1)
     
     -- === TOOL RACK (hammers, tongs) ===
-    local rackX, rackY = mainX + 4*scale, mainY + mainD
+    local rackX, rackY = mainCX - mainR + 4*scale, mainCY + mainR
     -- Rack board
     love.graphics.setColor(woodDark[1], woodDark[2], woodDark[3], 1)
     local tr1x, tr1y = isoProject(rackX, rackY, 10*scale, originX, originY)

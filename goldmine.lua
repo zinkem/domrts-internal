@@ -9,54 +9,13 @@
 local BuildingRenderer
 pcall(function() BuildingRenderer = require("building_renderer") end)
 
---============================================================================
--- ISOMETRIC RENDERING SYSTEM
---============================================================================
-
-local function isoProject(x, y, z, originX, originY)
-    local screenX = originX + (x - y) * 0.5
-    local screenY = originY + (x + y) * 0.25 - z * 0.5
-    return screenX, screenY
-end
-
-local function isoQuad(p1, p2, p3, p4, originX, originY, color)
-    local sx1, sy1 = isoProject(p1[1], p1[2], p1[3], originX, originY)
-    local sx2, sy2 = isoProject(p2[1], p2[2], p2[3], originX, originY)
-    local sx3, sy3 = isoProject(p3[1], p3[2], p3[3], originX, originY)
-    local sx4, sy4 = isoProject(p4[1], p4[2], p4[3], originX, originY)
-    
-    love.graphics.setColor(color[1], color[2], color[3], color[4] or 1)
-    love.graphics.polygon("fill", sx1, sy1, sx2, sy2, sx3, sy3, sx4, sy4)
-end
-
-local function isoBox(x, y, z, w, d, h, originX, originY, topColor, leftColor, rightColor)
-    -- Top face
-    isoQuad(
-        {x, y, z + h},
-        {x + w, y, z + h},
-        {x + w, y + d, z + h},
-        {x, y + d, z + h},
-        originX, originY, topColor
-    )
-    
-    -- Left face
-    isoQuad(
-        {x, y + d, z},
-        {x, y + d, z + h},
-        {x + w, y + d, z + h},
-        {x + w, y + d, z},
-        originX, originY, leftColor
-    )
-    
-    -- Right face
-    isoQuad(
-        {x + w, y, z},
-        {x + w, y, z + h},
-        {x + w, y + d, z + h},
-        {x + w, y + d, z},
-        originX, originY, rightColor
-    )
-end
+-- Shared isometric utilities
+local IsoUtils = require("iso_utils")
+local isoProject = IsoUtils.project
+local isoQuad = IsoUtils.quad
+local isoBox = IsoUtils.box
+local isoOctagonalPrism = IsoUtils.octagonalPrism
+local isoOctagon = IsoUtils.octagon
 
 local GoldMine = {}
 GoldMine.__index = GoldMine
@@ -183,90 +142,105 @@ function GoldMine:drawGoldMineIso(x, y, size)
     local woodDark = {0.38, 0.28, 0.18}
     local caveColor = {0.08, 0.06, 0.04}
     
-    -- === ROCKY MOUNTAIN BASE ===
-    -- Back peak (tallest)
-    isoBox(-10*scale, -22*scale, 0, 28*scale, 22*scale, 42*scale, originX, originY,
-           rockTop, rockLeft, rockRight)
-    
-    -- Left outcrop
-    isoBox(-24*scale, -8*scale, 0, 20*scale, 18*scale, 28*scale, originX, originY,
-           rockTop, rockLeft, rockRight)
-    
-    -- Right outcrop
-    isoBox(10*scale, -12*scale, 0, 18*scale, 20*scale, 32*scale, originX, originY,
-           rockTop, rockLeft, rockRight)
-    
-    -- Front lower rocks
-    isoBox(-16*scale, 6*scale, 0, 34*scale, 16*scale, 18*scale, originX, originY,
-           rockTop, rockLeft, rockRight)
-    
-    -- Additional rock detail left
+    -- === ROCKY MOUNTAIN BASE (using octagonal shapes) ===
+    local rockWallColors = {
+        {rockRight[1], rockRight[2], rockRight[3]},
+        {rockTop[1]*0.9, rockTop[2]*0.9, rockTop[3]*0.9},
+        {rockLeft[1], rockLeft[2], rockLeft[3]},
+        {rockTop[1]*0.85, rockTop[2]*0.85, rockTop[3]*0.85},
+    }
+
+    -- Back peak (tallest) - octagonal
+    local backR = 14*scale
+    local backCX, backCY = 4*scale, -11*scale
+    isoOctagonalPrism(backCX, backCY, 0, backR, 42*scale, originX, originY, rockTop, rockWallColors)
+
+    -- Left outcrop - octagonal
+    local leftR = 10*scale
+    local leftCX, leftCY = -14*scale, 1*scale
+    isoOctagonalPrism(leftCX, leftCY, 0, leftR, 28*scale, originX, originY, rockTop, rockWallColors)
+
+    -- Right outcrop - octagonal
+    local rightR = 10*scale
+    local rightCX, rightCY = 18*scale, -2*scale
+    isoOctagonalPrism(rightCX, rightCY, 0, rightR, 32*scale, originX, originY, rockTop, rockWallColors)
+
+    -- Front lower rocks - wider octagonal
+    local frontR = 18*scale
+    local frontCX, frontCY = 0, 14*scale
+    isoOctagonalPrism(frontCX, frontCY, 0, frontR, 18*scale, originX, originY, rockTop, rockWallColors)
+
+    -- Additional rock detail left (keep as box for variety)
     isoBox(-20*scale, -2*scale, 0, 14*scale, 10*scale, 16*scale, originX, originY,
            {rockTop[1]*0.95, rockTop[2]*0.95, rockTop[3]*0.95}, rockLeft, rockRight)
-    
-    -- Additional rock detail right
+
+    -- Additional rock detail right (keep as box for variety)
     isoBox(14*scale, 4*scale, 0, 10*scale, 14*scale, 14*scale, originX, originY,
            {rockTop[1]*0.92, rockTop[2]*0.92, rockTop[3]*0.92}, rockLeft, rockRight)
     
+    -- Front face Y for details (front of front rocks)
+    local frontFaceY = frontCY + frontR
+
     -- Rock cracks/texture
     love.graphics.setColor(rockDark[1], rockDark[2], rockDark[3], 0.5)
     love.graphics.setLineWidth(1)
-    
-    local c1x1, c1y1 = isoProject(-6*scale, 22*scale, 6*scale, originX, originY)
-    local c1x2, c1y2 = isoProject(4*scale, 22*scale, 12*scale, originX, originY)
+
+    local c1x1, c1y1 = isoProject(-6*scale, frontFaceY, 6*scale, originX, originY)
+    local c1x2, c1y2 = isoProject(4*scale, frontFaceY, 12*scale, originX, originY)
     love.graphics.line(c1x1, c1y1, c1x2, c1y2)
-    
-    local c2x1, c2y1 = isoProject(8*scale, 22*scale, 4*scale, originX, originY)
-    local c2x2, c2y2 = isoProject(14*scale, 22*scale, 10*scale, originX, originY)
+
+    local c2x1, c2y1 = isoProject(8*scale, frontFaceY, 4*scale, originX, originY)
+    local c2x2, c2y2 = isoProject(14*scale, frontFaceY, 10*scale, originX, originY)
     love.graphics.line(c2x1, c2y1, c2x2, c2y2)
-    
+
     -- === GOLD VEINS (if not depleted) ===
     if not self.depleted then
         local time = self.animTimer or 0
         local shimmer = 0.85 + math.sin(time * 3) * 0.15
-        
+
         love.graphics.setColor(goldColor[1] * shimmer, goldColor[2] * shimmer, goldColor[3], 1)
         love.graphics.setLineWidth(2)
-        
+
         -- Vein 1 on front
-        local v1x1, v1y1 = isoProject(-10*scale, 22*scale, 6*scale, originX, originY)
-        local v1x2, v1y2 = isoProject(0*scale, 22*scale, 10*scale, originX, originY)
+        local v1x1, v1y1 = isoProject(-10*scale, frontFaceY, 6*scale, originX, originY)
+        local v1x2, v1y2 = isoProject(0*scale, frontFaceY, 10*scale, originX, originY)
         love.graphics.line(v1x1, v1y1, v1x2, v1y2)
-        
+
         -- Vein 2 on front
-        local v2x1, v2y1 = isoProject(6*scale, 22*scale, 5*scale, originX, originY)
-        local v2x2, v2y2 = isoProject(14*scale, 22*scale, 9*scale, originX, originY)
+        local v2x1, v2y1 = isoProject(6*scale, frontFaceY, 5*scale, originX, originY)
+        local v2x2, v2y2 = isoProject(14*scale, frontFaceY, 9*scale, originX, originY)
         love.graphics.line(v2x1, v2y1, v2x2, v2y2)
-        
-        -- Vein on right face
-        local v3x1, v3y1 = isoProject(18*scale, 8*scale, 14*scale, originX, originY)
-        local v3x2, v3y2 = isoProject(18*scale, 16*scale, 18*scale, originX, originY)
+
+        -- Vein on right face (on right outcrop)
+        local rightFaceX = rightCX + rightR
+        local v3x1, v3y1 = isoProject(rightFaceX, rightCY - 4*scale, 14*scale, originX, originY)
+        local v3x2, v3y2 = isoProject(rightFaceX, rightCY + 4*scale, 18*scale, originX, originY)
         love.graphics.line(v3x1, v3y1, v3x2, v3y2)
-        
+
         love.graphics.setLineWidth(1)
-        
+
         -- Gold nugget highlights
         love.graphics.setColor(goldBright[1], goldBright[2], goldBright[3], shimmer)
-        local n1x, n1y = isoProject(-4*scale, 22*scale, 8*scale, originX, originY)
+        local n1x, n1y = isoProject(-4*scale, frontFaceY, 8*scale, originX, originY)
         love.graphics.circle("fill", n1x, n1y, 2.5)
-        
-        local n2x, n2y = isoProject(10*scale, 22*scale, 7*scale, originX, originY)
+
+        local n2x, n2y = isoProject(10*scale, frontFaceY, 7*scale, originX, originY)
         love.graphics.circle("fill", n2x, n2y, 2)
-        
-        local n3x, n3y = isoProject(18*scale, 12*scale, 16*scale, originX, originY)
+
+        local n3x, n3y = isoProject(rightFaceX, rightCY, 16*scale, originX, originY)
         love.graphics.circle("fill", n3x, n3y, 2)
-        
+
         -- Sparkles
         love.graphics.setColor(1, 1, 0.8, 0.6 + math.sin(time * 5) * 0.3)
-        local sp1x, sp1y = isoProject(-6*scale, 22*scale, 9*scale, originX, originY)
+        local sp1x, sp1y = isoProject(-6*scale, frontFaceY, 9*scale, originX, originY)
         love.graphics.circle("fill", sp1x, sp1y, 1)
-        
-        local sp2x, sp2y = isoProject(12*scale, 22*scale, 8*scale, originX, originY)
+
+        local sp2x, sp2y = isoProject(12*scale, frontFaceY, 8*scale, originX, originY)
         love.graphics.circle("fill", sp2x, sp2y, 1)
     end
-    
+
     -- === CAVE ENTRANCE ===
-    local caveX, caveY = -10*scale, 22*scale
+    local caveX, caveY = -10*scale, frontFaceY
     local caveW, caveH = 18*scale, 16*scale
     
     -- Cave opening (dark)

@@ -996,10 +996,10 @@ function UIDraw.drawCommandButton(x, y, w, h, text, hotkey, enabled, hovered, pr
     love.graphics.setLineWidth(2)
     love.graphics.rectangle("line", x, y, w, h, 4)
     
-    -- Draw icon/portrait in center-top area
+    -- Draw icon/portrait in center of button
     local iconSize = 28
     local iconX = x + (w - iconSize) / 2
-    local iconY = y + 5
+    local iconY = y + (h - iconSize) / 2
     
     -- Subtle circular vignette/frame for icon (instead of harsh black box)
     local cx, cy = iconX + iconSize/2, iconY + iconSize/2
@@ -1182,15 +1182,7 @@ function UIDraw.drawCommandButton(x, y, w, h, text, hotkey, enabled, hovered, pr
         love.graphics.setColor(enabled and {1, 0.9, 0.5, 1} or {0.6, 0.5, 0.3, 0.6})
         love.graphics.print(hotkey, x + 4, y + 2)
     end
-    
-    -- Button text at bottom
-    love.graphics.setColor(textColor)
-    love.graphics.setFont(Game.fonts.small)
-    local textW = Game.fonts.small:getWidth(text)
-    local textX = x + (w - textW) / 2
-    local textY = y + h - 16
-    love.graphics.print(text, textX, textY)
-    
+
     return x, y, w, h
 end
 

@@ -33,6 +33,7 @@ pcall(function() FlyingScout = require("flyingscout") end)
 pcall(function() Ballista = require("ballista") end)
 pcall(function() Kamikaze = require("kamikaze") end)
 local UIDraw = require("ui_draw")
+local CommandBar = require("command_bar")
 
 -- Team system
 local Teams
@@ -93,6 +94,10 @@ local resources = {
     gold = 1000,
     lumber = 400
 }
+
+-- Debug mode state
+local debugMode = false
+local debugCheckboxRect = {x = 0, y = 0, w = 0, h = 0}  -- Set in draw
 
 -- Unit capacity
 local BASE_CAPACITY = 4
@@ -388,6 +393,36 @@ end
 
 local function drawTopBar(screenW)
     UIDraw.drawTopBar(screenW, resources, currentPop, maxPop, elapsedTime, townHall.tier, Game.settings.gameSpeed, Game.fonts)
+
+    -- Debug mode checkbox (positioned left of the tier indicator)
+    local checkboxSize = 16
+    local checkboxX = screenW - UI.minimapSize - 120
+    local checkboxY = 12
+    debugCheckboxRect = {x = checkboxX, y = checkboxY, w = checkboxSize + 50, h = checkboxSize + 4}
+
+    -- Checkbox background
+    love.graphics.setColor(UI.stoneDark[1], UI.stoneDark[2], UI.stoneDark[3], 0.9)
+    love.graphics.rectangle("fill", checkboxX - 2, checkboxY - 2, checkboxSize + 4, checkboxSize + 4, 2)
+
+    -- Checkbox border
+    love.graphics.setColor(UI.metalBronze[1], UI.metalBronze[2], UI.metalBronze[3], 0.8)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", checkboxX - 2, checkboxY - 2, checkboxSize + 4, checkboxSize + 4, 2)
+
+    -- Checkmark if enabled
+    if debugMode then
+        love.graphics.setColor(0.4, 0.9, 0.4, 1)
+        love.graphics.setLineWidth(3)
+        love.graphics.line(checkboxX + 2, checkboxY + 8, checkboxX + 6, checkboxY + 12)
+        love.graphics.line(checkboxX + 6, checkboxY + 12, checkboxX + 14, checkboxY + 4)
+    end
+
+    -- Label
+    love.graphics.setColor(UI.textLight[1], UI.textLight[2], UI.textLight[3], 0.9)
+    if Game.fonts and Game.fonts.small then
+        love.graphics.setFont(Game.fonts.small)
+    end
+    love.graphics.print("Debug", checkboxX + checkboxSize + 6, checkboxY)
 end
 
 local function drawMinimap(screenW)
@@ -928,6 +963,64 @@ local function getCommandButtons()
         end
     end
 
+    -- Scout Tower upgrade commands
+    if selEntity.type == "scouttower" and selEntity.completed and selEntity:canUpgrade() then
+        local ScoutTower = require("scouttower")
+
+        -- Guard Tower upgrade (requires Lumber Mill)
+        local guardGold, guardLumber = ScoutTower.GUARD_TOWER_COST_GOLD, ScoutTower.GUARD_TOWER_COST_LUMBER
+        local canUpgradeGuard = Requirements.canUpgradeToGuardTower() and
+                               resources.gold >= guardGold and resources.lumber >= guardLumber
+        local guardReq = not Requirements.canUpgradeToGuardTower() and "Lumber Mill" or nil
+        table.insert(buttons, {
+            hotkey = "G",
+            text = "Guard Tower",
+            icon = "tower",
+            cost = guardGold .. "/" .. guardLumber,
+            enabled = canUpgradeGuard,
+            requirement = guardReq,
+            action = function()
+                if Requirements.canUpgradeToGuardTower() and
+                   resources.gold >= guardGold and resources.lumber >= guardLumber then
+                    if selEntity:startUpgrade("guardtower") then
+                        resources.gold = resources.gold - guardGold
+                        resources.lumber = resources.lumber - guardLumber
+                        addNotification("Upgrading to Guard Tower...")
+                    end
+                end
+            end
+        })
+
+        -- Cannon Tower upgrade (requires Blacksmith + Keep)
+        local cannonGold, cannonLumber = ScoutTower.CANNON_TOWER_COST_GOLD, ScoutTower.CANNON_TOWER_COST_LUMBER
+        local canUpgradeCannon = Requirements.canUpgradeToCannonTower() and
+                                resources.gold >= cannonGold and resources.lumber >= cannonLumber
+        local cannonReq = nil
+        if not Requirements.hasBlacksmith() then
+            cannonReq = "Blacksmith"
+        elseif not Requirements.isKeep() then
+            cannonReq = "Keep"
+        end
+        table.insert(buttons, {
+            hotkey = "C",
+            text = "Cannon Tower",
+            icon = "tower",
+            cost = cannonGold .. "/" .. cannonLumber,
+            enabled = canUpgradeCannon,
+            requirement = cannonReq,
+            action = function()
+                if Requirements.canUpgradeToCannonTower() and
+                   resources.gold >= cannonGold and resources.lumber >= cannonLumber then
+                    if selEntity:startUpgrade("cannontower") then
+                        resources.gold = resources.gold - cannonGold
+                        resources.lumber = resources.lumber - cannonLumber
+                        addNotification("Upgrading to Cannon Tower...")
+                    end
+                end
+            end
+        })
+    end
+
     return buttons
 end
 
@@ -1076,6 +1169,8 @@ local function drawCommandBar(screenW, screenH)
     end
 
     local mouseX, mouseY = love.mouse.getPosition()
+    local hoveredBtn = nil
+    local hoveredX, hoveredY = nil, nil
 
     -- Draw primary button in center of screen
     if primaryBtn then
@@ -1093,12 +1188,10 @@ local function drawCommandBar(screenW, screenH)
         UIDraw.drawCommandButton(x, btnY, COMMAND_BUTTON_SIZE, COMMAND_BUTTON_SIZE,
             primaryBtn.text, primaryBtn.hotkey, primaryBtn.enabled, hovered, pressed, primaryBtn.icon)
 
-        -- Draw cost below button
-        if primaryBtn.cost then
-            love.graphics.setFont(Game.fonts.small)
-            love.graphics.setColor(primaryBtn.enabled and {0.9, 0.8, 0.5, 0.9} or {0.5, 0.45, 0.4, 0.6})
-            local costW = Game.fonts.small:getWidth(primaryBtn.cost)
-            love.graphics.print(primaryBtn.cost, x + (COMMAND_BUTTON_SIZE - costW) / 2, btnY + COMMAND_BUTTON_SIZE + 2)
+        if hovered then
+            hoveredBtn = primaryBtn
+            hoveredX = x
+            hoveredY = btnY
         end
     end
 
@@ -1120,13 +1213,16 @@ local function drawCommandBar(screenW, screenH)
         UIDraw.drawCommandButton(x, btnY, COMMAND_BUTTON_SIZE, COMMAND_BUTTON_SIZE,
             btn.text, btn.hotkey, btn.enabled, hovered, pressed, btn.icon)
 
-        -- Draw cost below button
-        if btn.cost then
-            love.graphics.setFont(Game.fonts.small)
-            love.graphics.setColor(btn.enabled and {0.9, 0.8, 0.5, 0.9} or {0.5, 0.45, 0.4, 0.6})
-            local costW = Game.fonts.small:getWidth(btn.cost)
-            love.graphics.print(btn.cost, x + (COMMAND_BUTTON_SIZE - costW) / 2, btnY + COMMAND_BUTTON_SIZE + 2)
+        if hovered then
+            hoveredBtn = btn
+            hoveredX = x
+            hoveredY = btnY
         end
+    end
+
+    -- Draw tooltip for hovered button (on top of everything)
+    if hoveredBtn then
+        CommandBar.drawTooltip(hoveredBtn, hoveredX, hoveredY)
     end
 end
 
@@ -3291,6 +3387,22 @@ end
 
 function Gameplay.mousepressed(x, y, button)
     if victory or defeat then return end
+
+    -- Debug checkbox click
+    if button == 1 then
+        local cb = debugCheckboxRect
+        if x >= cb.x and x <= cb.x + cb.w and y >= cb.y and y <= cb.y + cb.h then
+            debugMode = not debugMode
+            if debugMode then
+                resources.gold = 100000
+                resources.lumber = 100000
+                addNotification("DEBUG MODE: 100k Gold & Lumber")
+            else
+                addNotification("Debug mode disabled")
+            end
+            return
+        end
+    end
 
     -- Building placement
     if isPlacingBuilding then

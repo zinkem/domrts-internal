@@ -17,57 +17,16 @@ pcall(function() Teams = require("teams") end)
 local BuildingRenderer
 pcall(function() BuildingRenderer = require("building_renderer") end)
 
+-- Shared isometric utilities
+local IsoUtils = require("iso_utils")
+local isoProject = IsoUtils.project
+local isoQuad = IsoUtils.quad
+local isoBox = IsoUtils.box
+local isoOctagonalPrism = IsoUtils.octagonalPrism
+local isoOctagon = IsoUtils.octagon
+
 -- Smoke particle system
 local smokeParticles = {}
-
---============================================================================
--- ISOMETRIC RENDERING SYSTEM
---============================================================================
-
-local function isoProject(x, y, z, originX, originY)
-    local screenX = originX + (x - y) * 0.5
-    local screenY = originY + (x + y) * 0.25 - z * 0.5
-    return screenX, screenY
-end
-
-local function isoQuad(p1, p2, p3, p4, originX, originY, color)
-    local sx1, sy1 = isoProject(p1[1], p1[2], p1[3], originX, originY)
-    local sx2, sy2 = isoProject(p2[1], p2[2], p2[3], originX, originY)
-    local sx3, sy3 = isoProject(p3[1], p3[2], p3[3], originX, originY)
-    local sx4, sy4 = isoProject(p4[1], p4[2], p4[3], originX, originY)
-    
-    love.graphics.setColor(color[1], color[2], color[3], color[4] or 1)
-    love.graphics.polygon("fill", sx1, sy1, sx2, sy2, sx3, sy3, sx4, sy4)
-end
-
-local function isoBox(x, y, z, w, d, h, originX, originY, topColor, leftColor, rightColor)
-    -- Top face
-    isoQuad(
-        {x, y, z + h},
-        {x + w, y, z + h},
-        {x + w, y + d, z + h},
-        {x, y + d, z + h},
-        originX, originY, topColor
-    )
-    
-    -- Left face
-    isoQuad(
-        {x, y + d, z},
-        {x, y + d, z + h},
-        {x + w, y + d, z + h},
-        {x + w, y + d, z},
-        originX, originY, leftColor
-    )
-    
-    -- Right face
-    isoQuad(
-        {x + w, y, z},
-        {x + w, y, z + h},
-        {x + w, y + d, z + h},
-        {x + w, y + d, z},
-        originX, originY, rightColor
-    )
-end
 
 -- Update smoke particles
 local function updateSmokeParticles(dt, buildingId)
@@ -386,20 +345,28 @@ function SiegeWorkshop:drawSiegeWorkshopIso(x, y, size)
     local gx, gy = isoProject(0, 0, 0, originX, originY)
     love.graphics.ellipse("fill", gx, gy + 3, 38, 14)
     
-    -- === MAIN BUILDING ===
-    local mainW, mainD, mainH = 45*scale, 40*scale, 32*scale
-    local mainX, mainY = -mainW/2, -mainD/2
-    
-    isoBox(mainX, mainY, 0, mainW, mainD, mainH, originX, originY,
-           stoneTop, stoneLeft, stoneRight)
-    
-    -- Stone brick texture
+    -- === MAIN BUILDING (octagonal) ===
+    local mainR = 24 * scale
+    local mainH = 32 * scale
+    local mainCX = 0
+    local mainCY = 0
+    local frontFaceY = mainCY + mainR
+
+    local wallColors = {
+        {stoneRight[1], stoneRight[2], stoneRight[3]},
+        {0.42, 0.40, 0.36},
+        {stoneLeft[1], stoneLeft[2], stoneLeft[3]},
+        {0.38, 0.36, 0.33},
+    }
+    isoOctagonalPrism(mainCX, mainCY, 0, mainR, mainH, originX, originY, stoneTop, wallColors)
+
+    -- Stone brick texture on front face
     love.graphics.setColor(stoneDark[1], stoneDark[2], stoneDark[3], 0.4)
     for row = 0, 4 do
         for col = 0, 2 do
             local offsetX = (row % 2) * 8*scale
-            -- Front wall bricks
-            local bx, by = mainX + 5*scale + col * 14*scale + offsetX, mainY + mainD
+            local bx = -mainR + 8*scale + col * 14*scale + offsetX
+            local by = frontFaceY
             local bz = 4*scale + row * 6*scale
             local b1x, b1y = isoProject(bx, by, bz, originX, originY)
             local b2x, b2y = isoProject(bx + 12*scale, by, bz, originX, originY)
@@ -409,36 +376,34 @@ function SiegeWorkshop:drawSiegeWorkshopIso(x, y, size)
         end
     end
     
-    -- === FLAT INDUSTRIAL ROOF ===
-    isoQuad(
-        {mainX - 3*scale, mainY - 3*scale, mainH},
-        {mainX + mainW + 3*scale, mainY - 3*scale, mainH},
-        {mainX + mainW + 3*scale, mainY + mainD + 3*scale, mainH},
-        {mainX - 3*scale, mainY + mainD + 3*scale, mainH},
-        originX, originY, roofColor
-    )
-    
-    -- Roof edge trim
+    -- === FLAT INDUSTRIAL ROOF (octagonal) ===
+    local roofR = mainR + 3*scale
+    isoOctagon(mainCX, mainCY, mainH, roofR, originX, originY, roofColor)
+
+    -- Roof edge trim (just draw visible edges)
     love.graphics.setColor(roofDark[1], roofDark[2], roofDark[3], 1)
-    local re1x, re1y = isoProject(mainX - 3*scale, mainY + mainD + 3*scale, mainH, originX, originY)
-    local re2x, re2y = isoProject(mainX + mainW + 3*scale, mainY + mainD + 3*scale, mainH, originX, originY)
-    local re3x, re3y = isoProject(mainX + mainW + 3*scale, mainY - 3*scale, mainH, originX, originY)
+    local cut = roofR * 0.293
+    local re1x, re1y = isoProject(mainCX - roofR + cut, mainCY + roofR, mainH, originX, originY)
+    local re2x, re2y = isoProject(mainCX + roofR - cut, mainCY + roofR, mainH, originX, originY)
+    local re3x, re3y = isoProject(mainCX + roofR, mainCY + roofR - cut, mainH, originX, originY)
+    local re4x, re4y = isoProject(mainCX + roofR, mainCY - roofR + cut, mainH, originX, originY)
     love.graphics.setLineWidth(2)
     love.graphics.line(re1x, re1y, re2x, re2y)
     love.graphics.line(re2x, re2y, re3x, re3y)
+    love.graphics.line(re3x, re3y, re4x, re4y)
     love.graphics.setLineWidth(1)
     
     -- === SMOKESTACKS ===
-    local stack1X, stack1Y = mainX + 8*scale, mainY + 8*scale
-    local stack2X, stack2Y = mainX + mainW - 14*scale, mainY + 10*scale
-    
+    local stack1X, stack1Y = mainCX - mainR + 10*scale, mainCY - mainR + 10*scale
+    local stack2X, stack2Y = mainCX + mainR - 14*scale, mainCY - mainR + 12*scale
+
     -- Stack 1 (taller)
     isoBox(stack1X, stack1Y, mainH, 8*scale, 8*scale, 18*scale, originX, originY,
            stoneTop, stoneDark, stoneLeft)
     -- Stack 1 cap
     isoBox(stack1X - 1*scale, stack1Y - 1*scale, mainH + 18*scale, 10*scale, 10*scale, 3*scale, originX, originY,
            metalColor, metalDark, metalColor)
-    
+
     -- Stack 2 (shorter)
     isoBox(stack2X, stack2Y, mainH, 8*scale, 8*scale, 14*scale, originX, originY,
            stoneTop, stoneDark, stoneLeft)
@@ -449,54 +414,54 @@ function SiegeWorkshop:drawSiegeWorkshopIso(x, y, size)
     -- === LARGE DOORS (workshop entrance) ===
     local doorW, doorH = 28*scale, 26*scale
     local doorX = -doorW/2
-    
+
     -- Door recess
     isoQuad(
-        {doorX - 2*scale, mainY + mainD + 0.5, 0},
-        {doorX + doorW + 2*scale, mainY + mainD + 0.5, 0},
-        {doorX + doorW + 2*scale, mainY + mainD + 0.5, doorH + 3*scale},
-        {doorX - 2*scale, mainY + mainD + 0.5, doorH + 3*scale},
+        {doorX - 2*scale, frontFaceY + 0.5, 0},
+        {doorX + doorW + 2*scale, frontFaceY + 0.5, 0},
+        {doorX + doorW + 2*scale, frontFaceY + 0.5, doorH + 3*scale},
+        {doorX - 2*scale, frontFaceY + 0.5, doorH + 3*scale},
         originX, originY, stoneDark
     )
-    
+
     -- Door itself
     isoQuad(
-        {doorX, mainY + mainD + 1, 0},
-        {doorX + doorW, mainY + mainD + 1, 0},
-        {doorX + doorW, mainY + mainD + 1, doorH},
-        {doorX, mainY + mainD + 1, doorH},
+        {doorX, frontFaceY + 1, 0},
+        {doorX + doorW, frontFaceY + 1, 0},
+        {doorX + doorW, frontFaceY + 1, doorH},
+        {doorX, frontFaceY + 1, doorH},
         originX, originY, woodDark
     )
-    
+
     -- Door arch
-    local archCX, archCY = isoProject(0, mainY + mainD + 1, doorH, originX, originY)
+    local archCX, archCY = isoProject(0, frontFaceY + 1, doorH, originX, originY)
     love.graphics.setColor(stoneDark[1], stoneDark[2], stoneDark[3], 1)
     love.graphics.arc("fill", archCX, archCY, 12, math.pi, 2 * math.pi)
-    
+
     -- Iron door bands
     love.graphics.setColor(metalDark[1], metalDark[2], metalDark[3], 1)
     for band = 0, 2 do
         local bandZ = 5*scale + band * 8*scale
-        local db1x, db1y = isoProject(doorX, mainY + mainD + 1, bandZ, originX, originY)
-        local db2x, db2y = isoProject(doorX + doorW, mainY + mainD + 1, bandZ, originX, originY)
+        local db1x, db1y = isoProject(doorX, frontFaceY + 1, bandZ, originX, originY)
+        local db2x, db2y = isoProject(doorX + doorW, frontFaceY + 1, bandZ, originX, originY)
         love.graphics.setLineWidth(2)
         love.graphics.line(db1x, db1y, db2x, db2y)
     end
     love.graphics.setLineWidth(1)
-    
+
     -- Door hinges
     love.graphics.setColor(metalColor[1], metalColor[2], metalColor[3], 1)
     for hinge = 0, 1 do
         local hingeZ = 8*scale + hinge * 12*scale
-        local h1x, h1y = isoProject(doorX + 2*scale, mainY + mainD + 1, hingeZ, originX, originY)
-        local h2x, h2y = isoProject(doorX + doorW - 2*scale, mainY + mainD + 1, hingeZ, originX, originY)
+        local h1x, h1y = isoProject(doorX + 2*scale, frontFaceY + 1, hingeZ, originX, originY)
+        local h2x, h2y = isoProject(doorX + doorW - 2*scale, frontFaceY + 1, hingeZ, originX, originY)
         love.graphics.circle("fill", h1x, h1y, 2.5)
         love.graphics.circle("fill", h2x, h2y, 2.5)
     end
     
     -- === CATAPULT ARM visible inside ===
     local armColor = {0.55, 0.42, 0.28}
-    local armX, armY = -4*scale, mainY + mainD - 5*scale
+    local armX, armY = -4*scale, frontFaceY - 5*scale
     
     isoQuad(
         {armX - 3*scale, armY, 4*scale},
@@ -512,8 +477,8 @@ function SiegeWorkshop:drawSiegeWorkshopIso(x, y, size)
     love.graphics.rectangle("fill", cwx - 6, cwy - 4, 12, 8)
     
     -- === GEARS ON SIDES ===
-    local gear1X, gear1Y = isoProject(mainX + mainW + 1, mainY + mainD/2 - 5*scale, 16*scale, originX, originY)
-    local gear2X, gear2Y = isoProject(mainX + mainW + 1, mainY + mainD/2 + 10*scale, 12*scale, originX, originY)
+    local gear1X, gear1Y = isoProject(mainCX + mainR + 1, mainCY - 5*scale, 16*scale, originX, originY)
+    local gear2X, gear2Y = isoProject(mainCX + mainR + 1, mainCY + 10*scale, 12*scale, originX, originY)
     
     -- Large gear
     love.graphics.setColor(metalColor[1], metalColor[2], metalColor[3], 1)
@@ -547,7 +512,7 @@ function SiegeWorkshop:drawSiegeWorkshopIso(x, y, size)
     end
     
     -- === WOOD PILE ===
-    local pileX, pileY = mainX + mainW - 5*scale, mainY + mainD + 8*scale
+    local pileX, pileY = mainCX + mainR - 5*scale, frontFaceY + 8*scale
     love.graphics.setColor(woodColor[1], woodColor[2], woodColor[3], 1)
     local p1x, p1y = isoProject(pileX, pileY, 0, originX, originY)
     love.graphics.ellipse("fill", p1x, p1y, 8, 4)
@@ -555,7 +520,7 @@ function SiegeWorkshop:drawSiegeWorkshopIso(x, y, size)
     love.graphics.ellipse("fill", p1x + 2, p1y - 6, 5, 2.5)
     
     -- === BANNER/SIGN ===
-    local bannerX, bannerY = mainX + 3*scale, mainY + mainD
+    local bannerX, bannerY = mainCX - mainR + 5*scale, frontFaceY
     
     -- Pole
     love.graphics.setColor(woodDark[1], woodDark[2], woodDark[3], 1)

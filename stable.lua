@@ -18,54 +18,13 @@ pcall(function() Teams = require("teams") end)
 local BuildingRenderer
 pcall(function() BuildingRenderer = require("building_renderer") end)
 
---============================================================================
--- ISOMETRIC RENDERING SYSTEM
---============================================================================
-
-local function isoProject(x, y, z, originX, originY)
-    local screenX = originX + (x - y) * 0.5
-    local screenY = originY + (x + y) * 0.25 - z * 0.5
-    return screenX, screenY
-end
-
-local function isoQuad(p1, p2, p3, p4, originX, originY, color)
-    local sx1, sy1 = isoProject(p1[1], p1[2], p1[3], originX, originY)
-    local sx2, sy2 = isoProject(p2[1], p2[2], p2[3], originX, originY)
-    local sx3, sy3 = isoProject(p3[1], p3[2], p3[3], originX, originY)
-    local sx4, sy4 = isoProject(p4[1], p4[2], p4[3], originX, originY)
-    
-    love.graphics.setColor(color[1], color[2], color[3], color[4] or 1)
-    love.graphics.polygon("fill", sx1, sy1, sx2, sy2, sx3, sy3, sx4, sy4)
-end
-
-local function isoBox(x, y, z, w, d, h, originX, originY, topColor, leftColor, rightColor)
-    -- Top face
-    isoQuad(
-        {x, y, z + h},
-        {x + w, y, z + h},
-        {x + w, y + d, z + h},
-        {x, y + d, z + h},
-        originX, originY, topColor
-    )
-    
-    -- Left face
-    isoQuad(
-        {x, y + d, z},
-        {x, y + d, z + h},
-        {x + w, y + d, z + h},
-        {x + w, y + d, z},
-        originX, originY, leftColor
-    )
-    
-    -- Right face
-    isoQuad(
-        {x + w, y, z},
-        {x + w, y, z + h},
-        {x + w, y + d, z + h},
-        {x + w, y + d, z},
-        originX, originY, rightColor
-    )
-end
+-- Shared isometric utilities
+local IsoUtils = require("iso_utils")
+local isoProject = IsoUtils.project
+local isoQuad = IsoUtils.quad
+local isoBox = IsoUtils.box
+local isoOctagonalPrism = IsoUtils.octagonalPrism
+local isoOctagon = IsoUtils.octagon
 
 local Stable = {}
 Stable.__index = Stable
@@ -296,112 +255,91 @@ function Stable:drawStableIso(x, y, size)
         love.graphics.ellipse("fill", hx, hy, 3, 1.5)
     end
     
-    -- === MAIN BARN BUILDING ===
-    local barnW, barnD, barnH = 45*scale, 38*scale, 28*scale
-    local barnX, barnY = -barnW/2, -barnD/2
-    
-    isoBox(barnX, barnY, 0, barnW, barnD, barnH, originX, originY,
-           woodTop, woodLeft, woodRight)
-    
-    -- Wood plank lines on walls
-    love.graphics.setColor(woodDark[1], woodDark[2], woodDark[3], 0.4)
+    -- === MAIN BARN BUILDING (octagonal) ===
+    local barnR = 22*scale  -- radius for octagonal shape
+    local barnH = 28*scale
+    local barnCX = 0
+    local barnCY = 0
+
+    -- Wall colors for octagonal faces
+    local barnWallColors = {
+        {woodRight[1], woodRight[2], woodRight[3]},
+        {0.48, 0.35, 0.22},
+        {woodLeft[1], woodLeft[2], woodLeft[3]},
+        {0.40, 0.28, 0.17},
+    }
+
+    isoOctagonalPrism(barnCX, barnCY, 0, barnR, barnH, originX, originY, woodTop, barnWallColors)
+
+    -- Wood plank bands on walls
     for i = 1, 4 do
         local z = i * 6*scale
-        -- Front wall
-        local lx1, ly1 = isoProject(barnX, barnY + barnD, z, originX, originY)
-        local lx2, ly2 = isoProject(barnX + barnW, barnY + barnD, z, originX, originY)
-        love.graphics.line(lx1, ly1, lx2, ly2)
-        -- Right wall
-        local rx1, ry1 = isoProject(barnX + barnW, barnY, z, originX, originY)
-        local rx2, ry2 = isoProject(barnX + barnW, barnY + barnD, z, originX, originY)
-        love.graphics.line(rx1, ry1, rx2, ry2)
+        isoOctagon(barnCX, barnCY, z, barnR + 0.3, originX, originY, {woodDark[1], woodDark[2], woodDark[3], 0.3})
     end
-    
-    -- === PEAKED BARN ROOF ===
+
+    -- === ROOF EAVES ===
+    local eaveR = barnR + 7*scale
+    local eaveH = 2*scale
+    local eaveDark = {roofLeft[1] * 0.85, roofLeft[2] * 0.85, roofLeft[3] * 0.85}
+    local eaveWallColors = {
+        {eaveDark[1] * 1.1, eaveDark[2] * 1.1, eaveDark[3] * 1.1},
+        {eaveDark[1], eaveDark[2], eaveDark[3]},
+        {eaveDark[1] * 0.9, eaveDark[2] * 0.9, eaveDark[3] * 0.9},
+        {eaveDark[1] * 0.8, eaveDark[2] * 0.8, eaveDark[3] * 0.8},
+    }
+    isoOctagonalPrism(barnCX, barnCY, barnH - 1*scale, eaveR, eaveH, originX, originY, eaveDark, eaveWallColors)
+
+    -- === PEAKED BARN ROOF (octagonal pyramid) ===
     local roofBase = barnH
     local roofPeak = 16*scale
-    local roofOverhang = 5*scale
-    
-    -- Left slope
-    isoQuad(
-        {barnX - roofOverhang, barnY - roofOverhang, roofBase},
-        {barnX + barnW/2, barnY + barnD/2, roofBase + roofPeak},
-        {barnX + barnW/2, barnY + barnD/2, roofBase + roofPeak},
-        {barnX - roofOverhang, barnY + barnD + roofOverhang, roofBase},
-        originX, originY, roofLeft
-    )
-    
-    -- Right slope
-    isoQuad(
-        {barnX + barnW + roofOverhang, barnY - roofOverhang, roofBase},
-        {barnX + barnW/2, barnY + barnD/2, roofBase + roofPeak},
-        {barnX + barnW/2, barnY + barnD/2, roofBase + roofPeak},
-        {barnX + barnW + roofOverhang, barnY + barnD + roofOverhang, roofBase},
-        originX, originY, roofRight
-    )
-    
-    -- Front gable
-    isoQuad(
-        {barnX - roofOverhang, barnY + barnD + roofOverhang, roofBase},
-        {barnX + barnW/2, barnY + barnD/2, roofBase + roofPeak},
-        {barnX + barnW/2, barnY + barnD/2, roofBase + roofPeak},
-        {barnX + barnW + roofOverhang, barnY + barnD + roofOverhang, roofBase},
-        originX, originY, roofTop
-    )
-    
-    -- Roof ridge highlight
-    love.graphics.setColor(0.62, 0.45, 0.28, 1)
-    local r1x, r1y = isoProject(barnX + barnW/2, barnY - roofOverhang, roofBase + roofPeak, originX, originY)
-    local r2x, r2y = isoProject(barnX + barnW/2, barnY + barnD + roofOverhang, roofBase + roofPeak, originX, originY)
-    love.graphics.setLineWidth(2)
-    love.graphics.line(r1x, r1y, r2x, r2y)
-    love.graphics.setLineWidth(1)
-    
+
+    IsoUtils.pyramidRoof(barnCX, barnCY, roofBase, barnR + 5*scale, roofPeak, originX, originY, roofLeft)
+
     -- === LARGE DOOR OPENING ===
     local doorW, doorH = 22*scale, 22*scale
-    local doorX = -doorW/2
-    
+    local frontFaceY = barnCY + barnR  -- front of octagon
+
     -- Door recess
     isoQuad(
-        {doorX, barnY + barnD + 0.5, 0},
-        {doorX + doorW, barnY + barnD + 0.5, 0},
-        {doorX + doorW, barnY + barnD + 0.5, doorH},
-        {doorX, barnY + barnD + 0.5, doorH},
+        {-doorW/2, frontFaceY + 0.5, 0},
+        {doorW/2, frontFaceY + 0.5, 0},
+        {doorW/2, frontFaceY + 0.5, doorH},
+        {-doorW/2, frontFaceY + 0.5, doorH},
         originX, originY, doorColor
     )
-    
+
     -- Door frame
     love.graphics.setColor(woodDark[1], woodDark[2], woodDark[3], 1)
-    local df1x, df1y = isoProject(doorX - 2*scale, barnY + barnD + 0.5, 0, originX, originY)
-    local df2x, df2y = isoProject(doorX - 2*scale, barnY + barnD + 0.5, doorH + 2*scale, originX, originY)
-    local df3x, df3y = isoProject(doorX + doorW + 2*scale, barnY + barnD + 0.5, doorH + 2*scale, originX, originY)
-    local df4x, df4y = isoProject(doorX + doorW + 2*scale, barnY + barnD + 0.5, 0, originX, originY)
+    local df1x, df1y = isoProject(-doorW/2 - 2*scale, frontFaceY + 0.5, 0, originX, originY)
+    local df2x, df2y = isoProject(-doorW/2 - 2*scale, frontFaceY + 0.5, doorH + 2*scale, originX, originY)
+    local df3x, df3y = isoProject(doorW/2 + 2*scale, frontFaceY + 0.5, doorH + 2*scale, originX, originY)
+    local df4x, df4y = isoProject(doorW/2 + 2*scale, frontFaceY + 0.5, 0, originX, originY)
     love.graphics.setLineWidth(3)
     love.graphics.line(df1x, df1y, df2x, df2y)
     love.graphics.line(df2x, df2y, df3x, df3y)
     love.graphics.line(df3x, df3y, df4x, df4y)
     love.graphics.setLineWidth(1)
-    
+
     -- X-pattern on doors
     love.graphics.setColor(woodDark[1] * 0.8, woodDark[2] * 0.8, woodDark[3] * 0.8, 0.7)
-    local dx1, dy1 = isoProject(doorX + 2*scale, barnY + barnD + 1, 2*scale, originX, originY)
-    local dx2, dy2 = isoProject(doorX + doorW/2 - 1*scale, barnY + barnD + 1, doorH - 2*scale, originX, originY)
-    local dx3, dy3 = isoProject(doorX + doorW/2 - 1*scale, barnY + barnD + 1, 2*scale, originX, originY)
-    local dx4, dy4 = isoProject(doorX + 2*scale, barnY + barnD + 1, doorH - 2*scale, originX, originY)
+    local dx1, dy1 = isoProject(-doorW/2 + 2*scale, frontFaceY + 1, 2*scale, originX, originY)
+    local dx2, dy2 = isoProject(-1*scale, frontFaceY + 1, doorH - 2*scale, originX, originY)
+    local dx3, dy3 = isoProject(-1*scale, frontFaceY + 1, 2*scale, originX, originY)
+    local dx4, dy4 = isoProject(-doorW/2 + 2*scale, frontFaceY + 1, doorH - 2*scale, originX, originY)
     love.graphics.setLineWidth(2)
     love.graphics.line(dx1, dy1, dx2, dy2)
     love.graphics.line(dx3, dy3, dx4, dy4)
     -- Right door half
-    local dx5, dy5 = isoProject(doorX + doorW/2 + 1*scale, barnY + barnD + 1, 2*scale, originX, originY)
-    local dx6, dy6 = isoProject(doorX + doorW - 2*scale, barnY + barnD + 1, doorH - 2*scale, originX, originY)
-    local dx7, dy7 = isoProject(doorX + doorW - 2*scale, barnY + barnD + 1, 2*scale, originX, originY)
-    local dx8, dy8 = isoProject(doorX + doorW/2 + 1*scale, barnY + barnD + 1, doorH - 2*scale, originX, originY)
+    local dx5, dy5 = isoProject(1*scale, frontFaceY + 1, 2*scale, originX, originY)
+    local dx6, dy6 = isoProject(doorW/2 - 2*scale, frontFaceY + 1, doorH - 2*scale, originX, originY)
+    local dx7, dy7 = isoProject(doorW/2 - 2*scale, frontFaceY + 1, 2*scale, originX, originY)
+    local dx8, dy8 = isoProject(1*scale, frontFaceY + 1, doorH - 2*scale, originX, originY)
     love.graphics.line(dx5, dy5, dx6, dy6)
     love.graphics.line(dx7, dy7, dx8, dy8)
     love.graphics.setLineWidth(1)
-    
+
     -- === HORSE HEAD SILHOUETTE ===
-    local horseX, horseY = isoProject(3*scale, barnY + barnD + 2, 10*scale, originX, originY)
+    local horseX, horseY = isoProject(3*scale, frontFaceY + 2, 10*scale, originX, originY)
     
     love.graphics.setColor(horseColor[1], horseColor[2], horseColor[3], 1)
     -- Head
@@ -419,26 +357,26 @@ function Stable:drawStableIso(x, y, size)
     love.graphics.circle("fill", horseX + 2, horseY - 1, 1.5)
     
     -- === HORSESHOE ABOVE DOOR ===
-    local hsX, hsY = isoProject(0, barnY + barnD + 0.5, doorH + 4*scale, originX, originY)
+    local hsX, hsY = isoProject(0, frontFaceY + 0.5, doorH + 4*scale, originX, originY)
     love.graphics.setColor(metalColor[1], metalColor[2], metalColor[3], 1)
     love.graphics.setLineWidth(3)
     love.graphics.arc("line", hsX, hsY, 6, math.pi * 0.15, math.pi * 0.85)
     love.graphics.setLineWidth(1)
-    
+
     -- === HAY BALES ===
     -- Front hay bale
-    local hay1X, hay1Y = barnX + barnW - 5*scale, barnY + barnD + 10*scale
+    local hay1X, hay1Y = barnR - 5*scale, frontFaceY + 10*scale
     isoBox(hay1X, hay1Y, 0, 10*scale, 8*scale, 6*scale, originX, originY,
            hayColor, hayDark, hayColor)
-    
+
     -- Stacked hay
     isoBox(hay1X + 2*scale, hay1Y + 1*scale, 6*scale, 6*scale, 5*scale, 4*scale, originX, originY,
            hayColor, hayDark, hayColor)
-    
+
     -- === PALADIN BANNER (if upgraded) ===
     if self.hasPaladinUpgrade then
-        local bannerX, bannerY = barnX + 5*scale, barnY + barnD
-        
+        local bannerX, bannerY = -barnR + 5*scale, frontFaceY
+
         -- Pole
         love.graphics.setColor(woodDark[1], woodDark[2], woodDark[3], 1)
         local bp1x, bp1y = isoProject(bannerX, bannerY, roofBase, originX, originY)
@@ -446,7 +384,7 @@ function Stable:drawStableIso(x, y, size)
         love.graphics.setLineWidth(2)
         love.graphics.line(bp1x, bp1y, bp2x, bp2y)
         love.graphics.setLineWidth(1)
-        
+
         -- Gold banner
         love.graphics.setColor(0.85, 0.75, 0.25, 1)
         love.graphics.polygon("fill",
@@ -455,32 +393,32 @@ function Stable:drawStableIso(x, y, size)
             bp2x + 14, bp2y + 18,
             bp2x, bp2y + 14
         )
-        
+
         -- Cross on banner
         love.graphics.setColor(0.95, 0.88, 0.40, 1)
         love.graphics.rectangle("fill", bp2x + 5, bp2y + 2, 4, 14)
         love.graphics.rectangle("fill", bp2x + 2, bp2y + 6, 10, 4)
     end
-    
+
     -- === FENCE SECTION ===
     love.graphics.setColor(woodDark[1], woodDark[2], woodDark[3], 1)
     -- Posts
     for i = 0, 2 do
-        local postX = barnX - 8*scale + i * 12*scale
-        local postY = barnY + barnD + 15*scale
+        local postX = -barnR - 8*scale + i * 12*scale
+        local postY = frontFaceY + 15*scale
         local p1x, p1y = isoProject(postX, postY, 0, originX, originY)
         local p2x, p2y = isoProject(postX, postY, 8*scale, originX, originY)
         love.graphics.setLineWidth(2)
         love.graphics.line(p1x, p1y, p2x, p2y)
     end
-    
+
     -- Rails
-    local fr1x1, fr1y1 = isoProject(barnX - 8*scale, barnY + barnD + 15*scale, 3*scale, originX, originY)
-    local fr1x2, fr1y2 = isoProject(barnX + 16*scale, barnY + barnD + 15*scale, 3*scale, originX, originY)
+    local fr1x1, fr1y1 = isoProject(-barnR - 8*scale, frontFaceY + 15*scale, 3*scale, originX, originY)
+    local fr1x2, fr1y2 = isoProject(-barnR + 16*scale, frontFaceY + 15*scale, 3*scale, originX, originY)
     love.graphics.line(fr1x1, fr1y1, fr1x2, fr1y2)
-    
-    local fr2x1, fr2y1 = isoProject(barnX - 8*scale, barnY + barnD + 15*scale, 6*scale, originX, originY)
-    local fr2x2, fr2y2 = isoProject(barnX + 16*scale, barnY + barnD + 15*scale, 6*scale, originX, originY)
+
+    local fr2x1, fr2y1 = isoProject(-barnR - 8*scale, frontFaceY + 15*scale, 6*scale, originX, originY)
+    local fr2x2, fr2y2 = isoProject(-barnR + 16*scale, frontFaceY + 15*scale, 6*scale, originX, originY)
     love.graphics.line(fr2x1, fr2y1, fr2x2, fr2y2)
     love.graphics.setLineWidth(1)
 end

@@ -47,7 +47,7 @@ local function isoBox(x, y, z, w, d, h, originX, originY, topColor, leftColor, r
         {x, y + d, z + h},
         originX, originY, topColor
     )
-    
+
     -- Left face
     isoQuad(
         {x, y + d, z},
@@ -56,7 +56,7 @@ local function isoBox(x, y, z, w, d, h, originX, originY, topColor, leftColor, r
         {x + w, y + d, z},
         originX, originY, leftColor
     )
-    
+
     -- Right face
     isoQuad(
         {x + w, y, z},
@@ -65,6 +65,87 @@ local function isoBox(x, y, z, w, d, h, originX, originY, topColor, leftColor, r
         {x + w, y + d, z},
         originX, originY, rightColor
     )
+end
+
+-- Draw an octagonal prism (tower shape)
+-- cx, cy = center position, r = radius, z = base height, h = height
+local function isoOctagon(cx, cy, z, r, originX, originY, color)
+    -- Octagon vertices: cut corners at 45 degrees
+    -- Corner cut is r * (1 - 1/sqrt(2)) ≈ r * 0.293
+    local cut = r * 0.293
+    local points = {
+        {cx - r + cut, cy - r, z},        -- top edge left
+        {cx + r - cut, cy - r, z},        -- top edge right
+        {cx + r, cy - r + cut, z},        -- right edge top
+        {cx + r, cy + r - cut, z},        -- right edge bottom
+        {cx + r - cut, cy + r, z},        -- bottom edge right
+        {cx - r + cut, cy + r, z},        -- bottom edge left
+        {cx - r, cy + r - cut, z},        -- left edge bottom
+        {cx - r, cy - r + cut, z},        -- left edge top
+    }
+
+    -- Project all points
+    local screenPts = {}
+    for i, p in ipairs(points) do
+        local sx, sy = isoProject(p[1], p[2], p[3], originX, originY)
+        screenPts[i] = {sx, sy}
+    end
+
+    -- Draw as polygon
+    love.graphics.setColor(color[1], color[2], color[3], color[4] or 1)
+    love.graphics.polygon("fill",
+        screenPts[1][1], screenPts[1][2],
+        screenPts[2][1], screenPts[2][2],
+        screenPts[3][1], screenPts[3][2],
+        screenPts[4][1], screenPts[4][2],
+        screenPts[5][1], screenPts[5][2],
+        screenPts[6][1], screenPts[6][2],
+        screenPts[7][1], screenPts[7][2],
+        screenPts[8][1], screenPts[8][2]
+    )
+end
+
+-- Draw octagonal prism walls (visible faces only)
+local function isoOctagonalPrism(cx, cy, z, r, h, originX, originY, topColor, wallColors)
+    -- wallColors is a table of 8 colors for each face, or we compute shading
+    local cut = r * 0.293
+
+    -- Define the 8 vertices at bottom and top
+    local bottomPts = {
+        {cx - r + cut, cy - r, z},        -- 1: top edge left
+        {cx + r - cut, cy - r, z},        -- 2: top edge right
+        {cx + r, cy - r + cut, z},        -- 3: right edge top
+        {cx + r, cy + r - cut, z},        -- 4: right edge bottom
+        {cx + r - cut, cy + r, z},        -- 5: bottom edge right
+        {cx - r + cut, cy + r, z},        -- 6: bottom edge left
+        {cx - r, cy + r - cut, z},        -- 7: left edge bottom
+        {cx - r, cy - r + cut, z},        -- 8: left edge top
+    }
+
+    local topPts = {}
+    for i, p in ipairs(bottomPts) do
+        topPts[i] = {p[1], p[2], z + h}
+    end
+
+    -- Draw visible wall faces (faces 3-7 are typically visible in isometric)
+    -- Face indices go clockwise, we draw faces facing "camera" (south-east-ish)
+    local faces = {
+        {3, 4, wallColors[1] or {0.52, 0.50, 0.46}},  -- right face (bright)
+        {4, 5, wallColors[2] or {0.48, 0.46, 0.42}},  -- bottom-right corner
+        {5, 6, wallColors[3] or {0.45, 0.43, 0.40}},  -- bottom face (medium)
+        {6, 7, wallColors[4] or {0.42, 0.40, 0.38}},  -- bottom-left corner
+    }
+
+    for _, face in ipairs(faces) do
+        local i1, i2, color = face[1], face[2], face[3]
+        isoQuad(
+            bottomPts[i1], bottomPts[i2], topPts[i2], topPts[i1],
+            originX, originY, color
+        )
+    end
+
+    -- Draw top face
+    isoOctagon(cx, cy, z + h, r, originX, originY, topColor)
 end
 
 -- Draw beacon/torch fire
@@ -424,125 +505,118 @@ function ScoutTower:drawScoutTowerIso(x, y, size)
     local originX = x + size/2
     local originY = y + size - 8
     local scale = 2
-    
+
     -- Color palette - defensive stone fortress
     local stoneTop = {0.65, 0.62, 0.58}
-    local stoneLeft = {0.45, 0.43, 0.40}
-    local stoneRight = {0.52, 0.50, 0.46}
     local stoneDark = {0.32, 0.30, 0.28}
     local stoneShadow = {0.25, 0.23, 0.22}
     local woodColor = {0.42, 0.30, 0.20}
-    local woodDark = {0.30, 0.22, 0.15}
-    local roofColor = {0.35, 0.32, 0.30}
-    
-    -- === BASE FOUNDATION ===
-    local baseW = 30 * scale
-    local baseD = 30 * scale
+
+    -- Wall colors for octagonal faces (gradient from light to dark)
+    local wallColors = {
+        {0.55, 0.53, 0.49},  -- right face (brightest)
+        {0.50, 0.48, 0.44},  -- bottom-right corner
+        {0.45, 0.43, 0.40},  -- bottom face
+        {0.40, 0.38, 0.36},  -- bottom-left corner (darkest visible)
+    }
+
+    -- === BASE FOUNDATION (square) ===
+    local baseR = 16 * scale
     local baseH = 6 * scale
-    local baseX = -baseW/2
-    local baseY = -baseD/2
-    
-    isoBox(baseX - 2*scale, baseY - 2*scale, 0, baseW + 4*scale, baseD + 4*scale, baseH, originX, originY,
-           stoneDark, stoneShadow, stoneDark)
-    
-    -- === MAIN TOWER BODY ===
-    local towerW = 26 * scale
-    local towerD = 26 * scale
+
+    isoOctagonalPrism(0, 0, 0, baseR + 2*scale, baseH, originX, originY,
+        stoneDark, {{0.28, 0.26, 0.24}, {0.25, 0.23, 0.22}, {0.22, 0.20, 0.19}, {0.20, 0.18, 0.17}})
+
+    -- === MAIN TOWER BODY (octagonal) ===
+    local towerR = 14 * scale
     local towerH = 50 * scale
-    local towerX = -towerW/2
-    local towerY = -towerD/2
-    
-    isoBox(towerX, towerY, baseH, towerW, towerD, towerH, originX, originY,
-           stoneTop, stoneLeft, stoneRight)
-    
-    -- Stone texture lines on walls
-    love.graphics.setColor(stoneDark[1], stoneDark[2], stoneDark[3], 0.35)
-    for row = 1, 5 do
-        local z = baseH + row * 9 * scale
-        local sx1, sy1 = isoProject(towerX, towerY + towerD, z, originX, originY)
-        local sx2, sy2 = isoProject(towerX + towerW, towerY + towerD, z, originX, originY)
-        love.graphics.line(sx1, sy1, sx2, sy2)
-        local sx3, sy3 = isoProject(towerX + towerW, towerY, z, originX, originY)
-        local sx4, sy4 = isoProject(towerX + towerW, towerY + towerD, z, originX, originY)
-        love.graphics.line(sx3, sy3, sx4, sy4)
+
+    isoOctagonalPrism(0, 0, baseH, towerR, towerH, originX, originY, stoneTop, wallColors)
+
+    -- === STONE BAND DETAILS ===
+    -- Draw horizontal bands on the tower
+    love.graphics.setColor(stoneDark[1], stoneDark[2], stoneDark[3], 0.4)
+    for row = 1, 4 do
+        local z = baseH + row * 11 * scale
+        local bandR = towerR + 0.5
+        isoOctagon(0, 0, z, bandR, originX, originY, {stoneDark[1], stoneDark[2], stoneDark[3], 0.3})
     end
-    
-    -- === WINDOW SLITS ===
-    love.graphics.setColor(0.12, 0.10, 0.08, 1)
-    for i = 0, 1 do
-        local slitX = towerX + 6*scale + i * 14*scale
-        local slitZ = baseH + 20*scale
-        isoQuad(
-            {slitX, towerY + towerD, slitZ},
-            {slitX + 3*scale, towerY + towerD, slitZ},
-            {slitX + 3*scale, towerY + towerD, slitZ + 12*scale},
-            {slitX, towerY + towerD, slitZ + 12*scale},
-            originX, originY, {0.12, 0.10, 0.08}
-        )
-    end
-    
-    -- === BATTLEMENTS ===
-    local battleH = 8 * scale
-    local battleZ = baseH + towerH
-    local merlonW = 5 * scale
-    local merlonD = 3 * scale
-    local gap = 4 * scale
-    
-    for i = 0, 2 do
-        local merlonX = towerX + 2*scale + i * (merlonW + gap)
-        isoBox(merlonX, towerY + towerD - merlonD, battleZ, merlonW, merlonD + 1*scale, battleH,
-               originX, originY, stoneTop, stoneLeft, stoneRight)
-    end
-    for i = 0, 2 do
-        local merlonY = towerY + 2*scale + i * (merlonW + gap)
-        isoBox(towerX + towerW - merlonD, merlonY, battleZ, merlonD + 1*scale, merlonW, battleH,
-               originX, originY, stoneTop, stoneLeft, stoneRight)
-    end
-    
-    -- === TOWER FLOOR ===
+
+    -- === WINDOW SLIT ===
+    -- Single window on front face
+    local cut = towerR * 0.293
+    local windowZ = baseH + 22 * scale
+    local windowH = 12 * scale
+    local windowW = 3 * scale
+    local frontY = towerR  -- front face Y position
+
     isoQuad(
-        {towerX + 2*scale, towerY + 2*scale, battleZ},
-        {towerX + towerW - 2*scale, towerY + 2*scale, battleZ},
-        {towerX + towerW - 2*scale, towerY + towerD - 2*scale, battleZ},
-        {towerX + 2*scale, towerY + towerD - 2*scale, battleZ},
-        originX, originY, woodColor
+        {-windowW/2, frontY, windowZ},
+        {windowW/2, frontY, windowZ},
+        {windowW/2, frontY, windowZ + windowH},
+        {-windowW/2, frontY, windowZ + windowH},
+        originX, originY, {0.10, 0.08, 0.06}
     )
-    
+
+    -- === BATTLEMENTS (merlons around the top) ===
+    local battleZ = baseH + towerH
+    local battleH = 8 * scale
+    local merlonSize = 4 * scale
+
+    -- Place merlons at key positions around the octagon
+    local merlonPositions = {
+        {towerR * 0.7, towerR * 0.7},    -- front-right
+        {-towerR * 0.7, towerR * 0.7},   -- front-left
+        {towerR, 0},                       -- right
+        {0, towerR},                       -- front
+    }
+
+    for _, pos in ipairs(merlonPositions) do
+        isoBox(pos[1] - merlonSize/2, pos[2] - merlonSize/2, battleZ,
+               merlonSize, merlonSize, battleH, originX, originY,
+               stoneTop, wallColors[3], wallColors[1])
+    end
+
+    -- === WOODEN PLATFORM TOP ===
+    local platformR = towerR - 2*scale
+    isoOctagon(0, 0, battleZ, platformR, originX, originY, woodColor)
+
     -- === DOOR ===
-    local doorW = 8 * scale
-    local doorH = 14 * scale
-    local doorX = -doorW/2
-    
+    local doorW = 7 * scale
+    local doorH = 12 * scale
+
+    -- Door frame (darker stone)
     isoQuad(
-        {doorX - 2*scale, towerY + towerD, baseH},
-        {doorX + doorW + 2*scale, towerY + towerD, baseH},
-        {doorX + doorW + 2*scale, towerY + towerD, baseH + doorH + 3*scale},
-        {doorX - 2*scale, towerY + towerD, baseH + doorH + 3*scale},
+        {-doorW/2 - 1*scale, frontY, baseH},
+        {doorW/2 + 1*scale, frontY, baseH},
+        {doorW/2 + 1*scale, frontY, baseH + doorH + 2*scale},
+        {-doorW/2 - 1*scale, frontY, baseH + doorH + 2*scale},
         originX, originY, stoneDark
     )
+    -- Door (wood)
     isoQuad(
-        {doorX, towerY + towerD + 0.5*scale, baseH},
-        {doorX + doorW, towerY + towerD + 0.5*scale, baseH},
-        {doorX + doorW, towerY + towerD + 0.5*scale, baseH + doorH},
-        {doorX, towerY + towerD + 0.5*scale, baseH + doorH},
+        {-doorW/2, frontY + 0.5*scale, baseH},
+        {doorW/2, frontY + 0.5*scale, baseH},
+        {doorW/2, frontY + 0.5*scale, baseH + doorH},
+        {-doorW/2, frontY + 0.5*scale, baseH + doorH},
         originX, originY, {0.18, 0.12, 0.08}
     )
-    
+
     -- === TEAM BANNER ===
     local bannerColor = Teams and Teams.getColor(self.team, "banner") or {0.55, 0.15, 0.12, 1}
     local emblemColor = Teams and Teams.getColor(self.team, "emblem") or {0.85, 0.80, 0.40, 1}
-    
-    local poleX = towerX + 2*scale + merlonW/2
-    local poleY = towerY + towerD
+
+    local poleX = towerR * 0.5
+    local poleY = towerR * 0.5
     local poleZ = battleZ + battleH
-    
+
     love.graphics.setColor(woodColor[1], woodColor[2], woodColor[3], 1)
     local pp1x, pp1y = isoProject(poleX, poleY, poleZ, originX, originY)
     local pp2x, pp2y = isoProject(poleX, poleY, poleZ + 16*scale, originX, originY)
     love.graphics.setLineWidth(2)
     love.graphics.line(pp1x, pp1y, pp2x, pp2y)
     love.graphics.setLineWidth(1)
-    
+
     local bx, by = pp2x, pp2y
     local wave = math.sin((self.animTimer or 0) * 4) * 2
     love.graphics.setColor(bannerColor[1], bannerColor[2], bannerColor[3], 1)
@@ -551,7 +625,7 @@ function ScoutTower:drawScoutTowerIso(x, y, size)
         bx + 14 + wave, by + 3,
         bx + 12 + wave, by + 12,
         bx, by + 9)
-    
+
     love.graphics.setColor(emblemColor[1], emblemColor[2], emblemColor[3], 1)
     love.graphics.circle("fill", bx + 7 + wave*0.5, by + 6, 3)
 end
@@ -560,67 +634,75 @@ end
 function ScoutTower:drawGuardTowerIso(x, y, size)
     -- Draw base scout tower first
     self:drawScoutTowerIso(x, y, size)
-    
+
     local originX = x + size/2
     local originY = y + size - 8
     local scale = 2
-    
+
     -- Additional elements for Guard Tower
     local metalColor = {0.55, 0.55, 0.58}
-    
-    -- Arrow slits have crossbars (for archers)
-    love.graphics.setColor(metalColor[1], metalColor[2], metalColor[3], 0.8)
-    local towerW = 26 * scale
-    local towerD = 26 * scale
-    local towerX = -towerW/2
-    local towerY = -towerD/2
+    local towerR = 14 * scale
     local baseH = 6 * scale
-    
-    for i = 0, 1 do
-        local slitX = towerX + 6*scale + i * 14*scale
-        local slitZ = baseH + 26*scale
-        local cx1, cy1 = isoProject(slitX - 1*scale, towerY + towerD, slitZ, originX, originY)
-        local cx2, cy2 = isoProject(slitX + 4*scale, towerY + towerD, slitZ, originX, originY)
-        love.graphics.setLineWidth(2)
-        love.graphics.line(cx1, cy1, cx2, cy2)
-    end
+
+    -- Arrow crossbar on the window slit
+    love.graphics.setColor(metalColor[1], metalColor[2], metalColor[3], 0.9)
+    local windowZ = baseH + 28*scale
+    local frontY = towerR
+    local cx1, cy1 = isoProject(-3*scale, frontY, windowZ, originX, originY)
+    local cx2, cy2 = isoProject(3*scale, frontY, windowZ, originX, originY)
+    love.graphics.setLineWidth(2)
+    love.graphics.line(cx1, cy1, cx2, cy2)
     love.graphics.setLineWidth(1)
+
+    -- Additional arrow slits on side faces
+    local sideWindowZ = baseH + 25*scale
+    -- Right side window
+    isoQuad(
+        {towerR, -2*scale, sideWindowZ},
+        {towerR, 2*scale, sideWindowZ},
+        {towerR, 2*scale, sideWindowZ + 10*scale},
+        {towerR, -2*scale, sideWindowZ + 10*scale},
+        originX, originY, {0.10, 0.08, 0.06}
+    )
 end
 
 -- Cannon Tower (Tier 3) - Heavy siege damage
 function ScoutTower:drawCannonTowerIso(x, y, size)
     -- Draw base scout tower
     self:drawScoutTowerIso(x, y, size)
-    
+
     local originX = x + size/2
     local originY = y + size - 8
     local scale = 2
-    
+
     local metalColor = {0.45, 0.45, 0.50}
     local metalDark = {0.30, 0.30, 0.35}
     local bronzeColor = {0.55, 0.42, 0.28}
-    
-    local towerW = 26 * scale
-    local towerD = 26 * scale
-    local towerY = -towerD/2
+
+    local towerR = 14 * scale
     local baseH = 6 * scale
-    
+    local frontY = towerR
+
     -- Cannon barrel protruding from front
-    local cannonZ = baseH + 30*scale
-    local cannonX, cannonY = isoProject(0, towerY + towerD + 5*scale, cannonZ, originX, originY)
-    
-    -- Cannon barrel
+    local cannonZ = baseH + 28*scale
+    local cannonX, cannonY = isoProject(0, frontY + 6*scale, cannonZ, originX, originY)
+
+    -- Cannon barrel (larger for cannon tower)
     love.graphics.setColor(metalDark[1], metalDark[2], metalDark[3], 1)
-    love.graphics.circle("fill", cannonX, cannonY, 6)
+    love.graphics.circle("fill", cannonX, cannonY, 8)
     love.graphics.setColor(metalColor[1], metalColor[2], metalColor[3], 1)
-    love.graphics.circle("fill", cannonX, cannonY, 4)
-    love.graphics.setColor(0.15, 0.12, 0.10, 1)
-    love.graphics.circle("fill", cannonX, cannonY, 2)
-    
-    -- Cannon mount
-    local mountX, mountY = isoProject(0, towerY + towerD, cannonZ - 5*scale, originX, originY)
+    love.graphics.circle("fill", cannonX, cannonY, 6)
+    love.graphics.setColor(0.12, 0.10, 0.08, 1)
+    love.graphics.circle("fill", cannonX, cannonY, 3)
+
+    -- Cannon mount/bracket
+    local mountX, mountY = isoProject(0, frontY + 2*scale, cannonZ - 4*scale, originX, originY)
     love.graphics.setColor(bronzeColor[1], bronzeColor[2], bronzeColor[3], 1)
-    love.graphics.rectangle("fill", mountX - 5, mountY - 3, 10, 6)
+    love.graphics.rectangle("fill", mountX - 6, mountY - 4, 12, 8, 2)
+
+    -- Decorative bronze band on barrel
+    love.graphics.setColor(bronzeColor[1], bronzeColor[2], bronzeColor[3], 0.8)
+    love.graphics.circle("line", cannonX, cannonY, 7)
 end
 
 function ScoutTower:containsPoint(screenX, screenY)

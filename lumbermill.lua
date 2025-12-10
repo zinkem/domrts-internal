@@ -13,57 +13,16 @@ pcall(function() Teams = require("teams") end)
 local BuildingRenderer
 pcall(function() BuildingRenderer = require("building_renderer") end)
 
+-- Shared isometric utilities
+local IsoUtils = require("iso_utils")
+local isoProject = IsoUtils.project
+local isoQuad = IsoUtils.quad
+local isoBox = IsoUtils.box
+local isoOctagonalPrism = IsoUtils.octagonalPrism
+local isoOctagon = IsoUtils.octagon
+
 -- Sawdust particle system
 local sawdustParticles = {}
-
---============================================================================
--- ISOMETRIC RENDERING SYSTEM
---============================================================================
-
-local function isoProject(x, y, z, originX, originY)
-    local screenX = originX + (x - y) * 0.5
-    local screenY = originY + (x + y) * 0.25 - z * 0.5
-    return screenX, screenY
-end
-
-local function isoQuad(p1, p2, p3, p4, originX, originY, color)
-    local sx1, sy1 = isoProject(p1[1], p1[2], p1[3], originX, originY)
-    local sx2, sy2 = isoProject(p2[1], p2[2], p2[3], originX, originY)
-    local sx3, sy3 = isoProject(p3[1], p3[2], p3[3], originX, originY)
-    local sx4, sy4 = isoProject(p4[1], p4[2], p4[3], originX, originY)
-    
-    love.graphics.setColor(color[1], color[2], color[3], color[4] or 1)
-    love.graphics.polygon("fill", sx1, sy1, sx2, sy2, sx3, sy3, sx4, sy4)
-end
-
-local function isoBox(x, y, z, w, d, h, originX, originY, topColor, leftColor, rightColor)
-    -- Top face
-    isoQuad(
-        {x, y, z + h},
-        {x + w, y, z + h},
-        {x + w, y + d, z + h},
-        {x, y + d, z + h},
-        originX, originY, topColor
-    )
-    
-    -- Left face (front-left visible)
-    isoQuad(
-        {x, y + d, z},
-        {x, y + d, z + h},
-        {x + w, y + d, z + h},
-        {x + w, y + d, z},
-        originX, originY, leftColor
-    )
-    
-    -- Right face (front-right visible)
-    isoQuad(
-        {x + w, y, z},
-        {x + w, y, z + h},
-        {x + w, y + d, z + h},
-        {x + w, y + d, z},
-        originX, originY, rightColor
-    )
-end
 
 -- Update sawdust particles
 local function updateSawdustParticles(dt, buildingId)
@@ -295,73 +254,53 @@ function LumberMill:drawLumberMillIso(x, y, size)
     local gx, gy = isoProject(0, 0, 0, originX, originY)
     love.graphics.ellipse("fill", gx, gy + 3, 35, 12)
     
-    -- === MAIN BUILDING ===
-    local mainW, mainD, mainH = 40*scale, 35*scale, 28*scale
-    local mainX, mainY = -mainW/2, -mainD/2
-    
-    isoBox(mainX, mainY, 0, mainW, mainD, mainH, originX, originY,
-           woodTop, woodLeft, woodRight)
-    
-    -- Wood plank lines on walls
-    love.graphics.setColor(woodDark[1], woodDark[2], woodDark[3], 0.5)
+    -- === MAIN BUILDING (octagonal) ===
+    local mainR = 20*scale  -- radius for octagonal shape
+    local mainH = 28*scale
+    local mainCX = 0
+    local mainCY = 0
+
+    -- Wall colors for octagonal faces
+    local mainWallColors = {
+        {woodRight[1], woodRight[2], woodRight[3]},
+        {0.45, 0.35, 0.23},
+        {woodLeft[1], woodLeft[2], woodLeft[3]},
+        {0.38, 0.29, 0.19},
+    }
+
+    isoOctagonalPrism(mainCX, mainCY, 0, mainR, mainH, originX, originY, woodTop, mainWallColors)
+
+    -- Wood plank bands on walls
     for i = 1, 4 do
         local z = i * 6 * scale
-        local lx1, ly1 = isoProject(mainX, mainY + mainD, z, originX, originY)
-        local lx2, ly2 = isoProject(mainX + mainW, mainY + mainD, z, originX, originY)
-        love.graphics.line(lx1, ly1, lx2, ly2)
-        
-        local rx1, ry1 = isoProject(mainX + mainW, mainY, z, originX, originY)
-        local rx2, ry2 = isoProject(mainX + mainW, mainY + mainD, z, originX, originY)
-        love.graphics.line(rx1, ry1, rx2, ry2)
+        isoOctagon(mainCX, mainCY, z, mainR + 0.3, originX, originY, {woodDark[1], woodDark[2], woodDark[3], 0.3})
     end
-    
-    -- === PEAKED ROOF ===
+
+    -- === ROOF EAVES ===
+    local eaveR = mainR + 7*scale
+    local eaveH = 2*scale
+    local eaveDark = {roofLeft[1] * 0.8, roofLeft[2] * 0.8, roofLeft[3] * 0.8}
+    local eaveWallColors = {
+        {eaveDark[1] * 1.1, eaveDark[2] * 1.1, eaveDark[3] * 1.1},
+        {eaveDark[1], eaveDark[2], eaveDark[3]},
+        {eaveDark[1] * 0.9, eaveDark[2] * 0.9, eaveDark[3] * 0.9},
+        {eaveDark[1] * 0.8, eaveDark[2] * 0.8, eaveDark[3] * 0.8},
+    }
+    isoOctagonalPrism(mainCX, mainCY, mainH - 1*scale, eaveR, eaveH, originX, originY, eaveDark, eaveWallColors)
+
+    -- === PEAKED ROOF (octagonal pyramid) ===
     local roofBase = mainH
     local roofPeak = 18*scale
-    local roofOverhang = 5*scale
-    
-    -- Left roof slope
-    isoQuad(
-        {mainX - roofOverhang, mainY - roofOverhang, roofBase},
-        {0, mainY + mainD/2, roofBase + roofPeak},
-        {0, mainY + mainD/2, roofBase + roofPeak},
-        {mainX - roofOverhang, mainY + mainD + roofOverhang, roofBase},
-        originX, originY, roofLeft
-    )
-    
-    -- Right roof slope
-    isoQuad(
-        {mainX + mainW + roofOverhang, mainY - roofOverhang, roofBase},
-        {0, mainY + mainD/2, roofBase + roofPeak},
-        {0, mainY + mainD/2, roofBase + roofPeak},
-        {mainX + mainW + roofOverhang, mainY + mainD + roofOverhang, roofBase},
-        originX, originY, roofRight
-    )
-    
-    -- Front gable
-    isoQuad(
-        {mainX - roofOverhang, mainY + mainD + roofOverhang, roofBase},
-        {0, mainY + mainD/2, roofBase + roofPeak},
-        {0, mainY + mainD/2, roofBase + roofPeak},
-        {mainX + mainW + roofOverhang, mainY + mainD + roofOverhang, roofBase},
-        originX, originY, roofTop
-    )
-    
-    -- Ridge highlight
-    love.graphics.setColor(0.45, 0.35, 0.25, 1)
-    local r1x, r1y = isoProject(0, mainY - roofOverhang, roofBase + roofPeak, originX, originY)
-    local r2x, r2y = isoProject(0, mainY + mainD + roofOverhang, roofBase + roofPeak, originX, originY)
-    love.graphics.setLineWidth(2)
-    love.graphics.line(r1x, r1y, r2x, r2y)
-    love.graphics.setLineWidth(1)
+
+    IsoUtils.pyramidRoof(mainCX, mainCY, roofBase, mainR + 5*scale, roofPeak, originX, originY, roofLeft)
     
     -- === LARGE SAW BLADE ===
-    local sawX, sawY = mainX + mainW + 8*scale, mainY + mainD/2
+    local sawX, sawY = mainCX + mainR + 8*scale, mainCY
     local sawZ = 15*scale
     local sawRadius = 14*scale
-    
+
     -- Saw mounting bracket
-    isoBox(mainX + mainW - 2*scale, sawY - 4*scale, 8*scale, 6*scale, 8*scale, 12*scale,
+    isoBox(mainCX + mainR - 2*scale, sawY - 4*scale, 8*scale, 6*scale, 8*scale, 12*scale,
            originX, originY, metalDark, metalDark, metalColor)
     
     -- Saw blade (circle with teeth)
@@ -395,30 +334,12 @@ function LumberMill:drawLumberMillIso(x, y, size)
     
     -- === DOOR ===
     local doorW, doorH = 10*scale, 18*scale
-    local doorX = -doorW/2
-    
-    isoQuad(
-        {doorX, mainY + mainD + 0.5, 0},
-        {doorX + doorW, mainY + mainD + 0.5, 0},
-        {doorX + doorW, mainY + mainD + 0.5, doorH},
-        {doorX, mainY + mainD + 0.5, doorH},
-        originX, originY, woodDark
-    )
-    
-    -- Door frame
-    love.graphics.setColor(woodDark[1] * 0.8, woodDark[2] * 0.8, woodDark[3] * 0.8, 1)
-    local df1x, df1y = isoProject(doorX, mainY + mainD + 0.5, 0, originX, originY)
-    local df2x, df2y = isoProject(doorX, mainY + mainD + 0.5, doorH, originX, originY)
-    local df3x, df3y = isoProject(doorX + doorW, mainY + mainD + 0.5, doorH, originX, originY)
-    local df4x, df4y = isoProject(doorX + doorW, mainY + mainD + 0.5, 0, originX, originY)
-    love.graphics.setLineWidth(2)
-    love.graphics.line(df1x, df1y, df2x, df2y)
-    love.graphics.line(df2x, df2y, df3x, df3y)
-    love.graphics.line(df3x, df3y, df4x, df4y)
-    love.graphics.setLineWidth(1)
-    
+    local frontFaceY = mainCY + mainR  -- front of octagon
+
+    IsoUtils.door(mainCX, frontFaceY, 0, doorW, doorH, originX, originY, {woodDark[1] * 0.8, woodDark[2] * 0.8, woodDark[3] * 0.8}, woodDark)
+
     -- === LOG PILE ===
-    local logX, logY = mainX - 18*scale, mainY + 5*scale
+    local logX, logY = mainCX - mainR - 8*scale, mainCY - 10*scale
     local logColors = {
         {0.50, 0.38, 0.25},
         {0.45, 0.35, 0.22},
@@ -446,10 +367,10 @@ function LumberMill:drawLumberMillIso(x, y, size)
         end
     end
     
-    -- === WINDOW ===
-    local winX, winY = mainX + mainW, mainY + mainD/2 - 5*scale
-    local winW, winH = 1, 8*scale
-    
+    -- === WINDOW (on right face) ===
+    local winX = mainCX + mainR
+    local winY = mainCY - 5*scale
+
     isoQuad(
         {winX + 0.5, winY, 12*scale},
         {winX + 0.5, winY + 8*scale, 12*scale},
@@ -457,7 +378,7 @@ function LumberMill:drawLumberMillIso(x, y, size)
         {winX + 0.5, winY, 20*scale},
         originX, originY, {0.3, 0.4, 0.5, 0.8}
     )
-    
+
     -- Window frame
     love.graphics.setColor(woodDark[1], woodDark[2], woodDark[3], 1)
     local w1x, w1y = isoProject(winX + 0.5, winY, 12*scale, originX, originY)
@@ -466,14 +387,13 @@ function LumberMill:drawLumberMillIso(x, y, size)
     local w4x, w4y = isoProject(winX + 0.5, winY, 20*scale, originX, originY)
     love.graphics.setLineWidth(1)
     love.graphics.polygon("line", w1x, w1y, w2x, w2y, w3x, w3y, w4x, w4y)
-    
+
     -- Cross bars
-    local wcx, wcy = isoProject(winX + 0.5, winY + 4*scale, 16*scale, originX, originY)
     love.graphics.line(w1x, w1y + (w4y - w1y)/2, w2x, w2y + (w3y - w2y)/2)
     love.graphics.line((w1x + w2x)/2, (w1y + w2y)/2, (w4x + w3x)/2, (w4y + w3y)/2)
-    
+
     -- === CHIMNEY WITH SMOKE ===
-    local chimX, chimY = mainX + mainW - 8*scale, mainY + 6*scale
+    local chimX, chimY = mainCX + mainR - 10*scale, mainCY - mainR + 6*scale
     
     isoBox(chimX, chimY, roofBase, 6*scale, 6*scale, 12*scale, originX, originY,
            {0.40, 0.35, 0.30}, {0.32, 0.28, 0.24}, {0.36, 0.32, 0.28})

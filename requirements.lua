@@ -130,12 +130,12 @@ function Requirements.getHoldRequirement()
 end
 
 -- Tower upgrade requirements
-function Requirements.canUpgradeToArcherTower()
+function Requirements.canUpgradeToGuardTower()
     return Requirements.hasLumberMill()
 end
 
 function Requirements.canUpgradeToCannonTower()
-    return Requirements.hasBlacksmith()
+    return Requirements.hasBlacksmith() and Requirements.isKeep()
 end
 
 -- Unit production requirements

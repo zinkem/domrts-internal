@@ -13,54 +13,13 @@ pcall(function() Teams = require("teams") end)
 local BuildingRenderer
 pcall(function() BuildingRenderer = require("building_renderer") end)
 
---============================================================================
--- ISOMETRIC RENDERING SYSTEM
---============================================================================
-
-local function isoProject(x, y, z, originX, originY)
-    local screenX = originX + (x - y) * 0.5
-    local screenY = originY + (x + y) * 0.25 - z * 0.5
-    return screenX, screenY
-end
-
-local function isoQuad(p1, p2, p3, p4, originX, originY, color)
-    local sx1, sy1 = isoProject(p1[1], p1[2], p1[3], originX, originY)
-    local sx2, sy2 = isoProject(p2[1], p2[2], p2[3], originX, originY)
-    local sx3, sy3 = isoProject(p3[1], p3[2], p3[3], originX, originY)
-    local sx4, sy4 = isoProject(p4[1], p4[2], p4[3], originX, originY)
-    
-    love.graphics.setColor(color[1], color[2], color[3], color[4] or 1)
-    love.graphics.polygon("fill", sx1, sy1, sx2, sy2, sx3, sy3, sx4, sy4)
-end
-
-local function isoBox(x, y, z, w, d, h, originX, originY, topColor, leftColor, rightColor)
-    -- Top face
-    isoQuad(
-        {x, y, z + h},
-        {x + w, y, z + h},
-        {x + w, y + d, z + h},
-        {x, y + d, z + h},
-        originX, originY, topColor
-    )
-    
-    -- Left face
-    isoQuad(
-        {x, y + d, z},
-        {x, y + d, z + h},
-        {x + w, y + d, z + h},
-        {x + w, y + d, z},
-        originX, originY, leftColor
-    )
-    
-    -- Right face
-    isoQuad(
-        {x + w, y, z},
-        {x + w, y, z + h},
-        {x + w, y + d, z + h},
-        {x + w, y + d, z},
-        originX, originY, rightColor
-    )
-end
+-- Shared isometric utilities
+local IsoUtils = require("iso_utils")
+local isoProject = IsoUtils.project
+local isoQuad = IsoUtils.quad
+local isoBox = IsoUtils.box
+local isoOctagonalPrism = IsoUtils.octagonalPrism
+local isoOctagon = IsoUtils.octagon
 
 local Farm = {}
 Farm.__index = Farm
@@ -265,74 +224,47 @@ function Farm:drawFarmIso(x, y, size)
         end
     end
     
-    -- === FARMHOUSE ===
-    local houseW, houseD, houseH = 20*scale, 16*scale, 12*scale
-    local houseX, houseY = -22*scale, -18*scale
-    
-    -- House walls
-    isoBox(houseX, houseY, 0, houseW, houseD, houseH, originX, originY,
-           woodTop, woodLeft, woodRight)
-    
-    -- Wood plank lines
+    -- === FARMHOUSE (octagonal) ===
+    local houseR = 10*scale  -- radius for octagonal shape
+    local houseH = 12*scale
+    local houseCX = -12*scale
+    local houseCY = -10*scale
+
+    -- Wall colors for octagonal faces
+    local wallColors = {
+        {woodRight[1], woodRight[2], woodRight[3]},
+        {0.48, 0.38, 0.24},
+        {woodLeft[1], woodLeft[2], woodLeft[3]},
+        {0.40, 0.32, 0.20},
+    }
+
+    isoOctagonalPrism(houseCX, houseCY, 0, houseR, houseH, originX, originY, woodTop, wallColors)
+
+    -- Wood plank detail lines
     love.graphics.setColor(woodDark[1], woodDark[2], woodDark[3], 0.4)
     for i = 1, 2 do
         local z = i * 4*scale
-        local lx1, ly1 = isoProject(houseX, houseY + houseD, z, originX, originY)
-        local lx2, ly2 = isoProject(houseX + houseW, houseY + houseD, z, originX, originY)
-        love.graphics.line(lx1, ly1, lx2, ly2)
+        isoOctagon(houseCX, houseCY, z, houseR + 0.3, originX, originY, {woodDark[1], woodDark[2], woodDark[3], 0.25})
     end
-    
-    -- === THATCHED ROOF ===
+
+    -- === THATCHED ROOF (octagonal pyramid) ===
     local roofBase = houseH
     local roofPeak = 9*scale
-    local roofOverhang = 3*scale
-    
-    -- Left slope
-    isoQuad(
-        {houseX - roofOverhang, houseY - roofOverhang, roofBase},
-        {houseX + houseW/2, houseY + houseD/2, roofBase + roofPeak},
-        {houseX + houseW/2, houseY + houseD/2, roofBase + roofPeak},
-        {houseX - roofOverhang, houseY + houseD + roofOverhang, roofBase},
-        originX, originY, thatchLeft
-    )
-    
-    -- Right slope
-    isoQuad(
-        {houseX + houseW + roofOverhang, houseY - roofOverhang, roofBase},
-        {houseX + houseW/2, houseY + houseD/2, roofBase + roofPeak},
-        {houseX + houseW/2, houseY + houseD/2, roofBase + roofPeak},
-        {houseX + houseW + roofOverhang, houseY + houseD + roofOverhang, roofBase},
-        originX, originY, thatchRight
-    )
-    
-    -- Front gable
-    isoQuad(
-        {houseX - roofOverhang, houseY + houseD + roofOverhang, roofBase},
-        {houseX + houseW/2, houseY + houseD/2, roofBase + roofPeak},
-        {houseX + houseW/2, houseY + houseD/2, roofBase + roofPeak},
-        {houseX + houseW + roofOverhang, houseY + houseD + roofOverhang, roofBase},
-        originX, originY, thatchTop
-    )
-    
+
+    IsoUtils.pyramidRoof(houseCX, houseCY, roofBase, houseR + 3*scale, roofPeak, originX, originY, thatchLeft)
+
     -- === DOOR ===
     local doorW, doorH = 5*scale, 9*scale
-    local doorX = houseX + houseW/2 - doorW/2
-    
+    local frontY = houseCY + houseR  -- front of octagon
+
+    IsoUtils.door(houseCX, frontY, 0, doorW, doorH, originX, originY, woodDark, {0.28, 0.20, 0.12})
+
+    -- === WINDOW (on right face) ===
     isoQuad(
-        {doorX, houseY + houseD + 0.5, 0},
-        {doorX + doorW, houseY + houseD + 0.5, 0},
-        {doorX + doorW, houseY + houseD + 0.5, doorH},
-        {doorX, houseY + houseD + 0.5, doorH},
-        originX, originY, woodDark
-    )
-    
-    -- === WINDOW ===
-    local winX, winY = houseX + houseW, houseY + houseD/2 - 2*scale
-    isoQuad(
-        {winX + 0.5, winY, 4*scale},
-        {winX + 0.5, winY + 5*scale, 4*scale},
-        {winX + 0.5, winY + 5*scale, 8*scale},
-        {winX + 0.5, winY, 8*scale},
+        {houseCX + houseR, houseCY - 2.5*scale, 4*scale},
+        {houseCX + houseR, houseCY + 2.5*scale, 4*scale},
+        {houseCX + houseR, houseCY + 2.5*scale, 8*scale},
+        {houseCX + houseR, houseCY - 2.5*scale, 8*scale},
         originX, originY, {0.4, 0.5, 0.6, 0.8}
     )
     
@@ -360,12 +292,126 @@ function Farm:drawFarmIso(x, y, size)
     love.graphics.line(r2x1, r2y1, r2x2, r2y2)
     
     -- === HAY BALES ===
-    local hayX, hayY = houseX + houseW + 3*scale, houseY + houseD - 2*scale
+    local hayX, hayY = houseCX + houseR + 5*scale, houseCY + 2*scale
     love.graphics.setColor(0.72, 0.62, 0.35, 1)
     local hbx, hby = isoProject(hayX, hayY, 0, originX, originY)
     love.graphics.ellipse("fill", hbx, hby, 4, 2.5)
     love.graphics.setColor(0.65, 0.55, 0.30, 1)
     love.graphics.ellipse("fill", hbx - 1, hby - 2.5, 3.5, 2)
+
+    -- === VEGETABLE GARDEN (back right corner) ===
+    local gardenX, gardenY = 10*scale, -18*scale
+
+    -- Garden soil patch
+    love.graphics.setColor(0.35, 0.28, 0.20, 1)
+    local gsx, gsy = isoProject(gardenX, gardenY, 0, originX, originY)
+    love.graphics.ellipse("fill", gsx, gsy, 12, 6)
+
+    -- Garden rows (darker soil lines)
+    love.graphics.setColor(0.28, 0.22, 0.16, 0.6)
+    for row = 0, 2 do
+        local ry = gardenY + (row - 1) * 4*scale
+        local r1x, r1y = isoProject(gardenX - 8*scale, ry, 0.2, originX, originY)
+        local r2x, r2y = isoProject(gardenX + 8*scale, ry, 0.2, originX, originY)
+        love.graphics.setLineWidth(1)
+        love.graphics.line(r1x, r1y, r2x, r2y)
+    end
+
+    -- Cabbages/lettuce (green round vegetables)
+    local veggieTime = self.animTimer or 0
+    for i = 0, 2 do
+        local vx = gardenX - 5*scale + i * 5*scale
+        local vy = gardenY - 3*scale
+        local vsx, vsy = isoProject(vx, vy, 1*scale, originX, originY)
+        -- Outer leaves
+        love.graphics.setColor(0.35, 0.55, 0.30, 1)
+        love.graphics.circle("fill", vsx, vsy, 3)
+        -- Inner leaves
+        love.graphics.setColor(0.45, 0.65, 0.35, 1)
+        love.graphics.circle("fill", vsx, vsy - 0.5, 2)
+    end
+
+    -- Carrots (orange tops poking out)
+    for i = 0, 3 do
+        local cx = gardenX - 6*scale + i * 4*scale
+        local cy = gardenY + 3*scale
+        local csx, csy = isoProject(cx, cy, 0.5*scale, originX, originY)
+        -- Carrot top greens
+        love.graphics.setColor(0.30, 0.50, 0.25, 1)
+        love.graphics.ellipse("fill", csx, csy - 2, 1.5, 3)
+        -- Orange carrot peeking
+        love.graphics.setColor(0.90, 0.55, 0.20, 1)
+        love.graphics.circle("fill", csx, csy, 1.5)
+    end
+
+    -- === FLOWER PATCH (front left corner) ===
+    local flowerX, flowerY = -18*scale, 16*scale
+
+    -- Grass/ground cover
+    love.graphics.setColor(0.40, 0.52, 0.30, 0.7)
+    local fpx, fpy = isoProject(flowerX, flowerY, 0, originX, originY)
+    love.graphics.ellipse("fill", fpx, fpy, 10, 5)
+
+    -- Flowers with different colors
+    local flowerColors = {
+        {0.90, 0.35, 0.40},  -- Red
+        {0.95, 0.85, 0.30},  -- Yellow
+        {0.85, 0.50, 0.75},  -- Pink
+        {0.50, 0.55, 0.90},  -- Blue
+        {0.95, 0.65, 0.30},  -- Orange
+    }
+
+    local flowerPositions = {
+        {-4, -2}, {2, -1}, {-6, 1}, {0, 2}, {5, 0}, {-2, 3}, {4, 3}
+    }
+
+    for i, pos in ipairs(flowerPositions) do
+        local fx = flowerX + pos[1]*scale
+        local fy = flowerY + pos[2]*scale
+        local fsx, fsy = isoProject(fx, fy, 2*scale, originX, originY)
+
+        -- Stem
+        love.graphics.setColor(0.30, 0.45, 0.25, 1)
+        local stemBase = isoProject(fx, fy, 0, originX, originY)
+        love.graphics.line(fsx, fsy, stemBase, fsy + 3)
+
+        -- Flower petals
+        local color = flowerColors[(i % #flowerColors) + 1]
+        love.graphics.setColor(color[1], color[2], color[3], 1)
+        love.graphics.circle("fill", fsx, fsy, 2)
+
+        -- Flower center
+        love.graphics.setColor(0.95, 0.90, 0.40, 1)
+        love.graphics.circle("fill", fsx, fsy, 0.8)
+    end
+
+    -- === PUMPKIN PATCH (near back left, behind house) ===
+    local pumpkinX, pumpkinY = -20*scale, -4*scale
+
+    -- Vine ground cover
+    love.graphics.setColor(0.35, 0.48, 0.28, 0.6)
+    local pvx, pvy = isoProject(pumpkinX, pumpkinY, 0, originX, originY)
+    love.graphics.ellipse("fill", pvx, pvy, 8, 4)
+
+    -- Pumpkins
+    local pumpkinPositions = {{-3, -1}, {2, 1}, {-1, 2}}
+    for i, pos in ipairs(pumpkinPositions) do
+        local px = pumpkinX + pos[1]*scale
+        local py = pumpkinY + pos[2]*scale
+        local psx, psy = isoProject(px, py, 1.5*scale, originX, originY)
+
+        -- Pumpkin body
+        love.graphics.setColor(0.90, 0.50, 0.15, 1)
+        love.graphics.ellipse("fill", psx, psy, 3, 2)
+
+        -- Pumpkin ridges
+        love.graphics.setColor(0.75, 0.40, 0.12, 0.5)
+        love.graphics.arc("line", psx, psy, 2.5, -0.5, 0.5)
+
+        -- Stem
+        love.graphics.setColor(0.40, 0.35, 0.20, 1)
+        love.graphics.rectangle("fill", psx - 0.5, psy - 3, 1, 2)
+    end
 end
 
 function Farm:containsPoint(screenX, screenY)
