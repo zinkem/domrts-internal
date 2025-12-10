@@ -255,6 +255,7 @@ GLOBAL STATE (Game table):
     Game.settings.musicEnabled  - Audio toggle
     Game.settings.soundEnabled  - Audio toggle
     Game.settings.gameSpeed     - Game speed multiplier (0.5=slow, 1.0=normal, 2.0=fast)
+    Game.settings.paletteShader - Retro pixel art shader for buildings
     Game.currentScene           - Active scene module
     Game.scenes                 - Registered scene table
     Game.SceneManager           - Scene switching interface
@@ -322,7 +323,8 @@ Game = {
     settings = {
         musicEnabled = true,
         soundEnabled = true,
-        gameSpeed = 1.0  -- 0.5 = slow, 1.0 = normal, 2.0 = fast
+        gameSpeed = 1.0,  -- 0.5 = slow, 1.0 = normal, 2.0 = fast
+        paletteShader = true  -- Enable retro pixel art shader for buildings
     },
     currentScene = nil,
     scenes = {}

@@ -13,13 +13,9 @@ local Button = require("button")
 local Teams
 pcall(function() Teams = require("teams") end)
 
--- Palette shader for retro pixel art effect
-local PaletteShader
-pcall(function() PaletteShader = require("palette_shader") end)
-
--- Static palette renderer (shared by all scout towers)
-local paletteRenderer = nil
-local usePaletteShader = true
+-- Building renderer for retro pixel art effect
+local BuildingRenderer
+pcall(function() BuildingRenderer = require("building_renderer") end)
 
 --============================================================================
 -- ISOMETRIC RENDERING SYSTEM
@@ -91,31 +87,6 @@ local function drawBeaconFire(x, y, time, scale)
     -- Hot core
     love.graphics.setColor(1, 0.92, 0.6, 0.85)
     love.graphics.circle("fill", x, y - 6 * scale, 2.5 * scale)
-end
-
--- Initialize palette renderer
-local function initPaletteRenderer()
-    local canvasSize = 128  -- 2x2 building but tall tower needs larger canvas
-    
-    if paletteRenderer then
-        local canvas = paletteRenderer:getCanvas()
-        if canvas then
-            local w, h = canvas:getDimensions()
-            if w ~= canvasSize or h ~= canvasSize then
-                paletteRenderer = nil
-            end
-        end
-    end
-    
-    if paletteRenderer or not PaletteShader then return end
-    
-    paletteRenderer = PaletteShader.new({
-        width = canvasSize,
-        height = canvasSize,
-        palette = PaletteShader.PALETTES.FANTASY,
-        dithering = false,
-        ditherStrength = 0
-    })
 end
 
 local ScoutTower = {}
@@ -378,29 +349,21 @@ function ScoutTower:draw()
     end
     
     -- Use palette shader if enabled
-    if usePaletteShader and PaletteShader then
-        initPaletteRenderer()
-        if paletteRenderer then
-            paletteRenderer:beginCapture()
-            -- Offset to position 64px building in 128px canvas (tower extends upward)
-            if self.tier == 1 then
-                self:drawScoutTowerIso(32, 64, size)
-            elseif self.tier == 2 then
-                self:drawGuardTowerIso(32, 64, size)
-            else
-                self:drawCannonTowerIso(32, 64, size)
-            end
-            paletteRenderer:endCapture()
-            paletteRenderer:draw(x - 32, y - 64, 1)
-        end
-    else
+    local function drawTierTower(ox, oy)
         if self.tier == 1 then
-            self:drawScoutTowerIso(x, y, size)
+            self:drawScoutTowerIso(ox, oy, size)
         elseif self.tier == 2 then
-            self:drawGuardTowerIso(x, y, size)
+            self:drawGuardTowerIso(ox, oy, size)
         else
-            self:drawCannonTowerIso(x, y, size)
+            self:drawCannonTowerIso(ox, oy, size)
         end
+    end
+
+    if BuildingRenderer and BuildingRenderer.begin("large") then
+        drawTierTower(32, 64)
+        BuildingRenderer.finishWithSize("large", x - 32, y - 64, 1)
+    else
+        drawTierTower(x, y)
     end
     
     -- Draw beacon fire on top (outside shader for glow effect)
@@ -737,27 +700,5 @@ function ScoutTower:drawOnMinimap(mapX, mapY, scale)
         love.graphics.circle("fill", x + self.gridSize * scale / 2, y + self.gridSize * scale / 2, 2)
     end
 end
-
--- Static functions for palette shader control
-function ScoutTower.setPaletteShaderEnabled(enabled)
-    usePaletteShader = enabled
-end
-
-function ScoutTower.isPaletteShaderEnabled()
-    return usePaletteShader
-end
-
-function ScoutTower.setPalette(palette)
-    if paletteRenderer then
-        paletteRenderer:setPalette(palette)
-    end
-end
-
-function ScoutTower.getPaletteShader()
-    initPaletteRenderer()
-    return paletteRenderer
-end
-
-ScoutTower.PALETTES = PaletteShader and PaletteShader.PALETTES or {}
 
 return ScoutTower

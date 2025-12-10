@@ -9,13 +9,9 @@
 local Teams
 pcall(function() Teams = require("teams") end)
 
--- Palette shader for retro pixel art effect
-local PaletteShader
-pcall(function() PaletteShader = require("palette_shader") end)
-
--- Static palette renderer (shared by all lumber mills)
-local paletteRenderer = nil
-local usePaletteShader = true
+-- Building renderer for retro pixel art effect
+local BuildingRenderer
+pcall(function() BuildingRenderer = require("building_renderer") end)
 
 -- Sawdust particle system
 local sawdustParticles = {}
@@ -114,31 +110,6 @@ local function drawSawdustParticles(buildingId, screenX, screenY)
         love.graphics.setColor(0.65, 0.55, 0.35, p.alpha)
         love.graphics.circle("fill", screenX + p.x, screenY + p.y, p.size)
     end
-end
-
--- Initialize palette renderer
-local function initPaletteRenderer()
-    local canvasSize = 128  -- 3x3 building needs room for 2x scale
-    
-    if paletteRenderer then
-        local canvas = paletteRenderer:getCanvas()
-        if canvas then
-            local w, h = canvas:getDimensions()
-            if w ~= canvasSize or h ~= canvasSize then
-                paletteRenderer = nil
-            end
-        end
-    end
-    
-    if paletteRenderer or not PaletteShader then return end
-    
-    paletteRenderer = PaletteShader.new({
-        width = canvasSize,
-        height = canvasSize,
-        palette = PaletteShader.PALETTES.FANTASY,
-        dithering = false,
-        ditherStrength = 0
-    })
 end
 
 local LumberMill = {}
@@ -268,29 +239,17 @@ function LumberMill:draw()
     end
     
     -- Use palette shader if enabled, with 2x scaling
-    if usePaletteShader and PaletteShader then
-        initPaletteRenderer()
-        if paletteRenderer then
-            paletteRenderer:beginCapture()
-            self:drawLumberMillIso(16, 32, 96)  -- Draw at offset in 128px canvas
-            paletteRenderer:endCapture()
-            
-            -- Draw at 2x scale
-            local drawScale = 2
-            local canvasSize = 128
-            local scaledSize = canvasSize * drawScale
-            local offsetX = x + (size - scaledSize) / 2
-            local offsetY = y + size - scaledSize
-            paletteRenderer:draw(offsetX, offsetY, drawScale)
-        end
+    local drawScale = 2
+    local canvasSize = 128
+    local scaledSize = canvasSize * drawScale
+    local offsetX = x + (size - scaledSize) / 2
+    local offsetY = y + size - scaledSize
+
+    if BuildingRenderer and BuildingRenderer.begin("large") then
+        self:drawLumberMillIso(16, 32, 96)
+        BuildingRenderer.finishWithSize("large", offsetX, offsetY, drawScale)
     else
-        -- Draw directly at 2x scale
         love.graphics.push()
-        local drawScale = 2
-        local canvasSize = 128
-        local scaledSize = canvasSize * drawScale
-        local offsetX = x + (size - scaledSize) / 2
-        local offsetY = y + size - scaledSize
         love.graphics.translate(offsetX, offsetY)
         love.graphics.scale(drawScale, drawScale)
         self:drawLumberMillIso(16, 32, 96)
@@ -593,15 +552,6 @@ function LumberMill:drawHealthBar()
     love.graphics.setColor(0, 0, 0, 0.8)
     love.graphics.setLineWidth(1)
     love.graphics.rectangle("line", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
-end
-
--- Static functions
-LumberMill.setPaletteShaderEnabled = function(enabled)
-    usePaletteShader = enabled
-end
-
-LumberMill.isPaletteShaderEnabled = function()
-    return usePaletteShader
 end
 
 return LumberMill

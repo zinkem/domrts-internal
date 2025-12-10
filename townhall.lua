@@ -12,13 +12,9 @@ local Requirements = require("requirements")
 local Teams
 pcall(function() Teams = require("teams") end)
 
--- Palette shader for retro pixel art effect
-local PaletteShader
-pcall(function() PaletteShader = require("palette_shader") end)
-
--- Static palette renderer (shared by all town halls)
-local paletteRenderer = nil
-local usePaletteShader = true  -- Enable pixelated shader
+-- Building renderer for retro pixel art effect
+local BuildingRenderer
+pcall(function() BuildingRenderer = require("building_renderer") end)
 
 --============================================================================
 -- ISOMETRIC RENDERING SYSTEM
@@ -229,34 +225,6 @@ local function drawFire(x, y, time, scale)
     -- Hot center
     love.graphics.setColor(1, 0.95, 0.7, 0.8)
     love.graphics.circle("fill", x, y - 4 * scale, 1.5 * scale)
-end
-
--- Initialize the palette renderer (called once)
-local function initPaletteRenderer()
-    -- Town hall is 4x4 = 128px
-    local canvasSize = 128
-    
-    if paletteRenderer then
-        local canvas = paletteRenderer:getCanvas()
-        if canvas then
-            local w, h = canvas:getDimensions()
-            if w ~= canvasSize or h ~= canvasSize then
-                paletteRenderer = nil
-            end
-        end
-    end
-    
-    if paletteRenderer or not PaletteShader then return end
-    
-    -- Full size canvas for 4x4 building (128x128)
-    -- Shader provides palette quantization for retro look
-    paletteRenderer = PaletteShader.new({
-        width = canvasSize,
-        height = canvasSize,
-        palette = PaletteShader.PALETTES.FANTASY,
-        dithering = false,
-        ditherStrength = 0
-    })
 end
 
 -- Shared gradient/texture helper functions for building rendering
@@ -604,42 +572,13 @@ function TownHall:draw()
     end
     
     -- Use palette shader if enabled, with 2x scaling
-    if usePaletteShader and PaletteShader then
-        initPaletteRenderer()
-        if paletteRenderer then
-            -- Draw at (0,0) in the 128px canvas
-            paletteRenderer:beginCapture()
-            
-            if self.tier == 1 then
-                self:drawTownHallIso(0, 0, 128)  -- Original size in canvas
-            elseif self.tier == 2 then
-                self:drawHoldIso(0, 0, 128)
-            else
-                self:drawKeepIso(0, 0, 128)
-            end
-            
-            paletteRenderer:endCapture()
-            
-            -- Draw at 2x scale, offset to align bottom edge with tile
-            -- Canvas is 128px, scaled to 256px. Building needs to align with bottom of tile area.
-            local drawScale = 2
-            local canvasSize = 128
-            local scaledSize = canvasSize * drawScale  -- 256
-            local offsetX = x + (size - scaledSize) / 2  -- Center horizontally
-            local offsetY = y + size - scaledSize  -- Align bottom edge
-            paletteRenderer:draw(offsetX, offsetY, drawScale)
-        end
-    else
-        -- Draw directly without shader (also at 2x scale)
-        love.graphics.push()
-        local drawScale = 2
-        local canvasSize = 128
-        local scaledSize = canvasSize * drawScale
-        local offsetX = x + (size - scaledSize) / 2
-        local offsetY = y + size - scaledSize
-        love.graphics.translate(offsetX, offsetY)
-        love.graphics.scale(drawScale, drawScale)
-        
+    local drawScale = 2
+    local canvasSize = 128
+    local scaledSize = canvasSize * drawScale
+    local offsetX = x + (size - scaledSize) / 2
+    local offsetY = y + size - scaledSize
+
+    local function drawTierBuilding()
         if self.tier == 1 then
             self:drawTownHallIso(0, 0, 128)
         elseif self.tier == 2 then
@@ -647,7 +586,16 @@ function TownHall:draw()
         else
             self:drawKeepIso(0, 0, 128)
         end
-        
+    end
+
+    if BuildingRenderer and BuildingRenderer.begin("large") then
+        drawTierBuilding()
+        BuildingRenderer.finishWithSize("large", offsetX, offsetY, drawScale)
+    else
+        love.graphics.push()
+        love.graphics.translate(offsetX, offsetY)
+        love.graphics.scale(drawScale, drawScale)
+        drawTierBuilding()
         love.graphics.pop()
     end
     
@@ -1910,34 +1858,5 @@ function TownHall:drawOnMinimap(mapX, mapY, scale)
     local y = mapY + (self.gridY - 1) * scale
     love.graphics.rectangle("fill", x, y, self.gridSize * scale, self.gridSize * scale)
 end
-
--- Static functions to control palette shader
-function TownHall.setPaletteShaderEnabled(enabled)
-    usePaletteShader = enabled
-end
-
-function TownHall.isPaletteShaderEnabled()
-    return usePaletteShader
-end
-
-function TownHall.setPalette(palette)
-    if paletteRenderer then
-        paletteRenderer:setPalette(palette)
-    end
-end
-
-function TownHall.setDithering(enabled, strength)
-    if paletteRenderer then
-        paletteRenderer:setDithering(enabled, strength)
-    end
-end
-
-function TownHall.getPaletteShader()
-    initPaletteRenderer()
-    return paletteRenderer
-end
-
--- Preset palette names for easy access
-TownHall.PALETTES = PaletteShader and PaletteShader.PALETTES or {}
 
 return TownHall

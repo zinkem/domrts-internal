@@ -11,13 +11,9 @@ local Button = require("button")
 local Teams
 pcall(function() Teams = require("teams") end)
 
--- Palette shader for retro pixel art effect
-local PaletteShader
-pcall(function() PaletteShader = require("palette_shader") end)
-
--- Static palette renderer (shared by all blacksmiths)
-local paletteRenderer = nil
-local usePaletteShader = true
+-- Building renderer for retro pixel art effect
+local BuildingRenderer
+pcall(function() BuildingRenderer = require("building_renderer") end)
 
 -- Smoke particle system
 local smokeParticles = {}
@@ -162,31 +158,6 @@ local function drawForgeFire(x, y, time, scale)
         love.graphics.setColor(1, 0.7, 0.2, 0.6 + flicker * 0.3)
         love.graphics.circle("fill", sparkX, sparkY, 1 * scale)
     end
-end
-
--- Initialize palette renderer
-local function initPaletteRenderer()
-    local canvasSize = 128  -- 3x3 building needs room for isometric rendering
-    
-    if paletteRenderer then
-        local canvas = paletteRenderer:getCanvas()
-        if canvas then
-            local w, h = canvas:getDimensions()
-            if w ~= canvasSize or h ~= canvasSize then
-                paletteRenderer = nil
-            end
-        end
-    end
-    
-    if paletteRenderer or not PaletteShader then return end
-    
-    paletteRenderer = PaletteShader.new({
-        width = canvasSize,
-        height = canvasSize,
-        palette = PaletteShader.PALETTES.FANTASY,
-        dithering = false,
-        ditherStrength = 0
-    })
 end
 
 local Blacksmith = {}
@@ -361,26 +332,15 @@ function Blacksmith:draw()
     end
     
     -- Use palette shader if enabled
-    if usePaletteShader and PaletteShader then
-        initPaletteRenderer()
-        if paletteRenderer then
-            paletteRenderer:beginCapture()
-            -- Draw at offset in 128px canvas
-            self:drawBlacksmithIso(32, 32, 64)
-            paletteRenderer:endCapture()
-            
-            -- Draw at 1x scale (no additional scaling)
-            local canvasSize = 128
-            local offsetX = x + (size - canvasSize) / 2
-            local offsetY = y + size - canvasSize
-            paletteRenderer:draw(offsetX, offsetY, 1)
-        end
+    local canvasSize = 128
+    local offsetX = x + (size - canvasSize) / 2
+    local offsetY = y + size - canvasSize
+
+    if BuildingRenderer and BuildingRenderer.begin("large") then
+        self:drawBlacksmithIso(32, 32, 64)
+        BuildingRenderer.finishWithSize("large", offsetX, offsetY, 1)
     else
-        -- Draw directly at 1x scale
         love.graphics.push()
-        local canvasSize = 128
-        local offsetX = x + (size - canvasSize) / 2
-        local offsetY = y + size - canvasSize
         love.graphics.translate(offsetX, offsetY)
         self:drawBlacksmithIso(32, 32, 64)
         love.graphics.pop()
@@ -757,27 +717,5 @@ function Blacksmith:drawOnMinimap(mapX, mapY, scale)
     local y = mapY + (self.gridY - 1) * scale
     love.graphics.rectangle("fill", x, y, self.gridSize * scale, self.gridSize * scale)
 end
-
--- Static functions for palette shader control
-function Blacksmith.setPaletteShaderEnabled(enabled)
-    usePaletteShader = enabled
-end
-
-function Blacksmith.isPaletteShaderEnabled()
-    return usePaletteShader
-end
-
-function Blacksmith.setPalette(palette)
-    if paletteRenderer then
-        paletteRenderer:setPalette(palette)
-    end
-end
-
-function Blacksmith.getPaletteShader()
-    initPaletteRenderer()
-    return paletteRenderer
-end
-
-Blacksmith.PALETTES = PaletteShader and PaletteShader.PALETTES or {}
 
 return Blacksmith

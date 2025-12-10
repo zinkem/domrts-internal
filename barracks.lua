@@ -11,13 +11,9 @@ local Button = require("button")
 local Teams
 pcall(function() Teams = require("teams") end)
 
--- Palette shader for retro pixel art effect
-local PaletteShader
-pcall(function() PaletteShader = require("palette_shader") end)
-
--- Static palette renderer (shared by all barracks)
-local paletteRenderer = nil
-local usePaletteShader = true
+-- Building renderer for retro pixel art effect
+local BuildingRenderer
+pcall(function() BuildingRenderer = require("building_renderer") end)
 
 --============================================================================
 -- ISOMETRIC RENDERING SYSTEM
@@ -133,31 +129,6 @@ local function drawBanner(bx, by, bannerColor, emblemColor, goldDark, goldMid)
     -- Sword emblem for barracks
     love.graphics.polygon("fill", bx + 9, by - 22, bx + 10, by - 14, bx + 8, by - 14)
     love.graphics.rectangle("fill", bx + 6, by - 17, 6, 2)
-end
-
--- Initialize the palette renderer
-local function initPaletteRenderer()
-    local canvasSize = 128  -- 3x3 building but needs larger canvas for 2x scale isometric
-    
-    if paletteRenderer then
-        local canvas = paletteRenderer:getCanvas()
-        if canvas then
-            local w, h = canvas:getDimensions()
-            if w ~= canvasSize or h ~= canvasSize then
-                paletteRenderer = nil
-            end
-        end
-    end
-    
-    if paletteRenderer or not PaletteShader then return end
-    
-    paletteRenderer = PaletteShader.new({
-        width = canvasSize,
-        height = canvasSize,
-        palette = PaletteShader.PALETTES.FANTASY,
-        dithering = false,
-        ditherStrength = 0
-    })
 end
 
 local Barracks = {}
@@ -329,15 +300,9 @@ function Barracks:draw()
     end
     
     -- Use palette shader if enabled
-    if usePaletteShader and PaletteShader then
-        initPaletteRenderer()
-        if paletteRenderer then
-            paletteRenderer:beginCapture()
-            -- Offset to position 96px building in 128px canvas (raised 10%)
-            self:drawBarracksIso(16, 19, size)
-            paletteRenderer:endCapture()
-            paletteRenderer:draw(x - 16, y - 19, 1)
-        end
+    if BuildingRenderer and BuildingRenderer.begin("large") then
+        self:drawBarracksIso(16, 19, size)
+        BuildingRenderer.finishWithSize("large", x - 16, y - 19, 1)
     else
         self:drawBarracksIso(x, y, size)
     end
@@ -714,27 +679,5 @@ function Barracks:drawOnMinimap(mapX, mapY, scale)
     local y = mapY + (self.gridY - 1) * scale
     love.graphics.rectangle("fill", x, y, self.gridSize * scale, self.gridSize * scale)
 end
-
--- Static functions for palette shader control
-function Barracks.setPaletteShaderEnabled(enabled)
-    usePaletteShader = enabled
-end
-
-function Barracks.isPaletteShaderEnabled()
-    return usePaletteShader
-end
-
-function Barracks.setPalette(palette)
-    if paletteRenderer then
-        paletteRenderer:setPalette(palette)
-    end
-end
-
-function Barracks.getPaletteShader()
-    initPaletteRenderer()
-    return paletteRenderer
-end
-
-Barracks.PALETTES = PaletteShader and PaletteShader.PALETTES or {}
 
 return Barracks

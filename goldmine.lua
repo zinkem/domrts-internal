@@ -5,13 +5,9 @@
     Style: Isometric rocky mountain with cave entrance and gold veins
 ]]
 
--- Palette shader for retro pixel art effect
-local PaletteShader
-pcall(function() PaletteShader = require("palette_shader") end)
-
--- Static palette renderer
-local paletteRenderer = nil
-local usePaletteShader = true
+-- Building renderer for retro pixel art effect
+local BuildingRenderer
+pcall(function() BuildingRenderer = require("building_renderer") end)
 
 --============================================================================
 -- ISOMETRIC RENDERING SYSTEM
@@ -60,31 +56,6 @@ local function isoBox(x, y, z, w, d, h, originX, originY, topColor, leftColor, r
         {x + w, y + d, z},
         originX, originY, rightColor
     )
-end
-
--- Initialize palette renderer
-local function initPaletteRenderer()
-    local canvasSize = 128  -- 3x3 building
-    
-    if paletteRenderer then
-        local canvas = paletteRenderer:getCanvas()
-        if canvas then
-            local w, h = canvas:getDimensions()
-            if w ~= canvasSize or h ~= canvasSize then
-                paletteRenderer = nil
-            end
-        end
-    end
-    
-    if paletteRenderer or not PaletteShader then return end
-    
-    paletteRenderer = PaletteShader.new({
-        width = canvasSize,
-        height = canvasSize,
-        palette = PaletteShader.PALETTES.FANTASY,
-        dithering = false,
-        ditherStrength = 0
-    })
 end
 
 local GoldMine = {}
@@ -160,27 +131,17 @@ function GoldMine:draw()
     local size = self.pixelSize
     
     -- Use palette shader with 2x scaling
-    if usePaletteShader and PaletteShader then
-        initPaletteRenderer()
-        if paletteRenderer then
-            paletteRenderer:beginCapture()
-            self:drawGoldMineIso(16, 24, 96)
-            paletteRenderer:endCapture()
-            
-            local drawScale = 2
-            local canvasSize = 128
-            local scaledSize = canvasSize * drawScale
-            local offsetX = x + (size - scaledSize) / 2
-            local offsetY = y + size - scaledSize
-            paletteRenderer:draw(offsetX, offsetY, drawScale)
-        end
+    local drawScale = 2
+    local canvasSize = 128
+    local scaledSize = canvasSize * drawScale
+    local offsetX = x + (size - scaledSize) / 2
+    local offsetY = y + size - scaledSize
+
+    if BuildingRenderer and BuildingRenderer.begin("large") then
+        self:drawGoldMineIso(16, 24, 96)
+        BuildingRenderer.finishWithSize("large", offsetX, offsetY, drawScale)
     else
         love.graphics.push()
-        local drawScale = 2
-        local canvasSize = 128
-        local scaledSize = canvasSize * drawScale
-        local offsetX = x + (size - scaledSize) / 2
-        local offsetY = y + size - scaledSize
         love.graphics.translate(offsetX, offsetY)
         love.graphics.scale(drawScale, drawScale)
         self:drawGoldMineIso(16, 24, 96)
@@ -432,15 +393,6 @@ function GoldMine:drawOnMinimap(mapX, mapY, scale)
     local x = mapX + (self.gridX - 1) * scale
     local y = mapY + (self.gridY - 1) * scale
     love.graphics.rectangle("fill", x, y, self.gridSize * scale, self.gridSize * scale)
-end
-
--- Static functions
-GoldMine.setPaletteShaderEnabled = function(enabled)
-    usePaletteShader = enabled
-end
-
-GoldMine.isPaletteShaderEnabled = function()
-    return usePaletteShader
 end
 
 return GoldMine
