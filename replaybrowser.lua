@@ -3,6 +3,9 @@
 
 local ReplayBrowser = {}
 
+-- Import cursor
+local Cursor = require("cursor")
+
 -- Background image
 local bgImage = nil
 
@@ -252,6 +255,9 @@ local function closeViewer()
 end
 
 function ReplayBrowser.load()
+    -- Hide system cursor (we draw our own)
+    love.mouse.setVisible(false)
+
     selectedIndex = nil
     scrollOffset = 0
 
@@ -597,6 +603,9 @@ function ReplayBrowser.draw()
     if viewerMode then
         drawViewer(screenW, screenH, mx, my)
     end
+
+    -- Custom cursor (always on top)
+    Cursor.draw()
 
     love.graphics.setColor(1, 1, 1, 1)
 end

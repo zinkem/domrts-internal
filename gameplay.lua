@@ -21,6 +21,7 @@ local M = {
     UIDraw = require("ui_draw"),
     CommandBar = require("command_bar"),
     Surrender = require("surrender"),
+    BuildingPlacement = require("building_placement"),
 }
 
 -- Optional modules (graceful fallback)
@@ -123,12 +124,8 @@ local enemyTownHall = nil
 
 local selectedEntities = {}  -- Support multiple selection
 
--- Building placement
-local isPlacingBuilding = false
-local placingBuildingType = nil
-local placingPeon = nil
-local placementGridX, placementGridY = 0, 0
-local placementValid = false
+-- Building placement (module instance created in load())
+local buildingPlacement = nil
 
 -- Box selection
 local isBoxSelecting = false
@@ -506,18 +503,6 @@ local commandBarY = 0
 local COMMAND_BUTTON_SIZE = 50
 local COMMAND_BUTTON_SPACING = 4
 
-local function startBuildingPlacement(peon, buildingType)
-    isPlacingBuilding = true
-    placingBuildingType = buildingType
-    placingPeon = peon
-end
-
-local function cancelBuildingPlacement()
-    isPlacingBuilding = false
-    placingBuildingType = nil
-    placingPeon = nil
-end
-
 -- Get command buttons for current selection
 local function getCommandButtons()
     local buttons = {}
@@ -579,7 +564,7 @@ local function getCommandButtons()
             enabled = canBuild and resources.gold >= M.Farm.COST_GOLD and resources.lumber >= M.Farm.COST_LUMBER,
             action = function()
                 if resources.gold >= M.Farm.COST_GOLD and resources.lumber >= M.Farm.COST_LUMBER then
-                    startBuildingPlacement(selEntity, "farm")
+                    buildingPlacement:start(selEntity, "farm")
                 end
             end
         })
@@ -591,7 +576,7 @@ local function getCommandButtons()
             enabled = canBuild and resources.gold >= M.Barracks.COST_GOLD and resources.lumber >= M.Barracks.COST_LUMBER,
             action = function()
                 if resources.gold >= M.Barracks.COST_GOLD and resources.lumber >= M.Barracks.COST_LUMBER then
-                    startBuildingPlacement(selEntity, "barracks")
+                    buildingPlacement:start(selEntity, "barracks")
                 end
             end
         })
@@ -603,7 +588,7 @@ local function getCommandButtons()
             enabled = canBuild and resources.gold >= M.ScoutTower.COST_GOLD and resources.lumber >= M.ScoutTower.COST_LUMBER,
             action = function()
                 if resources.gold >= M.ScoutTower.COST_GOLD and resources.lumber >= M.ScoutTower.COST_LUMBER then
-                    startBuildingPlacement(selEntity, "scouttower")
+                    buildingPlacement:start(selEntity, "scouttower")
                 end
             end
         })
@@ -616,7 +601,7 @@ local function getCommandButtons()
             requirement = not M.Requirements.canBuild("lumbermill") and "Barracks" or nil,
             action = function()
                 if M.Requirements.canBuild("lumbermill") and resources.gold >= M.LumberMill.COST_GOLD and resources.lumber >= M.LumberMill.COST_LUMBER then
-                    startBuildingPlacement(selEntity, "lumbermill")
+                    buildingPlacement:start(selEntity, "lumbermill")
                 end
             end
         })
@@ -629,7 +614,7 @@ local function getCommandButtons()
             requirement = not M.Requirements.canBuild("blacksmith") and "Barracks" or nil,
             action = function()
                 if M.Requirements.canBuild("blacksmith") and resources.gold >= M.Blacksmith.COST_GOLD and resources.lumber >= M.Blacksmith.COST_LUMBER then
-                    startBuildingPlacement(selEntity, "blacksmith")
+                    buildingPlacement:start(selEntity, "blacksmith")
                 end
             end
         })
@@ -642,7 +627,7 @@ local function getCommandButtons()
             requirement = not M.Requirements.canBuild("stable") and "Hold" or nil,
             action = function()
                 if M.Requirements.canBuild("stable") and resources.gold >= M.Stable.COST_GOLD and resources.lumber >= M.Stable.COST_LUMBER then
-                    startBuildingPlacement(selEntity, "stable")
+                    buildingPlacement:start(selEntity, "stable")
                 end
             end
         })
@@ -655,7 +640,7 @@ local function getCommandButtons()
             requirement = not M.Requirements.canBuild("siegeworkshop") and "Keep" or nil,
             action = function()
                 if M.Requirements.canBuild("siegeworkshop") and resources.gold >= M.SiegeWorkshop.COST_GOLD and resources.lumber >= M.SiegeWorkshop.COST_LUMBER then
-                    startBuildingPlacement(selEntity, "siegeworkshop")
+                    buildingPlacement:start(selEntity, "siegeworkshop")
                 end
             end
         })
@@ -668,7 +653,7 @@ local function getCommandButtons()
             requirement = not M.Requirements.canBuild("townhall") and "Hold" or nil,
             action = function()
                 if M.Requirements.canBuild("townhall") and resources.gold >= M.TownHall.COST_GOLD and resources.lumber >= M.TownHall.COST_LUMBER then
-                    startBuildingPlacement(selEntity, "townhall")
+                    buildingPlacement:start(selEntity, "townhall")
                 end
             end
         })
@@ -1586,99 +1571,6 @@ local function drawDefeatScreen()
     love.graphics.print(btnText, btnX + (btnW - textW) / 2, btnY + 10)
 end
 
-local function getBuildingSize(buildingType)
-    if buildingType == "farm" then return M.Farm.GRID_SIZE or 2
-    elseif buildingType == "lumbermill" and LumberMill then return M.LumberMill.GRID_SIZE or 2
-    elseif buildingType == "blacksmith" and Blacksmith then return M.Blacksmith.GRID_SIZE or 2
-    elseif buildingType == "scouttower" then return M.ScoutTower.GRID_SIZE or 2
-    elseif buildingType == "stable" and Stable then return M.Stable.GRID_SIZE or 2
-    elseif buildingType == "barracks" then return M.Barracks.GRID_SIZE or 3
-    elseif buildingType == "archeryrange" and ArcheryRange then return M.ArcheryRange.GRID_SIZE or 3
-    elseif buildingType == "siegeworkshop" and SiegeWorkshop then return M.SiegeWorkshop.GRID_SIZE or 3
-    elseif buildingType == "townhall" then return M.TownHall.GRID_SIZE or 3
-    else return 3
-    end
-end
-
-local function drawBuildingPlacement()
-    if not isPlacingBuilding then return end
-
-    local mx, my = love.mouse.getPosition()
-    if not map:isInViewport(mx, my) then return end
-
-    local worldX, worldY = map:screenToWorld(mx, my)
-    local gridX, gridY = map:worldToGrid(worldX, worldY)
-    local buildSize = getBuildingSize(placingBuildingType)
-
-    -- Check if area is clear of trees/terrain
-    placementValid = map:isAreaClear(gridX, gridY, buildSize, buildSize)
-
-    -- Also check for overlap with existing buildings
-    if placementValid then
-        local function buildingsOverlap(ax, ay, aSize, bx, by, bSize)
-            return ax < bx + bSize and ax + aSize > bx and
-                   ay < by + bSize and ay + aSize > by
-        end
-
-        -- Check all buildings
-        local allBuildings = getAllBuildings()
-        for _, building in ipairs(allBuildings) do
-            if building.gridSize and buildingsOverlap(gridX, gridY, buildSize, building.gridX, building.gridY, building.gridSize) then
-                placementValid = false
-                break
-            end
-        end
-    end
-    
-    -- Townhall cannot be placed within 2 tiles of a gold mine
-    if placementValid and placingBuildingType == "townhall" then
-        local minGapFromMine = 2
-        for _, mine in ipairs(goldMines) do
-            -- Calculate edge-to-edge gap between buildings
-            local mineSize = mine.gridSize or 3
-            local gapX = math.max(mine.gridX - (gridX + buildSize), gridX - (mine.gridX + mineSize))
-            local gapY = math.max(mine.gridY - (gridY + buildSize), gridY - (mine.gridY + mineSize))
-            
-            -- If either gap is negative, buildings overlap in that axis
-            -- We need to check the gap in the non-overlapping axis
-            local effectiveGap
-            if gapX < 0 and gapY < 0 then
-                -- Buildings overlap in both axes (on top of each other)
-                effectiveGap = -1
-            elseif gapX < 0 then
-                -- Overlap in X, so Y gap is what matters
-                effectiveGap = gapY
-            elseif gapY < 0 then
-                -- Overlap in Y, so X gap is what matters
-                effectiveGap = gapX
-            else
-                -- No overlap, use the smaller gap (closest edge)
-                effectiveGap = math.min(gapX, gapY)
-            end
-            
-            if effectiveGap < minGapFromMine then
-                placementValid = false
-                break
-            end
-        end
-    end
-
-    placementGridX, placementGridY = gridX, gridY
-
-    local screenX, screenY = map:worldToScreen(map:gridToWorld(gridX, gridY))
-    local pixelSize = buildSize * 32
-
-    love.graphics.setColor(placementValid and {0, 1, 0, 0.4} or {1, 0, 0, 0.4})
-    love.graphics.rectangle("fill", screenX, screenY, pixelSize, pixelSize)
-    love.graphics.setColor(1, 1, 1, 0.8)
-    love.graphics.setLineWidth(2)
-    love.graphics.rectangle("line", screenX, screenY, pixelSize, pixelSize)
-
-    love.graphics.setFont(Game.fonts.small)
-    love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.print("Left-click to place " .. placingBuildingType .. " | Right-click to cancel", map.viewportX + 10, map.viewportY + map.viewportH - 25)
-end
-
 local function drawBoxSelection()
     if not isBoxSelecting then return end
     local x1, y1 = math.min(boxStartX, boxEndX), math.min(boxStartY, boxEndY)
@@ -1879,11 +1771,11 @@ local function createBuilding(gridX, gridY, buildingType, peon)
         building = M.Barracks.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(barracks, building)
-    elseif buildingType == "lumbermill" and LumberMill then
+    elseif buildingType == "lumbermill" and M.LumberMill then
         building = M.LumberMill.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(lumberMills, building)
-    elseif buildingType == "blacksmith" and Blacksmith then
+    elseif buildingType == "blacksmith" and M.Blacksmith then
         building = M.Blacksmith.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(blacksmiths, building)
@@ -1891,11 +1783,11 @@ local function createBuilding(gridX, gridY, buildingType, peon)
         building = M.ScoutTower.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(scoutTowers, building)
-    elseif buildingType == "archeryrange" and ArcheryRange then
+    elseif buildingType == "archeryrange" and M.ArcheryRange then
         building = M.ArcheryRange.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(archeryRanges, building)
-    elseif buildingType == "stable" and Stable then
+    elseif buildingType == "stable" and M.Stable then
         building = M.Stable.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         -- Set callback for Paladin upgrade
@@ -1905,7 +1797,7 @@ local function createBuilding(gridX, gridY, buildingType, peon)
             end
         end
         table.insert(stables, building)
-    elseif buildingType == "siegeworkshop" and SiegeWorkshop then
+    elseif buildingType == "siegeworkshop" and M.SiegeWorkshop then
         building = M.SiegeWorkshop.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(siegeWorkshops, building)
@@ -1927,15 +1819,9 @@ local function createBuilding(gridX, gridY, buildingType, peon)
 end
 
 local function getBuildingCost(buildingType)
-    if buildingType == "farm" then return M.Farm.COST_GOLD, M.Farm.COST_LUMBER
-    elseif buildingType == "barracks" then return M.Barracks.COST_GOLD, M.Barracks.COST_LUMBER
-    elseif buildingType == "lumbermill" and LumberMill then return M.LumberMill.COST_GOLD, M.LumberMill.COST_LUMBER
-    elseif buildingType == "blacksmith" and Blacksmith then return M.Blacksmith.COST_GOLD, M.Blacksmith.COST_LUMBER
-    elseif buildingType == "scouttower" then return M.ScoutTower.COST_GOLD, M.ScoutTower.COST_LUMBER
-    elseif buildingType == "archeryrange" and ArcheryRange then return M.ArcheryRange.COST_GOLD, M.ArcheryRange.COST_LUMBER
-    elseif buildingType == "stable" and Stable then return M.Stable.COST_GOLD, M.Stable.COST_LUMBER
-    elseif buildingType == "siegeworkshop" and SiegeWorkshop then return M.SiegeWorkshop.COST_GOLD, M.SiegeWorkshop.COST_LUMBER
-    elseif buildingType == "townhall" then return M.TownHall.COST_GOLD, M.TownHall.COST_LUMBER
+    local ok, mod = pcall(require, buildingType)
+    if ok and mod and mod.COST_GOLD and mod.COST_LUMBER then
+        return mod.COST_GOLD, mod.COST_LUMBER
     end
     return 0, 0
 end
@@ -2381,7 +2267,7 @@ function Gameplay.load(options)
     kamikazes = {}
 
     selectedEntities = {}
-    isPlacingBuilding = false
+    buildingPlacement = M.BuildingPlacement.new()
     isBoxSelecting = false
     input.isMapDragging = false
 
@@ -2765,7 +2651,7 @@ function Gameplay.update(dt)
     elapsedTime = elapsedTime + gameDt
 
     -- Disable edge scroll when placing buildings, dragging map, or in UI
-    local disableEdgeScroll = isPlacingBuilding or input.isMapDragging or isBoxSelecting
+    local disableEdgeScroll = buildingPlacement:isActive() or input.isMapDragging or isBoxSelecting
 
     -- Also disable during tutorial selection steps
     if tutorialMode then
@@ -3363,7 +3249,8 @@ function Gameplay.draw()
     -- Draw particle effects (dust, sparks, etc)
     if Effects then M.Effects.draw(map) end
 
-    drawBuildingPlacement()
+    buildingPlacement:update(map, goldMines, getAllBuildings())
+    buildingPlacement:draw(map, Game.fonts)
     drawBoxSelection()
 
     love.graphics.setScissor()
@@ -3448,8 +3335,8 @@ function Gameplay.keypressed(key)
             return
         end
 
-        if isPlacingBuilding then
-            cancelBuildingPlacement()
+        if buildingPlacement:keypressed(key) then
+            -- Building placement handled escape
         elseif input.attackMoveMode then
             input.attackMoveMode = false
         elseif #selectedEntities > 0 then
@@ -3526,18 +3413,14 @@ function Gameplay.mousepressed(x, y, button)
     end
 
     -- Building placement
-    if isPlacingBuilding then
-        if button == 1 and placementValid and map:isInViewport(x, y) then
-            local costGold, costLumber = getBuildingCost(placingBuildingType)
-            -- Don't deduct cost here - peon will check and deduct when arriving at site
-            placingPeon:goToBuild(placementGridX, placementGridY, placingBuildingType, createBuilding, costGold, costLumber)
-            cancelBuildingPlacement()
-            return
-        elseif button == 2 then
-            cancelBuildingPlacement()
-            return
+    if buildingPlacement:isActive() then
+        local handled, peon, buildingType, gridX, gridY = buildingPlacement:mousepressed(x, y, button, map)
+        if handled and peon then
+            -- Placement confirmed - send peon to build
+            local costGold, costLumber = getBuildingCost(buildingType)
+            peon:goToBuild(gridX, gridY, buildingType, createBuilding, costGold, costLumber)
         end
-        return
+        if handled then return end
     end
 
     -- Entity UI clicks
@@ -3944,6 +3827,13 @@ function handleLeftClick(x, y, shiftHeld)
         return
     end
 
+    for _, building in ipairs(townHalls) do
+        if isPlayerOwned(building) and building:containsPoint(x, y) then
+            selectBuilding(building)
+            return
+        end
+    end
+
     for _, barrack in ipairs(barracks) do
         if isPlayerOwned(barrack) and barrack:containsPoint(x, y) then
             selectBuilding(barrack)
@@ -4238,8 +4128,8 @@ function Gameplay.getTutorialState()
         peonCount = peonCount,
 
         -- Building placement
-        isPlacingBuilding = isPlacingBuilding,
-        placingBuildingType = placingBuildingType,
+        isPlacingBuilding = buildingPlacement:isActive(),
+        placingBuildingType = buildingPlacement:getBuildingType(),
 
         -- Win conditions
         victory = victory,

@@ -10,6 +10,9 @@ local Title = {}
 local Audio
 pcall(function() Audio = require("audio") end)
 
+-- Import cursor
+local Cursor = require("cursor")
+
 -- Local state
 local animTimer = 0
 local particles = {}
@@ -875,6 +878,9 @@ local function drawBackgroundImage()
 end
 
 function Title.load()
+    -- Hide system cursor (we draw our own)
+    love.mouse.setVisible(false)
+
     animTimer = 0
     particles = {}
     medallionSparks = {}
@@ -1275,6 +1281,9 @@ function Title.draw()
     -- Version in corner
     love.graphics.setColor(Colors.textLight[1], Colors.textLight[2], Colors.textLight[3], 0.3)
     love.graphics.print("v0.1 - Made with LÖVE", screenW - 150, screenH - 25)
+
+    -- Custom cursor (always on top)
+    Cursor.draw()
 end
 
 function Title.keypressed(key)

@@ -3,6 +3,9 @@
 
 local GameConfig = {}
 
+-- Import cursor
+local Cursor = require("cursor")
+
 -- Game is a global defined in main.lua
 
 -- Background image
@@ -179,6 +182,9 @@ local enemyButtons = {}
 local dropdownButtons = {}
 
 function GameConfig.load()
+    -- Hide system cursor (we draw our own)
+    love.mouse.setVisible(false)
+
     -- Load background image
     local success, result = pcall(function()
         return love.graphics.newImage("images/hero_vs_goblin_army_dark_tower.png")
@@ -652,6 +658,9 @@ function GameConfig.draw()
     if activeDropdown then
         GameConfig.drawDropdown()
     end
+
+    -- Custom cursor (always on top)
+    Cursor.draw()
 
     love.graphics.setColor(1, 1, 1, 1)
 end
