@@ -63,7 +63,7 @@ function Map.new(options)
     self.cameraY = 0
     self.scrollSpeed = 400
     self.edgeScrollSpeed = 350  -- Edge scroll slightly slower
-    self.edgeScrollMargin = 20  -- Pixels from edge to trigger scroll
+    self.edgeScrollMargin = 5  -- Pixels from edge to trigger scroll (tight zone)
     
     -- Viewport (set by gameplay)
     self.viewportX = 0

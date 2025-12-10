@@ -41,6 +41,17 @@ end
 function Knight:draw()
     local x, y = self:getScreenPos()
 
+    -- Visual scale factor (2x size for better visibility)
+    local scale = 2
+
+    -- Attack animation: lance thrust / axe swing
+    local attackAnim = 0
+    if self.attackAnimTimer and self.attackAnimTimer > 0 then
+        -- Thrust forward (0 to 1 and back) over 0.3 seconds
+        local progress = 1 - (self.attackAnimTimer / 0.3)
+        attackAnim = math.sin(progress * math.pi)  -- 0 -> 1 -> 0
+    end
+
     -- Check if this is an enemy (orc) unit
     local isOrc = Teams and self.team == Teams.ENEMY
 
@@ -121,34 +132,34 @@ function Knight:draw()
     -- Glow effect (holy for paladin, fel for orc)
     if self.isPaladin and not isOrc then
         love.graphics.setColor(holyGreen[1], holyGreen[2], holyGreen[3], 0.15)
-        love.graphics.circle("fill", x, y, 22)
+        love.graphics.circle("fill", x, y, 22 * scale)
         love.graphics.setColor(holyGreenGlow[1], holyGreenGlow[2], holyGreenGlow[3], 0.08)
-        love.graphics.circle("fill", x, y, 28)
+        love.graphics.circle("fill", x, y, 28 * scale)
     elseif isOrc and accentGlow then
         love.graphics.setColor(accentGlow[1], accentGlow[2], accentGlow[3], 0.12)
-        love.graphics.circle("fill", x, y, 20)
+        love.graphics.circle("fill", x, y, 20 * scale)
     end
 
     -- Shadow
     love.graphics.setColor(0, 0, 0, 0.35)
-    love.graphics.ellipse("fill", x, y + 12, 14, 5)
+    love.graphics.ellipse("fill", x, y + 12 * scale, 14 * scale, 5 * scale)
 
     -- Mount body (horse or wolf)
     love.graphics.setColor(mountColor[1], mountColor[2], mountColor[3], 1)
     if isOrc then
         -- Wolf body (slightly different shape - more hunched)
-        love.graphics.ellipse("fill", x, y + 3, 13, 7)
+        love.graphics.ellipse("fill", x, y + 3 * scale, 13 * scale, 7 * scale)
     else
         -- Horse body
-        love.graphics.ellipse("fill", x, y + 4, 14, 8)
+        love.graphics.ellipse("fill", x, y + 4 * scale, 14 * scale, 8 * scale)
     end
 
     -- Mount legs
     love.graphics.setColor(mountColorDark[1], mountColorDark[2], mountColorDark[3], 1)
-    love.graphics.rectangle("fill", x - 8, y + 6, 3, 8, 1)
-    love.graphics.rectangle("fill", x - 3, y + 7, 3, 7, 1)
-    love.graphics.rectangle("fill", x + 3, y + 7, 3, 7, 1)
-    love.graphics.rectangle("fill", x + 8, y + 6, 3, 8, 1)
+    love.graphics.rectangle("fill", x - 8 * scale, y + 6 * scale, 3 * scale, 8 * scale, 1 * scale)
+    love.graphics.rectangle("fill", x - 3 * scale, y + 7 * scale, 3 * scale, 7 * scale, 1 * scale)
+    love.graphics.rectangle("fill", x + 3 * scale, y + 7 * scale, 3 * scale, 7 * scale, 1 * scale)
+    love.graphics.rectangle("fill", x + 8 * scale, y + 6 * scale, 3 * scale, 8 * scale, 1 * scale)
 
     -- Leg armor (steel for knight, silver for paladin, none for orc)
     if not isOrc then
@@ -157,8 +168,8 @@ function Knight:draw()
         else
             love.graphics.setColor(steelDark[1], steelDark[2], steelDark[3], 0.8)
         end
-        love.graphics.rectangle("fill", x - 8, y + 10, 3, 2)
-        love.graphics.rectangle("fill", x + 8, y + 10, 3, 2)
+        love.graphics.rectangle("fill", x - 8 * scale, y + 10 * scale, 3 * scale, 2 * scale)
+        love.graphics.rectangle("fill", x + 8 * scale, y + 10 * scale, 3 * scale, 2 * scale)
     end
 
     -- Hooves/Paws
@@ -168,41 +179,41 @@ function Knight:draw()
     else
         love.graphics.setColor(0.25, 0.22, 0.2, 1)
     end
-    love.graphics.ellipse("fill", x - 7, y + 14, 2, 1.5)
-    love.graphics.ellipse("fill", x - 2, y + 14, 2, 1.5)
-    love.graphics.ellipse("fill", x + 4, y + 14, 2, 1.5)
-    love.graphics.ellipse("fill", x + 9, y + 14, 2, 1.5)
+    love.graphics.ellipse("fill", x - 7 * scale, y + 14 * scale, 2 * scale, 1.5 * scale)
+    love.graphics.ellipse("fill", x - 2 * scale, y + 14 * scale, 2 * scale, 1.5 * scale)
+    love.graphics.ellipse("fill", x + 4 * scale, y + 14 * scale, 2 * scale, 1.5 * scale)
+    love.graphics.ellipse("fill", x + 9 * scale, y + 14 * scale, 2 * scale, 1.5 * scale)
 
     -- Mount neck and head
     love.graphics.setColor(mountColor[1], mountColor[2], mountColor[3], 1)
     if isOrc then
         -- Wolf head (more angular, with snout)
-        love.graphics.polygon("fill", x + 8, y + 1, x + 16, y - 6, x + 18, y - 4, x + 12, y + 3)
-        love.graphics.ellipse("fill", x + 18, y - 6, 6, 4)  -- Wolf head
+        love.graphics.polygon("fill", x + 8 * scale, y + 1 * scale, x + 16 * scale, y - 6 * scale, x + 18 * scale, y - 4 * scale, x + 12 * scale, y + 3 * scale)
+        love.graphics.ellipse("fill", x + 18 * scale, y - 6 * scale, 6 * scale, 4 * scale)  -- Wolf head
         -- Wolf ears (pointed)
-        love.graphics.polygon("fill", x + 14, y - 9, x + 16, y - 14, x + 18, y - 9)
-        love.graphics.polygon("fill", x + 19, y - 9, x + 21, y - 14, x + 23, y - 9)
+        love.graphics.polygon("fill", x + 14 * scale, y - 9 * scale, x + 16 * scale, y - 14 * scale, x + 18 * scale, y - 9 * scale)
+        love.graphics.polygon("fill", x + 19 * scale, y - 9 * scale, x + 21 * scale, y - 14 * scale, x + 23 * scale, y - 9 * scale)
         -- Wolf snout
         love.graphics.setColor(mountColorDark[1], mountColorDark[2], mountColorDark[3], 1)
-        love.graphics.ellipse("fill", x + 24, y - 5, 3, 2)
+        love.graphics.ellipse("fill", x + 24 * scale, y - 5 * scale, 3 * scale, 2 * scale)
     else
         -- Horse neck and head
-        love.graphics.polygon("fill", x + 10, y + 2, x + 18, y - 8, x + 20, y - 6, x + 14, y + 4)
-        love.graphics.ellipse("fill", x + 20, y - 8, 5, 4)
+        love.graphics.polygon("fill", x + 10 * scale, y + 2 * scale, x + 18 * scale, y - 8 * scale, x + 20 * scale, y - 6 * scale, x + 14 * scale, y + 4 * scale)
+        love.graphics.ellipse("fill", x + 20 * scale, y - 8 * scale, 5 * scale, 4 * scale)
         -- Horse ears
-        love.graphics.polygon("fill", x + 18, y - 12, x + 20, y - 16, x + 22, y - 11)
+        love.graphics.polygon("fill", x + 18 * scale, y - 12 * scale, x + 20 * scale, y - 16 * scale, x + 22 * scale, y - 11 * scale)
     end
 
     -- Mount eye
     if isOrc then
         -- Wolf eye (yellow/amber, predatory)
         love.graphics.setColor(0.9, 0.7, 0.2, 1)
-        love.graphics.circle("fill", x + 19, y - 7, 1.2)
+        love.graphics.circle("fill", x + 19 * scale, y - 7 * scale, 1.2 * scale)
         love.graphics.setColor(0.1, 0.05, 0.0, 1)
-        love.graphics.circle("fill", x + 19, y - 7, 0.6)
+        love.graphics.circle("fill", x + 19 * scale, y - 7 * scale, 0.6 * scale)
     else
         love.graphics.setColor(0.15, 0.1, 0.05, 1)
-        love.graphics.circle("fill", x + 21, y - 9, 1)
+        love.graphics.circle("fill", x + 21 * scale, y - 9 * scale, 1 * scale)
     end
 
     -- Mane/Fur and Tail
@@ -210,21 +221,21 @@ function Knight:draw()
         -- Wolf has no mane, but has fur tufts
         love.graphics.setColor(mountColorDark[1], mountColorDark[2], mountColorDark[3], 1)
         -- Fur on back
-        love.graphics.polygon("fill", x + 8, y - 2, x + 10, y - 5, x + 12, y - 1)
+        love.graphics.polygon("fill", x + 8 * scale, y - 2 * scale, x + 10 * scale, y - 5 * scale, x + 12 * scale, y - 1 * scale)
         -- Wolf tail (bushy)
         love.graphics.setColor(mountColor[1], mountColor[2], mountColor[3], 1)
-        love.graphics.polygon("fill", x - 12, y + 1, x - 20, y + 4, x - 18, y + 8, x - 12, y + 5)
+        love.graphics.polygon("fill", x - 12 * scale, y + 1 * scale, x - 20 * scale, y + 4 * scale, x - 18 * scale, y + 8 * scale, x - 12 * scale, y + 5 * scale)
         love.graphics.setColor(mountColorDark[1], mountColorDark[2], mountColorDark[3], 0.6)
-        love.graphics.polygon("fill", x - 14, y + 3, x - 18, y + 5, x - 16, y + 7, x - 13, y + 5)
+        love.graphics.polygon("fill", x - 14 * scale, y + 3 * scale, x - 18 * scale, y + 5 * scale, x - 16 * scale, y + 7 * scale, x - 13 * scale, y + 5 * scale)
     else
         if self.isPaladin then
             love.graphics.setColor(0.85, 0.85, 0.88, 1)  -- Silver-white mane
         else
             love.graphics.setColor(0.2, 0.15, 0.1, 1)  -- Dark brown mane
         end
-        love.graphics.polygon("fill", x + 12, y - 2, x + 16, y - 10, x + 18, y - 6, x + 14, y + 2)
+        love.graphics.polygon("fill", x + 12 * scale, y - 2 * scale, x + 16 * scale, y - 10 * scale, x + 18 * scale, y - 6 * scale, x + 14 * scale, y + 2 * scale)
         -- Horse tail
-        love.graphics.polygon("fill", x - 14, y + 2, x - 18, y + 8, x - 14, y + 10, x - 12, y + 6)
+        love.graphics.polygon("fill", x - 14 * scale, y + 2 * scale, x - 18 * scale, y + 8 * scale, x - 14 * scale, y + 10 * scale, x - 12 * scale, y + 6 * scale)
     end
 
     -- Bridle/Reins (horse) or nothing (wolf)
@@ -234,72 +245,72 @@ function Knight:draw()
         else
             love.graphics.setColor(steelMid[1], steelMid[2], steelMid[3], 1)
         end
-        love.graphics.setLineWidth(1.5)
-        love.graphics.line(x + 18, y - 6, x + 24, y - 8)
-        love.graphics.circle("fill", x + 18, y - 7, 2)
+        love.graphics.setLineWidth(1.5 * scale)
+        love.graphics.line(x + 18 * scale, y - 6 * scale, x + 24 * scale, y - 8 * scale)
+        love.graphics.circle("fill", x + 18 * scale, y - 7 * scale, 2 * scale)
     end
 
     -- Blanket under saddle
     if isOrc then
         -- Crude leather/fur blanket for orc
         love.graphics.setColor(clothMid[1], clothMid[2], clothMid[3], 1)
-        love.graphics.polygon("fill", x - 9, y - 3, x + 9, y - 3, x + 11, y + 5, x - 11, y + 5)
+        love.graphics.polygon("fill", x - 9 * scale, y - 3 * scale, x + 9 * scale, y - 3 * scale, x + 11 * scale, y + 5 * scale, x - 11 * scale, y + 5 * scale)
         -- Blood-red trim
         love.graphics.setColor(0.6, 0.2, 0.15, 0.9)
-        love.graphics.rectangle("fill", x - 9, y + 3, 18, 2)
+        love.graphics.rectangle("fill", x - 9 * scale, y + 3 * scale, 18 * scale, 2 * scale)
     else
         if self.isPaladin then
             love.graphics.setColor(0.92, 0.94, 0.98, 1)  -- White/silver blanket
         else
             love.graphics.setColor(clothMid[1], clothMid[2], clothMid[3], 1)  -- Dark cloth blanket
         end
-        love.graphics.polygon("fill", x - 10, y - 2, x + 10, y - 2, x + 12, y + 6, x - 12, y + 6)
+        love.graphics.polygon("fill", x - 10 * scale, y - 2 * scale, x + 10 * scale, y - 2 * scale, x + 12 * scale, y + 6 * scale, x - 12 * scale, y + 6 * scale)
         -- Blanket trim
         if self.isPaladin then
             love.graphics.setColor(holyGreen[1], holyGreen[2], holyGreen[3], 0.8)
         else
             love.graphics.setColor(steelMid[1], steelMid[2], steelMid[3], 1)
         end
-        love.graphics.rectangle("fill", x - 10, y + 4, 20, 2)
+        love.graphics.rectangle("fill", x - 10 * scale, y + 4 * scale, 20 * scale, 2 * scale)
     end
 
     -- Saddle
     love.graphics.setColor(leatherDark[1], leatherDark[2], leatherDark[3], 1)
-    love.graphics.ellipse("fill", x, y - 2, 8, 5)
+    love.graphics.ellipse("fill", x, y - 2 * scale, 8 * scale, 5 * scale)
     love.graphics.setColor(leatherMid[1], leatherMid[2], leatherMid[3], 0.5)
-    love.graphics.ellipse("fill", x - 2, y - 3, 4, 2)
+    love.graphics.ellipse("fill", x - 2 * scale, y - 3 * scale, 4 * scale, 2 * scale)
 
     -- Rider armor
     if isOrc then
         -- Orc raider: crude dark iron armor, green skin showing
         love.graphics.setColor(steelMid[1], steelMid[2], steelMid[3], 1)
-        love.graphics.rectangle("fill", x - 5, y - 14, 10, 12, 2)
+        love.graphics.rectangle("fill", x - 5 * scale, y - 14 * scale, 10 * scale, 12 * scale, 2 * scale)
         love.graphics.setColor(steelLight[1], steelLight[2], steelLight[3], 0.3)
-        love.graphics.rectangle("fill", x - 4, y - 13, 8, 3, 1)
+        love.graphics.rectangle("fill", x - 4 * scale, y - 13 * scale, 8 * scale, 3 * scale, 1 * scale)
         -- Spikes on shoulders
         love.graphics.setColor(steelDark[1], steelDark[2], steelDark[3], 1)
-        love.graphics.polygon("fill", x - 6, y - 12, x - 8, y - 17, x - 4, y - 12)
-        love.graphics.polygon("fill", x + 4, y - 12, x + 6, y - 17, x + 8, y - 12)
+        love.graphics.polygon("fill", x - 6 * scale, y - 12 * scale, x - 8 * scale, y - 17 * scale, x - 4 * scale, y - 12 * scale)
+        love.graphics.polygon("fill", x + 4 * scale, y - 12 * scale, x + 6 * scale, y - 17 * scale, x + 8 * scale, y - 12 * scale)
     elseif self.isPaladin then
         -- Silver plate armor with glow
         love.graphics.setColor(silverMid[1], silverMid[2], silverMid[3], 1)
-        love.graphics.rectangle("fill", x - 5, y - 14, 10, 12, 2)
+        love.graphics.rectangle("fill", x - 5 * scale, y - 14 * scale, 10 * scale, 12 * scale, 2 * scale)
         love.graphics.setColor(silverLight[1], silverLight[2], silverLight[3], 0.7)
-        love.graphics.rectangle("fill", x - 4, y - 13, 8, 4, 1)
+        love.graphics.rectangle("fill", x - 4 * scale, y - 13 * scale, 8 * scale, 4 * scale, 1 * scale)
         -- Holy symbol on chest
         love.graphics.setColor(holyGreen[1], holyGreen[2], holyGreen[3], 0.9)
-        love.graphics.circle("fill", x, y - 8, 3)
+        love.graphics.circle("fill", x, y - 8 * scale, 3 * scale)
         love.graphics.setColor(holyGreenGlow[1], holyGreenGlow[2], holyGreenGlow[3], 0.5)
-        love.graphics.circle("fill", x, y - 8, 4)
+        love.graphics.circle("fill", x, y - 8 * scale, 4 * scale)
     else
         -- Steel plate armor
         love.graphics.setColor(steelMid[1], steelMid[2], steelMid[3], 1)
-        love.graphics.rectangle("fill", x - 5, y - 14, 10, 12, 2)
+        love.graphics.rectangle("fill", x - 5 * scale, y - 14 * scale, 10 * scale, 12 * scale, 2 * scale)
         love.graphics.setColor(steelLight[1], steelLight[2], steelLight[3], 0.5)
-        love.graphics.rectangle("fill", x - 4, y - 13, 8, 4, 1)
+        love.graphics.rectangle("fill", x - 4 * scale, y - 13 * scale, 8 * scale, 4 * scale, 1 * scale)
     end
     love.graphics.setColor(steelDark[1], steelDark[2], steelDark[3], 1)
-    love.graphics.line(x, y - 14, x, y - 3)
+    love.graphics.line(x, y - 14 * scale, x, y - 3 * scale)
 
     -- Cape (no cape for orc)
     if not isOrc then
@@ -308,100 +319,129 @@ function Knight:draw()
         else
             love.graphics.setColor(clothMid[1], clothMid[2], clothMid[3], 1)  -- Dark cape
         end
-        love.graphics.polygon("fill", x - 4, y - 10, x - 12, y + 4, x - 2, y + 2)
+        love.graphics.polygon("fill", x - 4 * scale, y - 10 * scale, x - 12 * scale, y + 4 * scale, x - 2 * scale, y + 2 * scale)
         -- Cape highlight
         if self.isPaladin then
             love.graphics.setColor(holyGreen[1], holyGreen[2], holyGreen[3], 0.3)
         else
             love.graphics.setColor(0.45, 0.42, 0.48, 0.5)
         end
-        love.graphics.polygon("fill", x - 4, y - 10, x - 8, y, x - 3, y - 2)
+        love.graphics.polygon("fill", x - 4 * scale, y - 10 * scale, x - 8 * scale, y, x - 3 * scale, y - 2 * scale)
     end
 
     -- Head/helmet
     if isOrc then
         -- Orc head: green skin, tusks, crude helmet
         love.graphics.setColor(skin[1], skin[2], skin[3], 1)
-        love.graphics.ellipse("fill", x, y - 18, 5, 6)
+        love.graphics.ellipse("fill", x, y - 18 * scale, 5 * scale, 6 * scale)
         -- Tusks
         love.graphics.setColor(0.9, 0.88, 0.82, 1)
-        love.graphics.polygon("fill", x - 3, y - 14, x - 4, y - 10, x - 2, y - 13)
-        love.graphics.polygon("fill", x + 3, y - 14, x + 4, y - 10, x + 2, y - 13)
+        love.graphics.polygon("fill", x - 3 * scale, y - 14 * scale, x - 4 * scale, y - 10 * scale, x - 2 * scale, y - 13 * scale)
+        love.graphics.polygon("fill", x + 3 * scale, y - 14 * scale, x + 4 * scale, y - 10 * scale, x + 2 * scale, y - 13 * scale)
         -- Crude helmet
         love.graphics.setColor(steelMid[1], steelMid[2], steelMid[3], 1)
-        love.graphics.arc("fill", x, y - 19, 5, math.pi * 1.0, math.pi * 2.0)
+        love.graphics.arc("fill", x, y - 19 * scale, 5 * scale, math.pi * 1.0, math.pi * 2.0)
         -- Helmet spike
         love.graphics.setColor(steelDark[1], steelDark[2], steelDark[3], 1)
-        love.graphics.polygon("fill", x - 1, y - 23, x, y - 28, x + 1, y - 23)
+        love.graphics.polygon("fill", x - 1 * scale, y - 23 * scale, x, y - 28 * scale, x + 1 * scale, y - 23 * scale)
         -- Glowing eyes
         love.graphics.setColor(0.9, 0.3, 0.1, 1)
-        love.graphics.circle("fill", x - 2, y - 18, 1.2)
-        love.graphics.circle("fill", x + 2, y - 18, 1.2)
+        love.graphics.circle("fill", x - 2 * scale, y - 18 * scale, 1.2 * scale)
+        love.graphics.circle("fill", x + 2 * scale, y - 18 * scale, 1.2 * scale)
         love.graphics.setColor(1.0, 0.5, 0.2, 0.5)
-        love.graphics.circle("fill", x - 2, y - 18, 2)
-        love.graphics.circle("fill", x + 2, y - 18, 2)
+        love.graphics.circle("fill", x - 2 * scale, y - 18 * scale, 2 * scale)
+        love.graphics.circle("fill", x + 2 * scale, y - 18 * scale, 2 * scale)
     elseif self.isPaladin then
         love.graphics.setColor(silverMid[1], silverMid[2], silverMid[3], 1)
-        love.graphics.ellipse("fill", x, y - 18, 5, 6)
+        love.graphics.ellipse("fill", x, y - 18 * scale, 5 * scale, 6 * scale)
         love.graphics.setColor(silverLight[1], silverLight[2], silverLight[3], 0.7)
-        love.graphics.arc("fill", x, y - 19, 4, math.pi, math.pi * 1.8)
+        love.graphics.arc("fill", x, y - 19 * scale, 4 * scale, math.pi, math.pi * 1.8)
     else
         love.graphics.setColor(steelMid[1], steelMid[2], steelMid[3], 1)
-        love.graphics.ellipse("fill", x, y - 18, 5, 6)
+        love.graphics.ellipse("fill", x, y - 18 * scale, 5 * scale, 6 * scale)
         love.graphics.setColor(steelLight[1], steelLight[2], steelLight[3], 0.5)
-        love.graphics.arc("fill", x, y - 19, 4, math.pi, math.pi * 1.8)
+        love.graphics.arc("fill", x, y - 19 * scale, 4 * scale, math.pi, math.pi * 1.8)
     end
 
     -- Helmet plume (not for orc - they have spike)
     if not isOrc then
         if self.isPaladin then
             love.graphics.setColor(0.95, 0.97, 1.0, 1)  -- White plume
-            love.graphics.polygon("fill", x - 2, y - 24, x + 4, y - 28, x + 2, y - 18)
+            love.graphics.polygon("fill", x - 2 * scale, y - 24 * scale, x + 4 * scale, y - 28 * scale, x + 2 * scale, y - 18 * scale)
             -- Glowing effect on plume
             love.graphics.setColor(holyGreen[1], holyGreen[2], holyGreen[3], 0.4)
-            love.graphics.polygon("fill", x - 1, y - 23, x + 3, y - 26, x + 1, y - 19)
+            love.graphics.polygon("fill", x - 1 * scale, y - 23 * scale, x + 3 * scale, y - 26 * scale, x + 1 * scale, y - 19 * scale)
         else
             love.graphics.setColor(0.5, 0.15, 0.15, 1)  -- Dark red plume
-            love.graphics.polygon("fill", x - 2, y - 24, x + 4, y - 28, x + 2, y - 18)
+            love.graphics.polygon("fill", x - 2 * scale, y - 24 * scale, x + 4 * scale, y - 28 * scale, x + 2 * scale, y - 18 * scale)
         end
     end
 
-    -- Weapon: Lance (human) or Axe (orc)
+    -- Weapon: Lance (human) or Axe (orc) with attack animation
+    -- Attack thrust/swing offset
+    local weaponOffsetX = attackAnim * 8 * scale  -- Thrust forward during attack
+    local weaponOffsetY = -attackAnim * 4 * scale  -- Slightly up during attack
+
     if isOrc then
-        -- Brutal war axe
+        -- Brutal war axe (swings down during attack)
+        local axeSwing = attackAnim * 0.5  -- Rotation during attack
         love.graphics.setColor(leatherMid[1], leatherMid[2], leatherMid[3], 1)
-        love.graphics.setLineWidth(3)
-        love.graphics.line(x + 8, y - 6, x + 16, y - 24)
+        love.graphics.setLineWidth(3 * scale)
+        -- Axe handle
+        local handleStartX = x + 8 * scale
+        local handleStartY = y - 6 * scale
+        local handleEndX = x + 16 * scale + weaponOffsetX
+        local handleEndY = y - 24 * scale + weaponOffsetY + axeSwing * 10 * scale
+        love.graphics.line(handleStartX, handleStartY, handleEndX, handleEndY)
         -- Axe head
         love.graphics.setColor(steelMid[1], steelMid[2], steelMid[3], 1)
-        love.graphics.polygon("fill", x + 14, y - 22, x + 22, y - 28, x + 20, y - 20, x + 16, y - 18)
+        love.graphics.polygon("fill",
+            handleEndX - 2 * scale, handleEndY + 2 * scale,
+            handleEndX + 6 * scale, handleEndY - 6 * scale,
+            handleEndX + 4 * scale, handleEndY + 2 * scale,
+            handleEndX, handleEndY + 4 * scale)
         love.graphics.setColor(steelLight[1], steelLight[2], steelLight[3], 0.5)
-        love.graphics.polygon("fill", x + 15, y - 22, x + 19, y - 26, x + 18, y - 21)
+        love.graphics.polygon("fill",
+            handleEndX - 1 * scale, handleEndY,
+            handleEndX + 3 * scale, handleEndY - 4 * scale,
+            handleEndX + 2 * scale, handleEndY + 1 * scale)
         -- Fel glow on axe (optional)
         if accentGlow then
-            love.graphics.setColor(accentGlow[1], accentGlow[2], accentGlow[3], 0.3)
-            love.graphics.circle("fill", x + 18, y - 24, 4)
+            love.graphics.setColor(accentGlow[1], accentGlow[2], accentGlow[3], 0.3 + attackAnim * 0.3)
+            love.graphics.circle("fill", handleEndX + 2 * scale, handleEndY - 2 * scale, 4 * scale)
         end
     else
-        -- Lance
+        -- Lance (thrusts forward during attack)
         love.graphics.setColor(leatherMid[1], leatherMid[2], leatherMid[3], 1)
-        love.graphics.setLineWidth(3)
-        love.graphics.line(x + 8, y - 8, x + 20, y - 30)
+        love.graphics.setLineWidth(3 * scale)
+        local lanceStartX = x + 8 * scale
+        local lanceStartY = y - 8 * scale
+        local lanceEndX = x + 20 * scale + weaponOffsetX
+        local lanceEndY = y - 30 * scale + weaponOffsetY
+        love.graphics.line(lanceStartX, lanceStartY, lanceEndX, lanceEndY)
         -- Lance tip
         if self.isPaladin then
             love.graphics.setColor(silverLight[1], silverLight[2], silverLight[3], 1)
-            love.graphics.polygon("fill", x + 19, y - 30, x + 21, y - 30, x + 20, y - 36)
-            -- Holy glow on lance tip
-            love.graphics.setColor(holyGreen[1], holyGreen[2], holyGreen[3], 0.5)
-            love.graphics.circle("fill", x + 20, y - 33, 3)
+            love.graphics.polygon("fill",
+                lanceEndX - 1 * scale, lanceEndY,
+                lanceEndX + 1 * scale, lanceEndY,
+                lanceEndX, lanceEndY - 6 * scale)
+            -- Holy glow on lance tip (brighter during attack)
+            love.graphics.setColor(holyGreen[1], holyGreen[2], holyGreen[3], 0.5 + attackAnim * 0.4)
+            love.graphics.circle("fill", lanceEndX, lanceEndY - 3 * scale, (3 + attackAnim * 2) * scale)
         else
             love.graphics.setColor(steelLight[1], steelLight[2], steelLight[3], 1)
-            love.graphics.polygon("fill", x + 19, y - 30, x + 21, y - 30, x + 20, y - 36)
+            love.graphics.polygon("fill",
+                lanceEndX - 1 * scale, lanceEndY,
+                lanceEndX + 1 * scale, lanceEndY,
+                lanceEndX, lanceEndY - 6 * scale)
         end
         -- Lance bands
         love.graphics.setColor(steelMid[1], steelMid[2], steelMid[3], 1)
-        love.graphics.setLineWidth(2)
-        love.graphics.line(x + 12, y - 16, x + 14, y - 18)
+        love.graphics.setLineWidth(2 * scale)
+        local bandX = lanceStartX + (lanceEndX - lanceStartX) * 0.4
+        local bandY = lanceStartY + (lanceEndY - lanceStartY) * 0.4
+        love.graphics.line(bandX - 1 * scale, bandY + 1 * scale, bandX + 1 * scale, bandY - 1 * scale)
     end
 
     love.graphics.setLineWidth(1)

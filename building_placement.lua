@@ -7,6 +7,10 @@
 local BuildingPlacement = {}
 BuildingPlacement.__index = BuildingPlacement
 
+-- Audio (optional)
+local Audio
+pcall(function() Audio = require("audio") end)
+
 -- Building module references (lazy-loaded to avoid circular dependencies)
 local buildingModules = {}
 
@@ -179,8 +183,13 @@ function BuildingPlacement:mousepressed(x, y, button, map)
         local gridX, gridY = self.gridX, self.gridY
         self:cancel()
         return true, peon, buildingType, gridX, gridY
+    elseif button == 1 and not self.valid and map:isInViewport(x, y) then
+        -- Left click on invalid (red) spot - play alert
+        if Audio and Audio.playAlert then Audio.playAlert() end
+        return true
     elseif button == 2 then
         -- Right click - cancel placement
+        if Audio and Audio.playAlert then Audio.playAlert() end
         self:cancel()
         return true
     end
@@ -193,6 +202,7 @@ function BuildingPlacement:keypressed(key)
     if not self.active then return false end
 
     if key == "escape" then
+        if Audio and Audio.playAlert then Audio.playAlert() end
         self:cancel()
         return true
     end

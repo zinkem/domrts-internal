@@ -22,6 +22,7 @@ function Footman.new(params)
     setmetatable(self, Footman)
 
     self.radius = Footman.RADIUS
+    self.clickRadius = Footman.RADIUS * 1.414  -- Match visual scale for easier selection
     self.speed = Footman.SPEED
     self.type = "footman"
 
@@ -37,6 +38,17 @@ end
 
 function Footman:draw()
     local x, y = self:getScreenPos()
+
+    -- Visual scale factor (sqrt(2) ≈ 1.414 for 2x surface area)
+    local scale = 1.414
+
+    -- Attack animation: sword swing angle (0 to ~1.2 radians during attack)
+    local swingAngle = 0
+    if self.attackAnimTimer and self.attackAnimTimer > 0 then
+        -- Swing from raised (0.8 rad) to down (-0.4 rad) over 0.3 seconds
+        local swingProgress = 1 - (self.attackAnimTimer / 0.3)  -- 0 to 1
+        swingAngle = 0.8 - swingProgress * 1.2  -- 0.8 to -0.4
+    end
 
     -- Check if this is an enemy (orc) unit
     local isOrc = Teams and self.team == Teams.ENEMY
@@ -100,163 +112,197 @@ function Footman:draw()
     -- Fel glow for orcs
     if isOrc and accentGlow then
         love.graphics.setColor(accentGlow[1], accentGlow[2], accentGlow[3], 0.1)
-        love.graphics.circle("fill", x, y, 18)
+        love.graphics.circle("fill", x, y, 18 * scale)
     end
 
     -- Shadow
     love.graphics.setColor(0, 0, 0, 0.35)
-    love.graphics.ellipse("fill", x, y + 10, 12, 4)
+    love.graphics.ellipse("fill", x, y + 10 * scale, 12 * scale, 4 * scale)
 
     -- Feet (leather boots)
     love.graphics.setColor(leatherDark[1], leatherDark[2], leatherDark[3], 1)
-    love.graphics.ellipse("fill", x - 5, y + 8, 4, 3)
-    love.graphics.ellipse("fill", x + 5, y + 8, 4, 3)
+    love.graphics.ellipse("fill", x - 5 * scale, y + 8 * scale, 4 * scale, 3 * scale)
+    love.graphics.ellipse("fill", x + 5 * scale, y + 8 * scale, 4 * scale, 3 * scale)
     love.graphics.setColor(leatherMid[1], leatherMid[2], leatherMid[3], 1)
-    love.graphics.ellipse("line", x - 5, y + 8, 4, 3)
-    love.graphics.ellipse("line", x + 5, y + 8, 4, 3)
+    love.graphics.ellipse("line", x - 5 * scale, y + 8 * scale, 4 * scale, 3 * scale)
+    love.graphics.ellipse("line", x + 5 * scale, y + 8 * scale, 4 * scale, 3 * scale)
 
     -- Legs (dark cloth pants)
     love.graphics.setColor(clothMid[1], clothMid[2], clothMid[3], 1)
-    love.graphics.rectangle("fill", x - 6, y + 1, 5, 9, 1)
-    love.graphics.rectangle("fill", x + 1, y + 1, 5, 9, 1)
+    love.graphics.rectangle("fill", x - 6 * scale, y + 1 * scale, 5 * scale, 9 * scale, 1 * scale)
+    love.graphics.rectangle("fill", x + 1 * scale, y + 1 * scale, 5 * scale, 9 * scale, 1 * scale)
     -- Fabric highlight
     love.graphics.setColor(clothLight[1], clothLight[2], clothLight[3], 0.5)
-    love.graphics.rectangle("fill", x - 5, y + 2, 2, 7, 1)
+    love.graphics.rectangle("fill", x - 5 * scale, y + 2 * scale, 2 * scale, 7 * scale, 1 * scale)
 
     -- Shield on left arm (steel kite shield)
     love.graphics.setColor(steelDark[1], steelDark[2], steelDark[3], 1)
-    love.graphics.ellipse("fill", x - 12, y - 2, 7, 11)
+    love.graphics.ellipse("fill", x - 12 * scale, y - 2 * scale, 7 * scale, 11 * scale)
     love.graphics.setColor(steelMid[1], steelMid[2], steelMid[3], 1)
-    love.graphics.setLineWidth(2)
-    love.graphics.ellipse("line", x - 12, y - 2, 7, 11)
+    love.graphics.setLineWidth(2 * scale)
+    love.graphics.ellipse("line", x - 12 * scale, y - 2 * scale, 7 * scale, 11 * scale)
     -- Shield design (cross)
     love.graphics.setColor(leatherMid[1], leatherMid[2], leatherMid[3], 1)
-    love.graphics.rectangle("fill", x - 13, y - 6, 2, 10)
-    love.graphics.rectangle("fill", x - 16, y - 3, 8, 2)
+    love.graphics.rectangle("fill", x - 13 * scale, y - 6 * scale, 2 * scale, 10 * scale)
+    love.graphics.rectangle("fill", x - 16 * scale, y - 3 * scale, 8 * scale, 2 * scale)
     love.graphics.setColor(steelLight[1], steelLight[2], steelLight[3], 1)
-    love.graphics.circle("fill", x - 12, y - 2, 2)
+    love.graphics.circle("fill", x - 12 * scale, y - 2 * scale, 2 * scale)
     -- Shield highlight
     love.graphics.setColor(0.8, 0.82, 0.85, 0.3)
-    love.graphics.arc("fill", x - 13, y - 4, 5, math.pi * 1.2, math.pi * 1.7)
+    love.graphics.arc("fill", x - 13 * scale, y - 4 * scale, 5 * scale, math.pi * 1.2, math.pi * 1.7)
 
     -- Body (steel chainmail over cloth)
     love.graphics.setColor(clothDark[1], clothDark[2], clothDark[3], 1)
-    love.graphics.rectangle("fill", x - 8, y - 8, 16, 12, 2)
+    love.graphics.rectangle("fill", x - 8 * scale, y - 8 * scale, 16 * scale, 12 * scale, 2 * scale)
     -- Steel chainmail
     love.graphics.setColor(steelMid[1], steelMid[2], steelMid[3], 1)
-    love.graphics.rectangle("fill", x - 6, y - 7, 12, 8, 2)
+    love.graphics.rectangle("fill", x - 6 * scale, y - 7 * scale, 12 * scale, 8 * scale, 2 * scale)
     -- Armor detail (chainmail texture)
     love.graphics.setColor(steelLight[1], steelLight[2], steelLight[3], 0.4)
-    love.graphics.rectangle("fill", x - 5, y - 6, 10, 2, 1)
+    love.graphics.rectangle("fill", x - 5 * scale, y - 6 * scale, 10 * scale, 2 * scale, 1 * scale)
     love.graphics.setColor(steelDark[1], steelDark[2], steelDark[3], 1)
-    love.graphics.line(x, y - 7, x, y + 1)
+    love.graphics.line(x, y - 7 * scale, x, y + 1 * scale)
 
     -- Belt (leather with iron buckle)
     love.graphics.setColor(leatherDark[1], leatherDark[2], leatherDark[3], 1)
-    love.graphics.rectangle("fill", x - 7, y, 14, 3)
+    love.graphics.rectangle("fill", x - 7 * scale, y, 14 * scale, 3 * scale)
     love.graphics.setColor(steelMid[1], steelMid[2], steelMid[3], 1)
-    love.graphics.rectangle("fill", x - 2, y, 4, 3)  -- Buckle
+    love.graphics.rectangle("fill", x - 2 * scale, y, 4 * scale, 3 * scale)  -- Buckle
     love.graphics.setColor(steelDark[1], steelDark[2], steelDark[3], 1)
-    love.graphics.rectangle("fill", x - 1, y + 0.5, 2, 2)  -- Buckle center
+    love.graphics.rectangle("fill", x - 1 * scale, y + 0.5 * scale, 2 * scale, 2 * scale)  -- Buckle center
 
     -- Shoulder pauldron (steel)
     love.graphics.setColor(steelMid[1], steelMid[2], steelMid[3], 1)
-    love.graphics.ellipse("fill", x - 8, y - 6, 4, 3)
+    love.graphics.ellipse("fill", x - 8 * scale, y - 6 * scale, 4 * scale, 3 * scale)
     love.graphics.setColor(steelLight[1], steelLight[2], steelLight[3], 0.5)
-    love.graphics.arc("fill", x - 8, y - 7, 3, math.pi, math.pi * 1.5)
+    love.graphics.arc("fill", x - 8 * scale, y - 7 * scale, 3 * scale, math.pi, math.pi * 1.5)
 
-    -- Right arm holding sword
+    -- Right arm holding sword (with swing animation)
     love.graphics.setColor(steelMid[1], steelMid[2], steelMid[3], 1)
-    love.graphics.ellipse("fill", x + 8, y - 5, 4, 3)  -- Shoulder
+    love.graphics.ellipse("fill", x + 8 * scale, y - 5 * scale, 4 * scale, 3 * scale)  -- Shoulder
+
+    -- Arm pivot point for swing
+    local armPivotX = x + 8 * scale
+    local armPivotY = y - 2 * scale
+
+    -- Calculate arm and sword positions based on swing
+    local armEndX = armPivotX + math.sin(swingAngle) * 8 * scale
+    local armEndY = armPivotY + math.cos(swingAngle) * 8 * scale
+
+    -- Arm
     love.graphics.setColor(skin[1], skin[2], skin[3], 1)
-    love.graphics.rectangle("fill", x + 6, y - 2, 5, 8, 1)  -- Arm
-    -- Leather bracer
+    love.graphics.setLineWidth(5 * scale)
+    love.graphics.line(armPivotX, armPivotY, armEndX, armEndY)
+
+    -- Leather bracer on arm
+    local bracerX = armPivotX + math.sin(swingAngle) * 4 * scale
+    local bracerY = armPivotY + math.cos(swingAngle) * 4 * scale
     love.graphics.setColor(leatherMid[1], leatherMid[2], leatherMid[3], 1)
-    love.graphics.rectangle("fill", x + 6, y + 2, 5, 3, 1)
+    love.graphics.setLineWidth(6 * scale)
+    love.graphics.line(bracerX - math.sin(swingAngle) * 1.5 * scale,
+                       bracerY - math.cos(swingAngle) * 1.5 * scale,
+                       bracerX + math.sin(swingAngle) * 1.5 * scale,
+                       bracerY + math.cos(swingAngle) * 1.5 * scale)
 
-    -- Hand
+    -- Hand at end of arm
     love.graphics.setColor(skin[1], skin[2], skin[3], 1)
-    love.graphics.circle("fill", x + 9, y + 6, 3)
+    love.graphics.circle("fill", armEndX, armEndY, 3 * scale)
 
-    -- Sword (straight longsword)
+    -- Sword extends from hand (with swing rotation)
+    local swordLength = 20 * scale
+    local swordEndX = armEndX + math.sin(swingAngle) * swordLength
+    local swordEndY = armEndY + math.cos(swingAngle) * swordLength
+
+    -- Sword blade
     love.graphics.setColor(steelLight[1], steelLight[2], steelLight[3], 1)
-    love.graphics.setLineWidth(3)
-    love.graphics.line(x + 9, y + 4, x + 9, y - 16)
+    love.graphics.setLineWidth(3 * scale)
+    love.graphics.line(armEndX, armEndY, swordEndX, swordEndY)
+    -- Sword highlight
     love.graphics.setColor(0.85, 0.87, 0.9, 0.6)
-    love.graphics.setLineWidth(1)
-    love.graphics.line(x + 8, y + 2, x + 8, y - 14)
-    -- Steel hilt
+    love.graphics.setLineWidth(1 * scale)
+    local highlightOffsetX = math.cos(swingAngle) * 1 * scale
+    local highlightOffsetY = -math.sin(swingAngle) * 1 * scale
+    love.graphics.line(armEndX + highlightOffsetX, armEndY + highlightOffsetY,
+                       swordEndX + highlightOffsetX, swordEndY + highlightOffsetY)
+
+    -- Sword hilt
     love.graphics.setColor(leatherDark[1], leatherDark[2], leatherDark[3], 1)
-    love.graphics.setLineWidth(2)
-    love.graphics.line(x + 9, y + 4, x + 9, y + 7)
+    love.graphics.setLineWidth(2 * scale)
+    local hiltStartX = armEndX - math.sin(swingAngle) * 3 * scale
+    local hiltStartY = armEndY - math.cos(swingAngle) * 3 * scale
+    love.graphics.line(armEndX, armEndY, hiltStartX, hiltStartY)
+
+    -- Crossguard (perpendicular to sword)
     love.graphics.setColor(steelMid[1], steelMid[2], steelMid[3], 1)
-    love.graphics.line(x + 5, y + 4, x + 13, y + 4)  -- Crossguard
+    local crossX = math.cos(swingAngle) * 4 * scale
+    local crossY = -math.sin(swingAngle) * 4 * scale
+    love.graphics.line(armEndX - crossX, armEndY - crossY, armEndX + crossX, armEndY + crossY)
 
     -- Head
     love.graphics.setColor(skin[1], skin[2], skin[3], 1)
-    love.graphics.ellipse("fill", x, y - 12, 6, 7)
+    love.graphics.ellipse("fill", x, y - 12 * scale, 6 * scale, 7 * scale)
 
     if isOrc then
         -- Orc features: no hair showing, just helmet and tusks
         -- Darker green shadow on face
         love.graphics.setColor(skinShadow[1], skinShadow[2], skinShadow[3], 0.5)
-        love.graphics.ellipse("fill", x + 2, y - 10, 3, 4)
+        love.graphics.ellipse("fill", x + 2 * scale, y - 10 * scale, 3 * scale, 4 * scale)
 
         -- Tusks (iconic orc feature)
         love.graphics.setColor(0.9, 0.88, 0.82, 1)  -- Ivory color
-        love.graphics.polygon("fill", x - 4, y - 8, x - 5, y - 4, x - 3, y - 7)
-        love.graphics.polygon("fill", x + 4, y - 8, x + 5, y - 4, x + 3, y - 7)
+        love.graphics.polygon("fill", x - 4 * scale, y - 8 * scale, x - 5 * scale, y - 4 * scale, x - 3 * scale, y - 7 * scale)
+        love.graphics.polygon("fill", x + 4 * scale, y - 8 * scale, x + 5 * scale, y - 4 * scale, x + 3 * scale, y - 7 * scale)
 
         -- Crude iron helmet (more brutal looking)
         love.graphics.setColor(steelMid[1], steelMid[2], steelMid[3], 1)
-        love.graphics.arc("fill", x, y - 14, 7, math.pi * 1.0, math.pi * 2.0)
+        love.graphics.arc("fill", x, y - 14 * scale, 7 * scale, math.pi * 1.0, math.pi * 2.0)
         love.graphics.setColor(steelLight[1], steelLight[2], steelLight[3], 0.4)
-        love.graphics.arc("fill", x - 2, y - 15, 4, math.pi * 1.2, math.pi * 1.6)
+        love.graphics.arc("fill", x - 2 * scale, y - 15 * scale, 4 * scale, math.pi * 1.2, math.pi * 1.6)
         -- Helmet spikes
         love.graphics.setColor(steelDark[1], steelDark[2], steelDark[3], 1)
-        love.graphics.polygon("fill", x - 5, y - 18, x - 4, y - 22, x - 3, y - 18)
-        love.graphics.polygon("fill", x + 3, y - 18, x + 4, y - 22, x + 5, y - 18)
+        love.graphics.polygon("fill", x - 5 * scale, y - 18 * scale, x - 4 * scale, y - 22 * scale, x - 3 * scale, y - 18 * scale)
+        love.graphics.polygon("fill", x + 3 * scale, y - 18 * scale, x + 4 * scale, y - 22 * scale, x + 5 * scale, y - 18 * scale)
         -- Face guard
         love.graphics.setColor(steelDark[1], steelDark[2], steelDark[3], 1)
     else
         -- Human features: hair and steel helmet
         -- Dark brown hair
         love.graphics.setColor(0.25, 0.18, 0.12, 1)
-        love.graphics.ellipse("fill", x, y - 15, 7, 5)
+        love.graphics.ellipse("fill", x, y - 15 * scale, 7 * scale, 5 * scale)
         -- Hair detail
         love.graphics.setColor(0.32, 0.24, 0.18, 1)
-        love.graphics.ellipse("fill", x + 4, y - 14, 4, 3)
-        love.graphics.ellipse("fill", x - 3, y - 16, 3, 2)
+        love.graphics.ellipse("fill", x + 4 * scale, y - 14 * scale, 4 * scale, 3 * scale)
+        love.graphics.ellipse("fill", x - 3 * scale, y - 16 * scale, 3 * scale, 2 * scale)
 
         -- Steel helmet (open face)
         love.graphics.setColor(steelMid[1], steelMid[2], steelMid[3], 1)
-        love.graphics.arc("fill", x, y - 14, 7, math.pi * 1.1, math.pi * 1.9)
+        love.graphics.arc("fill", x, y - 14 * scale, 7 * scale, math.pi * 1.1, math.pi * 1.9)
         love.graphics.setColor(steelLight[1], steelLight[2], steelLight[3], 0.6)
-        love.graphics.arc("fill", x - 2, y - 15, 5, math.pi * 1.2, math.pi * 1.6)
+        love.graphics.arc("fill", x - 2 * scale, y - 15 * scale, 5 * scale, math.pi * 1.2, math.pi * 1.6)
         -- Nose guard
         love.graphics.setColor(steelDark[1], steelDark[2], steelDark[3], 1)
-        love.graphics.rectangle("fill", x - 1, y - 15, 2, 5)
+        love.graphics.rectangle("fill", x - 1 * scale, y - 15 * scale, 2 * scale, 5 * scale)
     end
 
     -- Eyes
     if isOrc and accentGlow then
         -- Glowing red/orange eyes for orcs
         love.graphics.setColor(0.9, 0.3, 0.1, 1)
-        love.graphics.circle("fill", x - 2, y - 12, 1.5)
-        love.graphics.circle("fill", x + 2, y - 12, 1.5)
+        love.graphics.circle("fill", x - 2 * scale, y - 12 * scale, 1.5 * scale)
+        love.graphics.circle("fill", x + 2 * scale, y - 12 * scale, 1.5 * scale)
         -- Eye glow
         love.graphics.setColor(1.0, 0.5, 0.2, 0.4)
-        love.graphics.circle("fill", x - 2, y - 12, 2.5)
-        love.graphics.circle("fill", x + 2, y - 12, 2.5)
+        love.graphics.circle("fill", x - 2 * scale, y - 12 * scale, 2.5 * scale)
+        love.graphics.circle("fill", x + 2 * scale, y - 12 * scale, 2.5 * scale)
     else
         love.graphics.setColor(0.15, 0.1, 0.05, 1)
-        love.graphics.circle("fill", x - 2, y - 12, 1.5)
-        love.graphics.circle("fill", x + 2, y - 12, 1.5)
+        love.graphics.circle("fill", x - 2 * scale, y - 12 * scale, 1.5 * scale)
+        love.graphics.circle("fill", x + 2 * scale, y - 12 * scale, 1.5 * scale)
     end
 
     -- Cloth tabard from belt
     love.graphics.setColor(clothMid[1], clothMid[2], clothMid[3], 0.9)
-    love.graphics.polygon("fill", x - 2, y + 3, x + 2, y + 3, x + 3, y + 10, x - 3, y + 10)
+    love.graphics.polygon("fill", x - 2 * scale, y + 3 * scale, x + 2 * scale, y + 3 * scale, x + 3 * scale, y + 10 * scale, x - 3 * scale, y + 10 * scale)
 
     love.graphics.setLineWidth(1)
     love.graphics.setColor(1, 1, 1, 1)

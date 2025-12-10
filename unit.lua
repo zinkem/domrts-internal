@@ -14,6 +14,10 @@ pcall(function() Teams = require("teams") end)
 local Effects
 pcall(function() Effects = require("effects") end)
 
+-- Audio (optional)
+local Audio
+pcall(function() Audio = require("audio") end)
+
 local Unit = {}
 Unit.__index = Unit
 
@@ -28,6 +32,7 @@ function Unit.new(params)
     self.worldY = params.worldY or 0
     self.map = params.map
     self.radius = Unit.RADIUS
+    self.clickRadius = nil  -- Optional: larger click target. Falls back to radius if nil
     self.speed = Unit.SPEED
     self.selected = false
     self.type = "unit"
@@ -56,7 +61,11 @@ function Unit.new(params)
     
     -- Visual
     self.flashTimer = 0
-    
+
+    -- Animation
+    self.animTimer = 0
+    self.attackAnimTimer = 0  -- Separate timer for attack swing animation
+
     return self
 end
 
@@ -67,11 +76,17 @@ function Unit:getScreenPos()
     return self.worldX, self.worldY
 end
 
+-- Get the effective click radius (for selection), falls back to collision radius
+function Unit:getClickRadius()
+    return self.clickRadius or self.radius
+end
+
 function Unit:containsPoint(screenX, screenY)
     local x, y = self:getScreenPos()
     local dx = screenX - x
     local dy = screenY - y
-    return (dx * dx + dy * dy) <= (self.radius + 4) * (self.radius + 4)
+    local clickR = self:getClickRadius() + 4  -- +4 for some selection tolerance
+    return (dx * dx + dy * dy) <= clickR * clickR
 end
 
 function Unit:isInBox(x1, y1, x2, y2)
@@ -301,12 +316,18 @@ function Unit:updateAttacking(dt, buildings, allUnits, allBuildings)
                 target:takeDamage(self.damage)
                 self.attackCooldown = 1.0 / self.attackSpeed
                 self.lastAttackHit = true  -- Flag for animation
-                
+                self.attackAnimTimer = 0.3  -- Trigger swing animation (0.3 second duration)
+
+                -- Play hit sound
+                if Audio and Audio.playHit then
+                    Audio.playHit()
+                end
+
                 -- Visual effects
                 if Effects then
                     -- Damage flash on target
                     Effects.damageFlash(target)
-                    
+
                     -- Blood particles
                     local tx = target.worldX or (target.getWorldCenter and select(1, target:getWorldCenter()))
                     local ty = target.worldY or (target.getWorldCenter and select(2, target:getWorldCenter()))
@@ -340,25 +361,31 @@ function Unit:updateAttacking(dt, buildings, allUnits, allBuildings)
             self.targetY = ty
             self.path = Pathfinding.findPath(self.worldX, self.worldY, tx, ty, self.radius)
             self.currentWaypoint = 1
+
+            -- If no path found, play alert and stop movement
+            if not self.path then
+                if Audio and Audio.playAlert then Audio.playAlert() end
+                self.moveTarget = nil
+                self.state = "idle"
+                return
+            end
         end
-        
+
         -- Move along path
         if self.path and self.currentWaypoint <= #self.path then
             local wp = self.path[self.currentWaypoint]
-            
+
             -- Check if reached waypoint
             if Pathfinding.reachedWaypoint(self.worldX, self.worldY, self.path, self.currentWaypoint, 8) then
                 self.currentWaypoint = self.currentWaypoint + 1
             end
-            
+
             if self.currentWaypoint <= #self.path then
                 wp = self.path[self.currentWaypoint]
                 self:moveToward(wp.x, wp.y, dt, allUnits)
             end
-        else
-            -- No path or reached end - move directly toward target
-            self:moveToward(tx, ty, dt, allUnits)
         end
+        -- No fallback movement - units stop if no valid path
     end
 end
 
@@ -445,6 +472,12 @@ function Unit:update(dt, buildings, allUnits, allBuildings)
     -- Update flash timer
     if self.flashTimer and self.flashTimer > 0 then
         self.flashTimer = self.flashTimer - dt
+    end
+
+    -- Update animation timers
+    self.animTimer = (self.animTimer or 0) + dt
+    if self.attackAnimTimer and self.attackAnimTimer > 0 then
+        self.attackAnimTimer = self.attackAnimTimer - dt
     end
     
     -- Stuck detection - track position history

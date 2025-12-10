@@ -12,6 +12,7 @@ local musicVolume = 0.5
 
 -- Sound effects
 local hitSounds = {}
+local alertSound = nil
 local soundVolume = 0.7
 
 -- Initialize audio system
@@ -53,7 +54,16 @@ function Audio.init()
             table.insert(hitSounds, source)
         end
     end
-    
+
+    -- Load alert sound
+    local success, source = pcall(function()
+        return love.audio.newSource("sfx/alert2.wav", "static")
+    end)
+    if success and source then
+        source:setVolume(soundVolume)
+        alertSound = source
+    end
+
     -- Seed random
     math.randomseed(os.time())
 end
@@ -107,14 +117,24 @@ end
 function Audio.playHit()
     if #hitSounds == 0 then return end
     if not Game.settings.soundEnabled then return end
-    
+
     local index = math.random(1, #hitSounds)
     local sound = hitSounds[index]
-    
+
     -- Clone and play so multiple can overlap
     local clone = sound:clone()
     clone:setVolume(soundVolume * (0.8 + math.random() * 0.4))  -- Slight volume variation
     clone:setPitch(0.9 + math.random() * 0.2)  -- Slight pitch variation
+    clone:play()
+end
+
+-- Play alert sound (for errors, invalid actions)
+function Audio.playAlert()
+    if not alertSound then return end
+    if not Game.settings.soundEnabled then return end
+
+    local clone = alertSound:clone()
+    clone:setVolume(soundVolume)
     clone:play()
 end
 

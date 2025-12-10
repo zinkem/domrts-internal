@@ -3351,8 +3351,13 @@ function Gameplay.keypressed(key)
     -- Check command button hotkeys
     local upperKey = string.upper(key)
     for _, btn in ipairs(commandButtons) do
-        if btn.hotkey == upperKey and btn.enabled and btn.action then
-            btn.action()
+        if btn.hotkey == upperKey then
+            if btn.enabled and btn.action then
+                btn.action()
+            else
+                -- Button disabled (supply limit, insufficient resources, etc.)
+                if M.Audio and M.Audio.playAlert then M.Audio.playAlert() end
+            end
             return
         end
     end
@@ -3592,13 +3597,16 @@ function Gameplay.mousereleased(x, y, button)
     -- Check command button clicks first
     if button == 1 then
         for _, btn in ipairs(commandButtons) do
-            if btn.enabled and btn.x and btn.hovered then
+            if btn.x and btn.hovered then
                 if x >= btn.x and x <= btn.x + btn.w and
                    y >= btn.y and y <= btn.y + btn.h then
-                    if btn.action then
+                    if btn.enabled and btn.action then
                         btn.action()
-                        return
+                    else
+                        -- Button disabled (supply limit, insufficient resources, etc.)
+                        if M.Audio and M.Audio.playAlert then M.Audio.playAlert() end
                     end
+                    return
                 end
             end
         end
