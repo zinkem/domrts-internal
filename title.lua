@@ -983,7 +983,7 @@ function Title.load()
         },
         {
             text = "Exit Game",
-            x = btnX, y = btnStartY + btnSpacing * 4 + 20, w = btnW, h = btnH,
+            x = btnX, y = panelY + panelH - btnH - 30, w = btnW, h = btnH,
             action = function() love.event.quit() end
         }
     }

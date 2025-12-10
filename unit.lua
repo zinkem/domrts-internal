@@ -58,7 +58,8 @@ function Unit.new(params)
     self.targetY = nil
     self.path = nil
     self.currentWaypoint = 1
-    
+    self.repathCooldown = 0  -- Throttle how often we recompute paths
+
     -- Visual
     self.flashTimer = 0
 
@@ -356,11 +357,12 @@ function Unit:updateAttacking(dt, buildings, allUnits, allBuildings)
             if targetMoved then needNewPath = true end
         end
         
-        if needNewPath then
+        if needNewPath and self.repathCooldown <= 0 then
             self.targetX = tx
             self.targetY = ty
             self.path = Pathfinding.findPath(self.worldX, self.worldY, tx, ty, self.radius)
             self.currentWaypoint = 1
+            self.repathCooldown = 0.5  -- Don't repath again for 0.5 seconds
 
             -- If no path found, play alert and stop movement
             if not self.path then
@@ -474,6 +476,11 @@ function Unit:update(dt, buildings, allUnits, allBuildings)
         self.flashTimer = self.flashTimer - dt
     end
 
+    -- Update repath cooldown
+    if self.repathCooldown > 0 then
+        self.repathCooldown = self.repathCooldown - dt
+    end
+
     -- Update animation timers
     self.animTimer = (self.animTimer or 0) + dt
     if self.attackAnimTimer and self.attackAnimTimer > 0 then
@@ -530,12 +537,12 @@ function Unit:updateMoving(dt, buildings, allUnits)
         self.state = "Idle"
         return
     end
-    
+
     -- Check if reached target
     local dx = self.targetX - self.worldX
     local dy = self.targetY - self.worldY
     local dist = math.sqrt(dx * dx + dy * dy)
-    
+
     if dist < 5 then
         self.state = "Idle"
         self.targetX = nil
@@ -543,11 +550,12 @@ function Unit:updateMoving(dt, buildings, allUnits)
         self.path = nil
         return
     end
-    
-    -- Compute path if needed
-    if not self.path then
+
+    -- Compute path if needed (with cooldown to prevent spam)
+    if not self.path and self.repathCooldown <= 0 then
         self.path = Pathfinding.findPath(self.worldX, self.worldY, self.targetX, self.targetY, self.radius)
         self.currentWaypoint = 1
+        self.repathCooldown = 0.5  -- Don't repath again for 0.5 seconds
     end
     
     -- Move along path
@@ -628,27 +636,29 @@ function Unit:updateAttackMoving(dt, buildings, allUnits, allBuildings)
         return
     end
     
-    -- Move toward target
-    if not self.path then
+    -- Move toward target (with cooldown to prevent spam)
+    if not self.path and self.repathCooldown <= 0 then
         self.path = Pathfinding.findPath(self.worldX, self.worldY, self.targetX, self.targetY, self.radius)
         self.currentWaypoint = 1
+        self.repathCooldown = 0.5  -- Don't repath again for 0.5 seconds
     end
-    
+
     if self.path and self.currentWaypoint <= #self.path then
         local wp = self.path[self.currentWaypoint]
-        
+
         if Pathfinding.reachedWaypoint(self.worldX, self.worldY, self.path, self.currentWaypoint, 8) then
             self.currentWaypoint = self.currentWaypoint + 1
         end
-        
+
         if self.currentWaypoint <= #self.path then
             wp = self.path[self.currentWaypoint]
             self:moveToward(wp.x, wp.y, dt, allUnits)
         end
-    else
-        -- No path - move directly toward target
+    elseif self.path then
+        -- Have path but finished it - move directly toward target
         self:moveToward(self.targetX, self.targetY, dt, allUnits)
     end
+    -- If no path and on cooldown, just wait
 end
 
 function Unit:moveTo(worldX, worldY)
@@ -658,6 +668,7 @@ function Unit:moveTo(worldX, worldY)
     self.state = "Moving"
     self.path = nil
     self.currentWaypoint = 1
+    self.repathCooldown = 0  -- Reset cooldown for new command
 end
 
 function Unit:attackMoveTo(worldX, worldY)
@@ -668,6 +679,7 @@ function Unit:attackMoveTo(worldX, worldY)
     self.state = "AttackMoving"
     self.path = nil
     self.currentWaypoint = 1
+    self.repathCooldown = 0  -- Reset cooldown for new command
     self.attackMoveTarget = {x = worldX, y = worldY}  -- Remember destination
 end
 

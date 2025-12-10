@@ -16,7 +16,19 @@ local Pathfinding = {}
 local navGrid = nil      -- navGrid[y][x] = true (walkable) or false (blocked)
 local navWidth = 0
 local navHeight = 0
-local NAV_CELL_SIZE = 16 -- Half-tile resolution
+local NAV_CELL_SIZE = 16 -- Half-tile resolution (fine grid)
+
+-- Coarse navigation grid for long-distance pathfinding
+local coarseGrid = nil   -- coarseGrid[y][x] = true (walkable) or false (blocked)
+local coarseWidth = 0
+local coarseHeight = 0
+local COARSE_CELL_SIZE = 64  -- 4x coarser (one full tile)
+local COARSE_THRESHOLD = 40  -- Use coarse grid if manhattan distance > this many fine cells
+local COARSE_MIN_MAP_SIZE = 48  -- Only use coarse grid on maps >= 48 tiles wide/tall
+
+-- Path cache: pathCache[startNavY..","..startNavX.."->"..goalNavY..","..goalNavX] = path
+local pathCache = {}
+local PATH_CACHE_MAX = 200  -- Max cached paths before cleanup
 
 -- Direction vectors for 8-way movement
 local DIRECTIONS = {
@@ -121,14 +133,76 @@ local function isWalkable(navX, navY)
     return navGrid[navY] and navGrid[navY][navX] == true
 end
 
+-- Check if a coarse cell is walkable
+local function isCoarseWalkable(cx, cy)
+    if cx < 1 or cx > coarseWidth or cy < 1 or cy > coarseHeight then
+        return false
+    end
+    return coarseGrid and coarseGrid[cy] and coarseGrid[cy][cx] == true
+end
+
+-- Build coarse grid from fine grid (call after fine grid is complete)
+local function rebuildCoarseGrid()
+    if not navGrid then return end
+
+    -- Skip coarse grid on small maps - fine A* is fast enough
+    local mapTilesW = navWidth / 2  -- Convert nav cells back to tiles
+    local mapTilesH = navHeight / 2
+    if mapTilesW < COARSE_MIN_MAP_SIZE and mapTilesH < COARSE_MIN_MAP_SIZE then
+        coarseGrid = nil
+        coarseWidth = 0
+        coarseHeight = 0
+        return
+    end
+
+    -- Coarse grid is 1/4 resolution (64px cells vs 16px)
+    local ratio = COARSE_CELL_SIZE / NAV_CELL_SIZE  -- 4
+    coarseWidth = math.ceil(navWidth / ratio)
+    coarseHeight = math.ceil(navHeight / ratio)
+
+    coarseGrid = {}
+    for cy = 1, coarseHeight do
+        coarseGrid[cy] = {}
+        for cx = 1, coarseWidth do
+            -- A coarse cell is walkable if ANY of its fine cells are walkable
+            -- (we just need a path through, not full coverage)
+            local hasWalkable = false
+            local fineX1 = (cx - 1) * ratio + 1
+            local fineY1 = (cy - 1) * ratio + 1
+            local fineX2 = math.min(fineX1 + ratio - 1, navWidth)
+            local fineY2 = math.min(fineY1 + ratio - 1, navHeight)
+
+            for fy = fineY1, fineY2 do
+                for fx = fineX1, fineX2 do
+                    if isWalkable(fx, fy) then
+                        hasWalkable = true
+                        break
+                    end
+                end
+                if hasWalkable then break end
+            end
+
+            coarseGrid[cy][cx] = hasWalkable
+        end
+    end
+end
+
+-- Clear the path cache (call when nav grid changes)
+local function clearPathCache()
+    pathCache = {}
+end
+
 -- Rebuild the entire navigation grid from map and buildings
 function Pathfinding.rebuildNavGrid(map, buildings)
     if not map then return end
-    
+
+    -- Clear path cache since terrain changed
+    clearPathCache()
+
     -- Calculate nav grid dimensions (half-tile resolution)
     navWidth = map.width * 2
     navHeight = map.height * 2
-    
+
     -- Initialize all cells as walkable
     navGrid = {}
     for y = 1, navHeight do
@@ -166,12 +240,18 @@ function Pathfinding.rebuildNavGrid(map, buildings)
             Pathfinding.markBuilding(building, false)
         end
     end
+
+    -- Build coarse grid for long-distance pathfinding
+    rebuildCoarseGrid()
 end
 
 -- Mark/unmark a building in the nav grid
 -- walkable = false to block, true to unblock
 function Pathfinding.markBuilding(building, walkable)
     if not navGrid or not building then return end
+
+    -- Clear path cache since terrain changed
+    clearPathCache()
     
     local bx1, by1, bx2, by2
     if building.getWorldBounds then
@@ -214,12 +294,18 @@ function Pathfinding.markBuilding(building, walkable)
             end
         end
     end
+
+    -- Rebuild coarse grid
+    rebuildCoarseGrid()
 end
 
 -- Mark a tile area (for tree removal, etc)
 function Pathfinding.markTile(tileX, tileY, walkable)
     if not navGrid then return end
-    
+
+    -- Clear path cache since terrain changed
+    clearPathCache()
+
     -- Each tile maps to 2x2 nav cells
     local baseNavX = (tileX - 1) * 2 + 1
     local baseNavY = (tileY - 1) * 2 + 1
@@ -233,6 +319,9 @@ function Pathfinding.markTile(tileX, tileY, walkable)
             end
         end
     end
+
+    -- Rebuild coarse grid
+    rebuildCoarseGrid()
 end
 
 -- Find nearest walkable cell to a given position
@@ -258,47 +347,230 @@ local function findNearestWalkable(navX, navY)
     return nil, nil
 end
 
+-- Find nearest walkable coarse cell
+local function findNearestCoarseWalkable(cx, cy)
+    if isCoarseWalkable(cx, cy) then
+        return cx, cy
+    end
+
+    for radius = 1, 10 do
+        for dy = -radius, radius do
+            for dx = -radius, radius do
+                if math.abs(dx) == radius or math.abs(dy) == radius then
+                    local nx, ny = cx + dx, cy + dy
+                    if isCoarseWalkable(nx, ny) then
+                        return nx, ny
+                    end
+                end
+            end
+        end
+    end
+
+    return nil, nil
+end
+
+-- Coarse A* pathfinding (returns list of coarse cell centers as waypoints)
+local function findCoarsePath(startCX, startCY, goalCX, goalCY)
+    if not coarseGrid then return nil end
+
+    -- Find nearest walkable coarse cells
+    startCX, startCY = findNearestCoarseWalkable(startCX, startCY)
+    goalCX, goalCY = findNearestCoarseWalkable(goalCX, goalCY)
+    if not startCX or not goalCX then return nil end
+
+    if startCX == goalCX and startCY == goalCY then
+        return {}  -- Already there at coarse level
+    end
+
+    local openSet = createPriorityQueue()
+    local cameFrom = {}
+    local gScore = {}
+    local closedSet = {}
+
+    gScore[startCY] = {}
+    gScore[startCY][startCX] = 0
+    cameFrom[startCY] = {}
+
+    local function heuristic(x1, y1, x2, y2)
+        local dx = math.abs(x2 - x1)
+        local dy = math.abs(y2 - y1)
+        return math.max(dx, dy) + 0.414 * math.min(dx, dy)
+    end
+
+    local startF = heuristic(startCX, startCY, goalCX, goalCY)
+    openSet:push({x = startCX, y = startCY}, startF)
+
+    local iterations = 0
+    local maxIterations = 2000
+
+    while not openSet:isEmpty() and iterations < maxIterations do
+        iterations = iterations + 1
+
+        local current = openSet:pop()
+        local cx, cy = current.x, current.y
+
+        if closedSet[cy] and closedSet[cy][cx] then
+            goto continue
+        end
+
+        if cx == goalCX and cy == goalCY then
+            -- Reconstruct path (coarse waypoints)
+            local path = {}
+            local px, py = cx, cy
+
+            while cameFrom[py] and cameFrom[py][px] do
+                -- Convert coarse cell to world center
+                local worldX = (px - 0.5) * COARSE_CELL_SIZE
+                local worldY = (py - 0.5) * COARSE_CELL_SIZE
+                table.insert(path, 1, {x = worldX, y = worldY})
+                local prev = cameFrom[py][px]
+                px, py = prev.x, prev.y
+            end
+
+            return path
+        end
+
+        if not closedSet[cy] then closedSet[cy] = {} end
+        closedSet[cy][cx] = true
+
+        for _, dir in ipairs(DIRECTIONS) do
+            local nx = cx + dir.dx
+            local ny = cy + dir.dy
+
+            if nx >= 1 and nx <= coarseWidth and ny >= 1 and ny <= coarseHeight then
+                if not (closedSet[ny] and closedSet[ny][nx]) then
+                    if isCoarseWalkable(nx, ny) then
+                        -- For diagonal, check adjacent cells
+                        local canMove = true
+                        if dir.dx ~= 0 and dir.dy ~= 0 then
+                            if not isCoarseWalkable(cx + dir.dx, cy) or not isCoarseWalkable(cx, cy + dir.dy) then
+                                canMove = false
+                            end
+                        end
+
+                        if canMove then
+                            if not gScore[ny] then gScore[ny] = {} end
+                            local tentativeG = gScore[cy][cx] + dir.cost
+
+                            if not gScore[ny][nx] or tentativeG < gScore[ny][nx] then
+                                if not cameFrom[ny] then cameFrom[ny] = {} end
+                                cameFrom[ny][nx] = {x = cx, y = cy}
+                                gScore[ny][nx] = tentativeG
+
+                                local f = tentativeG + heuristic(nx, ny, goalCX, goalCY)
+                                openSet:push({x = nx, y = ny}, f)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        ::continue::
+    end
+
+    return nil  -- No coarse path found
+end
+
 -- A* pathfinding algorithm
 -- Returns list of {x, y} world coordinates, or nil if no path
 function Pathfinding.findPath(startX, startY, goalX, goalY, unitRadius)
     if not navGrid then return nil end
-    
+
     unitRadius = unitRadius or 14
-    
+
     -- Convert to nav coordinates
     local startNavX, startNavY = Pathfinding.worldToNav(startX, startY)
     local goalNavX, goalNavY = Pathfinding.worldToNav(goalX, goalY)
-    
+
     -- Clamp to grid bounds
     startNavX = math.max(1, math.min(navWidth, startNavX))
     startNavY = math.max(1, math.min(navHeight, startNavY))
     goalNavX = math.max(1, math.min(navWidth, goalNavX))
     goalNavY = math.max(1, math.min(navHeight, goalNavY))
-    
+
     -- If start is blocked, find nearest walkable cell
     if not isWalkable(startNavX, startNavY) then
         startNavX, startNavY = findNearestWalkable(startNavX, startNavY)
         if not startNavX then return nil end
     end
-    
+
     -- For goal, we allow blocked cells if that's where the user clicked
     -- (they might be clicking on a building to attack it)
     local goalBlocked = not isWalkable(goalNavX, goalNavY)
-    
+
     -- If goal is blocked, find nearest walkable cell to it
     local actualGoalNavX, actualGoalNavY = goalNavX, goalNavY
     if goalBlocked then
         actualGoalNavX, actualGoalNavY = findNearestWalkable(goalNavX, goalNavY)
         if not actualGoalNavX then return nil end
     end
-    
+
     -- Quick check: if start == goal, return trivial path
     if startNavX == actualGoalNavX and startNavY == actualGoalNavY then
         local wx, wy = Pathfinding.navToWorld(startNavX, startNavY)
         return {{x = wx, y = wy}}
     end
-    
-    -- A* algorithm
+
+    -- Check path cache
+    local cacheKey = startNavY .. "," .. startNavX .. "->" .. actualGoalNavY .. "," .. actualGoalNavX
+    if pathCache[cacheKey] then
+        -- Return a copy so caller can't modify cached path
+        local cached = pathCache[cacheKey]
+        local copy = {}
+        for i, wp in ipairs(cached) do
+            copy[i] = {x = wp.x, y = wp.y}
+        end
+        return copy
+    end
+
+    -- Check if this is a long-distance path - use hierarchical approach
+    local manhattanDist = math.abs(actualGoalNavX - startNavX) + math.abs(actualGoalNavY - startNavY)
+    if manhattanDist > COARSE_THRESHOLD and coarseGrid then
+        -- Convert to coarse coordinates
+        local ratio = COARSE_CELL_SIZE / NAV_CELL_SIZE
+        local startCX = math.ceil(startNavX / ratio)
+        local startCY = math.ceil(startNavY / ratio)
+        local goalCX = math.ceil(actualGoalNavX / ratio)
+        local goalCY = math.ceil(actualGoalNavY / ratio)
+
+        -- Get coarse path
+        local coarsePath = findCoarsePath(startCX, startCY, goalCX, goalCY)
+        if coarsePath and #coarsePath > 0 then
+            -- Build path: start -> coarse waypoints -> goal
+            local path = {}
+
+            -- Add coarse waypoints (these are already world coordinates)
+            for _, wp in ipairs(coarsePath) do
+                table.insert(path, {x = wp.x, y = wp.y})
+            end
+
+            -- Add final goal
+            table.insert(path, {x = goalX, y = goalY})
+
+            -- Simplify and cache
+            path = Pathfinding.simplifyPath(path)
+
+            local pathCopy = {}
+            for i, wp in ipairs(path) do
+                pathCopy[i] = {x = wp.x, y = wp.y}
+            end
+            pathCache[cacheKey] = pathCopy
+
+            -- Cache size limit
+            local cacheSize = 0
+            for _ in pairs(pathCache) do cacheSize = cacheSize + 1 end
+            if cacheSize > PATH_CACHE_MAX then
+                clearPathCache()
+                pathCache[cacheKey] = pathCopy
+            end
+
+            return path
+        end
+        -- Fall through to fine A* if coarse path failed
+    end
+
+    -- Fine A* algorithm (for short distances or when coarse fails)
     local openSet = createPriorityQueue()
     local cameFrom = {}  -- cameFrom[y][x] = {fromX, fromY}
     local gScore = {}    -- gScore[y][x] = cost from start
@@ -351,7 +623,22 @@ function Pathfinding.findPath(startX, startY, goalX, goalY, unitRadius)
             
             -- Simplify path (remove unnecessary waypoints)
             path = Pathfinding.simplifyPath(path)
-            
+
+            -- Cache the path (store a copy)
+            local pathCopy = {}
+            for i, wp in ipairs(path) do
+                pathCopy[i] = {x = wp.x, y = wp.y}
+            end
+            pathCache[cacheKey] = pathCopy
+
+            -- Simple cache size limit - clear if too large
+            local cacheSize = 0
+            for _ in pairs(pathCache) do cacheSize = cacheSize + 1 end
+            if cacheSize > PATH_CACHE_MAX then
+                clearPathCache()
+                pathCache[cacheKey] = pathCopy  -- Re-add current path
+            end
+
             return path
         end
         
