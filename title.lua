@@ -27,32 +27,86 @@ local jiggleActive = false
 local jiggleDuration = 1.2
 local clickX, clickY = 0, 0
 
--- Color palette inspired by the warrior
+-- Background scroll state
+local scrollOffset = 0
+local scrollDirection = 1  -- 1 = down, -1 = up
+local scrollSpeed = 0.8  -- pixels per second (very slow)
+
+-- Color palette inspired by the succubus moonlight (desaturated)
 local Colors = {
-    -- Teals (from her hair/clothes)
-    tealDark = {0.10, 0.25, 0.35, 1},
-    tealMid = {0.15, 0.40, 0.50, 1},
-    tealLight = {0.25, 0.55, 0.65, 1},
-    tealBright = {0.30, 0.70, 0.80, 1},
-    
-    -- Golds (from her armor)
-    goldDark = {0.45, 0.35, 0.15, 1},
-    goldMid = {0.72, 0.58, 0.22, 1},
-    goldLight = {0.92, 0.78, 0.35, 1},
-    goldBright = {1.0, 0.88, 0.45, 1},
-    
-    -- Sand/Stone (from environment)
-    sandDark = {0.25, 0.22, 0.18, 1},
-    sandMid = {0.45, 0.40, 0.32, 1},
-    sandLight = {0.65, 0.58, 0.48, 1},
-    
+    -- Muted purples (from the night sky)
+    purpleDark = {0.18, 0.14, 0.22, 1},
+    purpleMid = {0.28, 0.22, 0.34, 1},
+    purpleLight = {0.42, 0.35, 0.48, 1},
+    purpleBright = {0.55, 0.45, 0.60, 1},
+
+    -- Dusty rose/mauve (from her wings, less saturated)
+    crimsonDark = {0.32, 0.18, 0.22, 1},
+    crimsonMid = {0.48, 0.25, 0.32, 1},
+    crimsonLight = {0.62, 0.38, 0.45, 1},
+    crimsonBright = {0.75, 0.50, 0.55, 1},
+
+    -- Silver/Moonlight (softer)
+    silverDark = {0.50, 0.48, 0.52, 1},
+    silverMid = {0.68, 0.66, 0.72, 1},
+    silverLight = {0.82, 0.80, 0.85, 1},
+
     -- UI
-    panelBg = {0.08, 0.12, 0.18, 0.92},
-    panelBorder = {0.25, 0.45, 0.55, 1},
-    textLight = {0.95, 0.92, 0.85, 1},
-    textGold = {1.0, 0.85, 0.35, 1},
-    textMuted = {0.6, 0.55, 0.5, 1},
+    panelBg = {0.12, 0.10, 0.15, 0.88},
+    panelBorder = {0.45, 0.35, 0.42, 1},
+    textLight = {0.85, 0.82, 0.86, 1},
+    textGold = {0.72, 0.45, 0.52, 1},  -- Dusty rose accent
+    textMuted = {0.55, 0.52, 0.56, 1},
 }
+
+-- Sky color rotation shader (targets dark blue pixels)
+local skyShader = nil
+local skyShaderCode = [[
+extern float time;
+
+// Convert RGB to HSV
+vec3 rgb2hsv(vec3 c) {
+    vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+    float d = q.x - min(q.w, q.y);
+    float e = 1.0e-10;
+    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+
+// Convert HSV to RGB
+vec3 hsv2rgb(vec3 c) {
+    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+vec4 effect(vec4 color, Image texture, vec2 texture_coords, vec2 screen_coords) {
+    vec4 pixel = Texel(texture, texture_coords);
+    vec3 hsv = rgb2hsv(pixel.rgb);
+
+    // Detect sky pixels - wider range to catch more sky areas
+    // Hue: blue to purple range (0.5 to 0.85)
+    // Value: dark to mid (up to 0.65)
+    // Saturation: any amount (lowered threshold)
+
+    // Smoothly blend the mask for softer transitions
+    float blueness = smoothstep(0.45, 0.55, hsv.x) * smoothstep(0.9, 0.8, hsv.x);
+    float darkness = smoothstep(0.65, 0.35, hsv.z);
+    float saturation = smoothstep(0.05, 0.15, hsv.y);
+    float skyMask = blueness * darkness * saturation;
+
+    // Rotate hue slowly for sky pixels
+    float hueShift = sin(time * 0.15) * 0.08;  // Subtle rotation
+    hsv.x = fract(hsv.x + hueShift * skyMask);
+
+    // Slightly vary saturation too
+    hsv.y = hsv.y + sin(time * 0.2) * 0.05 * skyMask;
+
+    vec3 result = hsv2rgb(hsv);
+    return vec4(result, pixel.a) * color;
+}
+]]
 
 -- Gelatin jiggle shader
 local jiggleShaderCode = [[
@@ -65,17 +119,200 @@ vec4 effect(vec4 color, Image texture, vec2 texture_coords, vec2 screen_coords) 
     vec2 uv = texture_coords;
     vec2 clickUV = clickPos / resolution;
     float dist = distance(uv, clickUV);
-    
+
     float wave = sin(dist * 20.0 - time * 10.0) * 0.5 + 0.5;
     float decay = exp(-dist * 2.5) * exp(-time * 2.5);
-    
+
     float jiggleX = sin(uv.y * 12.0 + time * 14.0) * wave * decay * intensity * 0.025;
     float jiggleY = sin(uv.x * 10.0 + time * 12.0) * wave * decay * intensity * 0.02;
     jiggleX += sin(uv.y * 6.0 - time * 8.0) * decay * intensity * 0.012;
     jiggleY += cos(uv.x * 8.0 - time * 9.0) * decay * intensity * 0.01;
-    
+
     vec2 displaced = clamp(uv + vec2(jiggleX, jiggleY), 0.0, 1.0);
     return Texel(texture, displaced) * color;
+}
+]]
+
+-- Magical glow shader
+local glowShader = nil
+local glowShaderCode = [[
+extern float time;
+extern vec2 resolution;
+
+vec4 effect(vec4 color, Image texture, vec2 texture_coords, vec2 screen_coords) {
+    vec2 uv = texture_coords;
+    vec4 original = Texel(texture, uv);
+
+    // Sample blur for glow (simple box blur)
+    float blurSize = 3.0 / resolution.x;
+    vec4 blur = vec4(0.0);
+    float samples = 0.0;
+
+    for (float x = -2.0; x <= 2.0; x += 1.0) {
+        for (float y = -2.0; y <= 2.0; y += 1.0) {
+            vec2 offset = vec2(x, y) * blurSize;
+            blur += Texel(texture, uv + offset);
+            samples += 1.0;
+        }
+    }
+    blur /= samples;
+
+    // Extract bright areas (luminance threshold)
+    float lum = dot(blur.rgb, vec3(0.299, 0.587, 0.114));
+    float glowStrength = smoothstep(0.4, 0.8, lum) * 0.2;
+
+    // Add magical color tint that shifts over time
+    vec3 magicColor = vec3(
+        0.6 + 0.4 * sin(time * 0.5),
+        0.4 + 0.3 * sin(time * 0.7 + 1.0),
+        0.8 + 0.2 * sin(time * 0.3 + 2.0)
+    );
+
+    // Combine original with glow
+    vec3 glow = blur.rgb * magicColor * glowStrength;
+    vec3 result = original.rgb + glow;
+
+    // Add subtle vignette
+    vec2 center = uv - 0.5;
+    float vignette = 1.0 - dot(center, center) * 0.5;
+    result *= vignette;
+
+    // Add subtle shimmer at edges of bright areas
+    float shimmer = sin(uv.x * 50.0 + time * 3.0) * sin(uv.y * 50.0 + time * 2.0);
+    shimmer *= glowStrength * 0.1;
+    result += vec3(shimmer) * magicColor;
+
+    return vec4(result, original.a) * color;
+}
+]]
+
+-- Fog/Light rays shader using Perlin noise (from rotoscopescenes)
+local fogShader = nil
+local fogShaderCode = [[
+extern number time;
+extern number noiseScale;
+extern number fogIntensity;
+extern number lightIntensity;
+extern number oscillationSpeed;
+extern number oscillationAmount;
+
+// Permutation table for Perlin noise
+vec3 mod289_3(vec3 x) {
+    return x - floor(x * (1.0 / 289.0)) * 289.0;
+}
+
+vec4 mod289_4(vec4 x) {
+    return x - floor(x * (1.0 / 289.0)) * 289.0;
+}
+
+vec3 permute3(vec3 x) {
+    return mod289_3(((x * 34.0) + 1.0) * x);
+}
+
+vec4 permute4(vec4 x) {
+    return mod289_4(((x * 34.0) + 1.0) * x);
+}
+
+vec4 taylorInvSqrt(vec4 r) {
+    return 1.79284291400159 - 0.85373472095314 * r;
+}
+
+// 2D Perlin noise
+float snoise(vec2 v) {
+    const vec4 C = vec4(0.211324865405187,
+                        0.366025403784439,
+                        -0.577350269189626,
+                        0.024390243902439);
+
+    vec2 i  = floor(v + dot(v, C.yy));
+    vec2 x0 = v - i + dot(i, C.xx);
+
+    vec2 i1;
+    i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+    vec4 x12 = x0.xyxy + C.xxzz;
+    x12.xy -= i1;
+
+    i = mod289_3(vec3(i, 0.0)).xy;
+    vec3 p = permute3(permute3(i.y + vec3(0.0, i1.y, 1.0))
+                     + i.x + vec3(0.0, i1.x, 1.0));
+
+    vec3 m = max(0.5 - vec3(dot(x0, x0), dot(x12.xy, x12.xy), dot(x12.zw, x12.zw)), 0.0);
+    m = m * m;
+    m = m * m;
+
+    vec3 x = 2.0 * fract(p * C.www) - 1.0;
+    vec3 h = abs(x) - 0.5;
+    vec3 ox = floor(x + 0.5);
+    vec3 a0 = x - ox;
+
+    m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + h * h);
+
+    vec3 g;
+    g.x = a0.x * x0.x + h.x * x0.y;
+    g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+    return 130.0 * dot(m, g);
+}
+
+// Fractal Brownian Motion
+float fbm(vec2 p, float scale) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    float frequency = scale;
+
+    for (int i = 0; i < 4; i++) {
+        value += amplitude * snoise(p * frequency);
+        frequency *= 2.0;
+        amplitude *= 0.5;
+    }
+
+    return value;
+}
+
+vec4 effect(vec4 color, Image texture, vec2 texture_coords, vec2 screen_coords) {
+    vec4 pixel = Texel(texture, texture_coords);
+
+    // Calculate oscillating noise scale
+    float scaleOscillation = sin(time * oscillationSpeed * 0.05) * oscillationAmount;
+    float currentScale = noiseScale + scaleOscillation;
+
+    // Slow drift for the noise pattern
+    vec2 drift = vec2(time * 0.001, time * 0.00075);
+
+    // Sample noise at current position with drift
+    vec2 noiseCoord = texture_coords + drift;
+    float noise1 = fbm(noiseCoord, currentScale);
+
+    // Second layer with different drift for more complexity
+    vec2 drift2 = vec2(time * -0.00075, time * 0.00125);
+    float noise2 = fbm(texture_coords + drift2, currentScale * 1.5);
+
+    // Combine noise layers
+    float combinedNoise = (noise1 + noise2) * 0.5;
+
+    // Remap noise from [-1, 1] to [0, 1] range
+    float fogAmount = (combinedNoise + 1.0) * 0.5;
+
+    // Apply contrast to make light shafts more defined
+    fogAmount = smoothstep(0.2, 0.8, fogAmount);
+
+    // Calculate darkening factor
+    float darkness = mix(1.0, 1.0 - fogIntensity, 1.0 - fogAmount);
+
+    // Calculate brightening factor for light rays
+    float brightness = 1.0 + (fogAmount * lightIntensity);
+
+    // Apply fog darkening and light brightening to the pixel
+    vec3 result = pixel.rgb * darkness * brightness;
+
+    // Add warm glow to bright areas (golden light rays)
+    vec3 lightTint = vec3(1.1, 1.05, 0.95);
+    result = mix(result, result * lightTint, fogAmount * lightIntensity * 0.5);
+
+    // Add slight color tint to fog (cool blue-ish in shadows)
+    vec3 fogTint = vec3(0.9, 0.95, 1.0);
+    result = mix(result, result * fogTint, (1.0 - fogAmount) * 0.3);
+
+    return vec4(result, pixel.a) * color;
 }
 ]]
 
@@ -144,12 +381,16 @@ end
 
 -- Draw the stone/metal medallion frame
 local function drawMedallion(cx, cy, radius)
-    -- Outer glow (fire glow from behind) - extended to fill corners
+    -- Outer glow (magical moonlight glow from behind)
     for i = 30, 1, -1 do
         local glowRadius = radius + i * 6
         local alpha = (1 - i / 30) * 0.18
-        local flicker = 0.9 + math.sin(animTimer * 8 + i) * 0.1
-        love.graphics.setColor(1.0, 0.4, 0.1, alpha * flicker)
+        local flicker = 0.9 + math.sin(animTimer * 2 + i * 0.3) * 0.1
+        -- Shifting purple/blue/pink magical glow
+        local r = 0.5 + 0.15 * math.sin(animTimer * 0.5)
+        local g = 0.3 + 0.1 * math.sin(animTimer * 0.7 + 1)
+        local b = 0.7 + 0.15 * math.sin(animTimer * 0.3 + 2)
+        love.graphics.setColor(r, g, b, alpha * flicker)
         love.graphics.circle("fill", cx, cy, glowRadius)
     end
     
@@ -176,17 +417,17 @@ local function drawMedallion(cx, cy, radius)
     
     -- Outer bronze ring
     love.graphics.setLineWidth(12)
-    love.graphics.setColor(Colors.goldDark[1] * 0.7, Colors.goldDark[2] * 0.7, Colors.goldDark[3] * 0.7, 1)
+    love.graphics.setColor(Colors.crimsonDark[1] * 0.7, Colors.crimsonDark[2] * 0.7, Colors.crimsonDark[3] * 0.7, 1)
     love.graphics.circle("line", cx, cy, radius - 6)
     
     -- Bronze ring highlight
     love.graphics.setLineWidth(3)
-    love.graphics.setColor(Colors.goldMid[1], Colors.goldMid[2], Colors.goldMid[3], 0.6)
+    love.graphics.setColor(Colors.crimsonMid[1], Colors.crimsonMid[2], Colors.crimsonMid[3], 0.6)
     love.graphics.arc("line", "open", cx, cy, radius - 6, -math.pi * 0.8, -math.pi * 0.2)
     
     -- Inner bronze ring
     love.graphics.setLineWidth(6)
-    love.graphics.setColor(Colors.goldDark[1] * 0.6, Colors.goldDark[2] * 0.6, Colors.goldDark[3] * 0.6, 1)
+    love.graphics.setColor(Colors.crimsonDark[1] * 0.6, Colors.crimsonDark[2] * 0.6, Colors.crimsonDark[3] * 0.6, 1)
     love.graphics.circle("line", cx, cy, radius * 0.75)
     
     -- Decorative rivets around the edge
@@ -197,10 +438,10 @@ local function drawMedallion(cx, cy, radius)
         local ry = cy + math.sin(angle) * (radius - 20)
         
         -- Rivet base
-        love.graphics.setColor(Colors.goldDark)
+        love.graphics.setColor(Colors.crimsonDark)
         love.graphics.circle("fill", rx, ry, 6)
         -- Rivet highlight
-        love.graphics.setColor(Colors.goldLight[1], Colors.goldLight[2], Colors.goldLight[3], 0.7)
+        love.graphics.setColor(Colors.crimsonLight[1], Colors.crimsonLight[2], Colors.crimsonLight[3], 0.7)
         love.graphics.circle("fill", rx - 1.5, ry - 1.5, 2.5)
         -- Rivet shadow
         love.graphics.setColor(0, 0, 0, 0.4)
@@ -208,7 +449,7 @@ local function drawMedallion(cx, cy, radius)
     end
     
     -- Center emblem (abstract symbol)
-    love.graphics.setColor(Colors.goldMid[1], Colors.goldMid[2], Colors.goldMid[3], 0.8)
+    love.graphics.setColor(Colors.crimsonMid[1], Colors.crimsonMid[2], Colors.crimsonMid[3], 0.8)
     love.graphics.setLineWidth(4)
     -- Diamond shape
     local emblemSize = radius * 0.25
@@ -220,7 +461,7 @@ local function drawMedallion(cx, cy, radius)
     )
     -- Inner diamond
     love.graphics.setLineWidth(2)
-    love.graphics.setColor(Colors.goldLight[1], Colors.goldLight[2], Colors.goldLight[3], 0.5)
+    love.graphics.setColor(Colors.crimsonLight[1], Colors.crimsonLight[2], Colors.crimsonLight[3], 0.5)
     local innerSize = emblemSize * 0.5
     love.graphics.polygon("line",
         cx, cy - innerSize,
@@ -265,7 +506,7 @@ local function drawButton(btn, mx, my)
     
     -- Button glow on hover
     if hovered then
-        love.graphics.setColor(Colors.tealBright[1], Colors.tealBright[2], Colors.tealBright[3], 0.15)
+        love.graphics.setColor(Colors.purpleBright[1], Colors.purpleBright[2], Colors.purpleBright[3], 0.15)
         love.graphics.rectangle("fill", x - 4, y - 4, w + 8, h + 8, 10)
     end
     
@@ -274,9 +515,9 @@ local function drawButton(btn, mx, my)
         -- Gold gradient for primary
         for i = 0, h - 1 do
             local t = i / h
-            local r = Colors.goldDark[1] + (Colors.goldMid[1] - Colors.goldDark[1]) * (1 - t * 0.5)
-            local g = Colors.goldDark[2] + (Colors.goldMid[2] - Colors.goldDark[2]) * (1 - t * 0.5)
-            local b = Colors.goldDark[3] + (Colors.goldMid[3] - Colors.goldDark[3]) * (1 - t * 0.5)
+            local r = Colors.crimsonDark[1] + (Colors.crimsonMid[1] - Colors.crimsonDark[1]) * (1 - t * 0.5)
+            local g = Colors.crimsonDark[2] + (Colors.crimsonMid[2] - Colors.crimsonDark[2]) * (1 - t * 0.5)
+            local b = Colors.crimsonDark[3] + (Colors.crimsonMid[3] - Colors.crimsonDark[3]) * (1 - t * 0.5)
             if hovered then r, g, b = r + 0.1, g + 0.1, b + 0.05 end
             love.graphics.setColor(r, g, b, 1)
             love.graphics.rectangle("fill", x, y + i, w, 1)
@@ -285,7 +526,7 @@ local function drawButton(btn, mx, my)
         -- Teal for regular buttons
         for i = 0, h - 1 do
             local t = i / h
-            local baseColor = hovered and Colors.tealMid or Colors.tealDark
+            local baseColor = hovered and Colors.purpleMid or Colors.purpleDark
             local r = baseColor[1] * (1 - t * 0.3)
             local g = baseColor[2] * (1 - t * 0.3)
             local b = baseColor[3] * (1 - t * 0.3)
@@ -297,11 +538,11 @@ local function drawButton(btn, mx, my)
     -- Border
     love.graphics.setLineWidth(isPrimary and 2 or 1)
     if isPrimary then
-        love.graphics.setColor(Colors.goldLight)
+        love.graphics.setColor(Colors.crimsonLight)
     elseif hovered then
-        love.graphics.setColor(Colors.tealBright)
+        love.graphics.setColor(Colors.purpleBright)
     else
-        love.graphics.setColor(Colors.tealLight[1], Colors.tealLight[2], Colors.tealLight[3], 0.6)
+        love.graphics.setColor(Colors.purpleLight[1], Colors.purpleLight[2], Colors.purpleLight[3], 0.6)
     end
     love.graphics.rectangle("line", x, y, w, h, 4)
     
@@ -339,21 +580,21 @@ local function drawCheckbox(cb, mx, my)
     local checked = cb.checked
     
     -- Box background
-    love.graphics.setColor(Colors.tealDark[1], Colors.tealDark[2], Colors.tealDark[3], 0.8)
+    love.graphics.setColor(Colors.purpleDark[1], Colors.purpleDark[2], Colors.purpleDark[3], 0.8)
     love.graphics.rectangle("fill", x, y, size, size, 3)
     
     -- Box border
     if hovered then
-        love.graphics.setColor(Colors.tealBright)
+        love.graphics.setColor(Colors.purpleBright)
     else
-        love.graphics.setColor(Colors.tealLight[1], Colors.tealLight[2], Colors.tealLight[3], 0.6)
+        love.graphics.setColor(Colors.purpleLight[1], Colors.purpleLight[2], Colors.purpleLight[3], 0.6)
     end
     love.graphics.setLineWidth(1)
     love.graphics.rectangle("line", x, y, size, size, 3)
     
     -- Checkmark
     if checked then
-        love.graphics.setColor(Colors.goldLight)
+        love.graphics.setColor(Colors.crimsonLight)
         love.graphics.setLineWidth(2)
         love.graphics.line(x + 4, y + size/2, x + size/2 - 1, y + size - 5)
         love.graphics.line(x + size/2 - 1, y + size - 5, x + size - 4, y + 5)
@@ -387,9 +628,9 @@ local function drawPanel(panelX, panelY, panelW, panelH)
     end
     
     -- Decorative top border (gold accent)
-    love.graphics.setColor(Colors.goldMid)
+    love.graphics.setColor(Colors.crimsonMid)
     love.graphics.rectangle("fill", panelX, panelY, panelW, 3)
-    love.graphics.setColor(Colors.goldLight[1], Colors.goldLight[2], Colors.goldLight[3], 0.6)
+    love.graphics.setColor(Colors.crimsonLight[1], Colors.crimsonLight[2], Colors.crimsonLight[3], 0.6)
     love.graphics.rectangle("fill", panelX, panelY, panelW, 1)
     
     -- Side borders
@@ -399,7 +640,7 @@ local function drawPanel(panelX, panelY, panelW, panelH)
     love.graphics.line(panelX + panelW, panelY + 3, panelX + panelW, panelY + panelH)
     
     -- Bottom accent
-    love.graphics.setColor(Colors.tealMid[1], Colors.tealMid[2], Colors.tealMid[3], 0.5)
+    love.graphics.setColor(Colors.purpleMid[1], Colors.purpleMid[2], Colors.purpleMid[3], 0.5)
     love.graphics.rectangle("fill", panelX, panelY + panelH - 2, panelW, 2)
 end
 
@@ -434,43 +675,110 @@ end
 -- Draw background image
 local function drawBackgroundImage()
     if not bgImage then return end
-    
+
     local screenW, screenH = love.graphics.getDimensions()
     local imgW, imgH = bgImage:getWidth(), bgImage:getHeight()
-    
+
     -- Scale to cover, positioned to show the warrior on the right
     local scale = math.max(screenW / imgW, screenH / imgH) * 1.05
     local drawW = imgW * scale
     local drawH = imgH * scale
-    
+
     -- Offset to right side so warrior is visible (panel will be on left)
-    -- Shift down to show her face and flowing hair
     local drawX = (screenW - drawW) / 2 + 100
-    local drawY = (screenH - drawH) / 2 + 140  -- Shift down more to show head
+
+    -- Calculate vertical scroll range
+    -- Top position: image top at screen top (or centered if smaller)
+    -- Bottom position: image bottom at screen bottom
+    local topY = 0
+    local bottomY = screenH - drawH
+    local scrollRange = topY - bottomY  -- positive value representing scroll distance
+
+    -- Apply scroll offset (0 = top aligned, scrollRange = bottom aligned)
+    local drawY = topY - scrollOffset
     
     -- Canvas for shader
     if not bgCanvas or bgCanvas:getWidth() ~= screenW or bgCanvas:getHeight() ~= screenH then
         bgCanvas = love.graphics.newCanvas(screenW, screenH)
     end
-    
+
     love.graphics.setCanvas(bgCanvas)
     love.graphics.clear(0, 0, 0, 0)
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.draw(bgImage, drawX, drawY, 0, scale, scale)
     love.graphics.setCanvas()
-    
+
+    -- Apply sky color rotation shader first (targets dark blue sky pixels)
+    if skyShader then
+        local tempCanvas = love.graphics.newCanvas(screenW, screenH)
+        skyShader:send("time", animTimer)
+
+        love.graphics.setCanvas(tempCanvas)
+        love.graphics.clear(0, 0, 0, 0)
+        love.graphics.setShader(skyShader)
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(bgCanvas, 0, 0)
+        love.graphics.setShader()
+        love.graphics.setCanvas()
+        bgCanvas = tempCanvas
+    end
+
     -- Apply jiggle shader if active
     if jiggleActive and jiggleShader then
+        local tempCanvas = love.graphics.newCanvas(screenW, screenH)
         jiggleShader:send("time", jiggleTime)
         jiggleShader:send("intensity", math.max(0, 1 - jiggleTime / jiggleDuration))
         jiggleShader:send("clickPos", {clickX, clickY})
         jiggleShader:send("resolution", {screenW, screenH})
+
+        love.graphics.setCanvas(tempCanvas)
+        love.graphics.clear(0, 0, 0, 0)
         love.graphics.setShader(jiggleShader)
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(bgCanvas, 0, 0)
+        love.graphics.setShader()
+        love.graphics.setCanvas()
+        bgCanvas = tempCanvas
     end
-    
+
+    -- Apply fog shader (perlin noise light/dark modulation)
+    if fogShader then
+        local tempCanvas = love.graphics.newCanvas(screenW, screenH)
+        fogShader:send("time", animTimer)
+        fogShader:send("noiseScale", 2.0)        -- Lower = larger patterns
+        fogShader:send("fogIntensity", 0.3)      -- How dark the dark areas get
+        fogShader:send("lightIntensity", 0.25)   -- How bright the light areas get
+        fogShader:send("oscillationSpeed", 1.0)  -- How fast scale oscillates
+        fogShader:send("oscillationAmount", 0.5) -- How much scale varies
+
+        love.graphics.setCanvas(tempCanvas)
+        love.graphics.clear(0, 0, 0, 0)
+        love.graphics.setShader(fogShader)
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(bgCanvas, 0, 0)
+        love.graphics.setShader()
+        love.graphics.setCanvas()
+        bgCanvas = tempCanvas
+    end
+
+    -- Apply glow shader (always active for magical effect)
+    if glowShader then
+        local tempCanvas = love.graphics.newCanvas(screenW, screenH)
+        glowShader:send("time", animTimer)
+        glowShader:send("resolution", {screenW, screenH})
+
+        love.graphics.setCanvas(tempCanvas)
+        love.graphics.clear(0, 0, 0, 0)
+        love.graphics.setShader(glowShader)
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(bgCanvas, 0, 0)
+        love.graphics.setShader()
+        love.graphics.setCanvas()
+        bgCanvas = tempCanvas
+    end
+
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.draw(bgCanvas, 0, 0)
-    love.graphics.setShader()
 end
 
 function Title.load()
@@ -479,30 +787,62 @@ function Title.load()
     medallionSparks = {}
     jiggleTime = 0
     jiggleActive = false
-    
+    scrollOffset = 0
+    scrollDirection = 1
+
     -- Load background image
-    local imagePath = "images/female_desert_warrior_with_spear_and_shield.png"
+    local imagePath = "images/succubus_moonlight.png"
     local success, result = pcall(function()
         return love.graphics.newImage(imagePath)
     end)
     if success then
         bgImage = result
-        print("Title: Loaded warrior background")
+        print("Title: Loaded succubus background")
     else
         bgImage = nil
         print("Title: Could not load " .. imagePath)
     end
     
+    -- Create sky color rotation shader
+    local skySuccess
+    skySuccess, skyShader = pcall(function()
+        return love.graphics.newShader(skyShaderCode)
+    end)
+    if not skySuccess then
+        print("Title: Sky shader error: " .. tostring(skyShader))
+        skyShader = nil
+    end
+
     -- Create jiggle shader
     local shaderSuccess
     shaderSuccess, jiggleShader = pcall(function()
         return love.graphics.newShader(jiggleShaderCode)
     end)
     if not shaderSuccess then
-        print("Title: Shader error: " .. tostring(jiggleShader))
+        print("Title: Jiggle shader error: " .. tostring(jiggleShader))
         jiggleShader = nil
     end
-    
+
+    -- Create glow shader
+    local glowSuccess
+    glowSuccess, glowShader = pcall(function()
+        return love.graphics.newShader(glowShaderCode)
+    end)
+    if not glowSuccess then
+        print("Title: Glow shader error: " .. tostring(glowShader))
+        glowShader = nil
+    end
+
+    -- Create fog shader
+    local fogSuccess
+    fogSuccess, fogShader = pcall(function()
+        return love.graphics.newShader(fogShaderCode)
+    end)
+    if not fogSuccess then
+        print("Title: Fog shader error: " .. tostring(fogShader))
+        fogShader = nil
+    end
+
     -- Audio
     if Audio and Audio.init then Audio.init() end
     if Audio and Audio.playRandomMusic then Audio.playRandomMusic() end
@@ -587,7 +927,27 @@ end
 
 function Title.update(dt)
     animTimer = animTimer + dt
-    
+
+    -- Update background scroll
+    if bgImage then
+        local screenW, screenH = love.graphics.getDimensions()
+        local imgW, imgH = bgImage:getWidth(), bgImage:getHeight()
+        local scale = math.max(screenW / imgW, screenH / imgH) * 1.05
+        local drawH = imgH * scale
+        local scrollRange = (drawH - screenH) * 0.5  -- half the full range
+
+        scrollOffset = scrollOffset + scrollDirection * scrollSpeed * dt
+
+        -- Reverse direction at bounds
+        if scrollOffset >= scrollRange then
+            scrollOffset = scrollRange
+            scrollDirection = -1
+        elseif scrollOffset <= 0 then
+            scrollOffset = 0
+            scrollDirection = 1
+        end
+    end
+
     -- Update jiggle
     if jiggleActive then
         jiggleTime = jiggleTime + dt
@@ -596,7 +956,7 @@ function Title.update(dt)
             jiggleTime = 0
         end
     end
-    
+
     -- Audio
     if Audio and Audio.update then Audio.update(dt) end
     
@@ -618,7 +978,8 @@ function Title.update(dt)
     
     -- Medallion sparks
     local screenW, screenH = love.graphics.getDimensions()
-    local medallionX = 120
+    local panelCenterX = 100 + 280 / 2  -- panelX + panelW/2 = 240
+    local medallionX = panelCenterX
     local medallionY = screenH / 2 - 100
     local medallionRadius = 340
     
@@ -665,8 +1026,9 @@ function Title.draw()
     -- Vignette
     drawVignette(screenW, screenH)
     
-    -- Medallion (behind panel, offset up and left)
-    local medallionX = 120  -- Further left
+    -- Medallion (centered with panel)
+    local panelCenterX = 100 + 280 / 2  -- panelX + panelW/2 = 240
+    local medallionX = panelCenterX
     local medallionY = screenH / 2 - 100  -- Up from center
     local medallionRadius = 340
     drawMedallion(medallionX, medallionY, medallionRadius)
@@ -678,9 +1040,9 @@ function Title.draw()
     for _, p in ipairs(particles) do
         local alpha = (p.life / p.maxLife) * p.alpha
         if p.type == "spark" then
-            love.graphics.setColor(Colors.goldLight[1], Colors.goldLight[2], Colors.goldLight[3], alpha)
+            love.graphics.setColor(Colors.crimsonLight[1], Colors.crimsonLight[2], Colors.crimsonLight[3], alpha)
         else
-            love.graphics.setColor(Colors.sandLight[1], Colors.sandLight[2], Colors.sandLight[3], alpha * 0.6)
+            love.graphics.setColor(Colors.silverLight[1], Colors.silverLight[2], Colors.silverLight[3], alpha * 0.6)
         end
         love.graphics.circle("fill", p.x, p.y, p.size)
     end
@@ -705,7 +1067,7 @@ function Title.draw()
     
     -- Title glow
     local glowPulse = 0.6 + math.sin(animTimer * 2) * 0.4
-    love.graphics.setColor(Colors.goldMid[1], Colors.goldMid[2], Colors.goldMid[3], 0.25 * glowPulse)
+    love.graphics.setColor(Colors.crimsonMid[1], Colors.crimsonMid[2], Colors.crimsonMid[3], 0.25 * glowPulse)
     for dx = -3, 3 do
         for dy = -3, 3 do
             if dx ~= 0 or dy ~= 0 then
@@ -719,7 +1081,7 @@ function Title.draw()
     love.graphics.print(title, titleX + 2, titleY + 2)
     
     -- Title main
-    love.graphics.setColor(Colors.goldBright)
+    love.graphics.setColor(Colors.crimsonBright)
     love.graphics.print(title, titleX, titleY)
     
     -- Subtitle
@@ -730,18 +1092,18 @@ function Title.draw()
     
     love.graphics.setColor(0, 0, 0, 0.5)
     love.graphics.print(subtitle, panelX + (panelW - subtitleW) / 2 + 1, titleY + 55 + 1)
-    love.graphics.setColor(Colors.tealBright[1], Colors.tealBright[2], Colors.tealBright[3], 0.9)
+    love.graphics.setColor(Colors.purpleBright[1], Colors.purpleBright[2], Colors.purpleBright[3], 0.9)
     love.graphics.print(subtitle, panelX + (panelW - subtitleW) / 2, titleY + 55)
     
     -- Decorative line under subtitle
     local lineY = titleY + 95
-    love.graphics.setColor(Colors.goldMid[1], Colors.goldMid[2], Colors.goldMid[3], 0.6)
+    love.graphics.setColor(Colors.crimsonMid[1], Colors.crimsonMid[2], Colors.crimsonMid[3], 0.6)
     love.graphics.setLineWidth(1)
     love.graphics.line(panelX + 30, lineY, panelX + panelW - 30, lineY)
     
     -- Diamond accent in center of line
     local diamondX = panelX + panelW / 2
-    love.graphics.setColor(Colors.goldLight)
+    love.graphics.setColor(Colors.crimsonLight)
     love.graphics.polygon("fill", 
         diamondX, lineY - 5,
         diamondX + 5, lineY,
@@ -771,14 +1133,14 @@ function Title.draw()
         local dbHovered = mx >= db.x and mx <= db.x + db.size and my >= db.y and my <= db.y + db.size
         
         -- Button background
-        love.graphics.setColor(Colors.tealDark[1], Colors.tealDark[2], Colors.tealDark[3], dbHovered and 0.9 or 0.6)
+        love.graphics.setColor(Colors.purpleDark[1], Colors.purpleDark[2], Colors.purpleDark[3], dbHovered and 0.9 or 0.6)
         love.graphics.rectangle("fill", db.x, db.y, db.size, db.size, 6)
         
         -- Border
         if dbHovered then
-            love.graphics.setColor(Colors.tealBright)
+            love.graphics.setColor(Colors.purpleBright)
         else
-            love.graphics.setColor(Colors.tealLight[1], Colors.tealLight[2], Colors.tealLight[3], 0.4)
+            love.graphics.setColor(Colors.purpleLight[1], Colors.purpleLight[2], Colors.purpleLight[3], 0.4)
         end
         love.graphics.setLineWidth(1)
         love.graphics.rectangle("line", db.x, db.y, db.size, db.size, 6)
@@ -790,7 +1152,7 @@ function Title.draw()
         local toothH = db.size * 0.12
         
         if dbHovered then
-            love.graphics.setColor(Colors.goldLight)
+            love.graphics.setColor(Colors.crimsonLight)
         else
             love.graphics.setColor(Colors.textLight[1], Colors.textLight[2], Colors.textLight[3], 0.7)
         end
@@ -811,7 +1173,7 @@ function Title.draw()
         end
         
         -- Inner hole
-        love.graphics.setColor(Colors.tealDark[1], Colors.tealDark[2], Colors.tealDark[3], 1)
+        love.graphics.setColor(Colors.purpleDark[1], Colors.purpleDark[2], Colors.purpleDark[3], 1)
         love.graphics.circle("fill", cx, cy, innerR * 0.4)
     end
     

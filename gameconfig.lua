@@ -5,6 +5,9 @@ local GameConfig = {}
 
 -- Game is a global defined in main.lua
 
+-- Background image
+local bgImage = nil
+
 -- Configuration state
 local config = {
     mapSize = 64,        -- 64, 128, 192, 256
@@ -44,21 +47,131 @@ local hoveredElement = nil
 local activeDropdown = nil  -- { enemyIndex = n } or nil
 local scrollY = 0
 
--- UI Colors (stone theme)
+-- UI Colors (moonlight theme - matching title screen)
 local UI = {
-    panelBg = {0.15, 0.12, 0.1, 0.95},
-    panelBorder = {0.4, 0.35, 0.25, 1},
-    buttonBg = {0.25, 0.2, 0.15, 1},
-    buttonHover = {0.35, 0.28, 0.2, 1},
-    buttonBorder = {0.5, 0.45, 0.35, 1},
-    buttonBorderHover = {0.8, 0.7, 0.4, 1},
-    textLight = {0.92, 0.88, 0.78, 1},
-    textGold = {1, 0.85, 0.4, 1},
-    textMuted = {0.6, 0.55, 0.45, 1},
-    sectionBg = {0.18, 0.15, 0.12, 1},
-    dropdownBg = {0.2, 0.17, 0.14, 1},
-    selectedBg = {0.3, 0.25, 0.18, 1},
+    panelBg = {0.12, 0.10, 0.15, 0.88},
+    panelBorder = {0.45, 0.35, 0.42, 1},
+    buttonBg = {0.18, 0.14, 0.22, 1},
+    buttonHover = {0.28, 0.22, 0.34, 1},
+    buttonBorder = {0.42, 0.35, 0.48, 1},
+    buttonBorderHover = {0.62, 0.38, 0.45, 1},
+    textLight = {0.85, 0.82, 0.86, 1},
+    textGold = {0.72, 0.45, 0.52, 1},
+    textMuted = {0.55, 0.52, 0.56, 1},
+    sectionBg = {0.15, 0.12, 0.18, 1},
+    dropdownBg = {0.18, 0.15, 0.22, 1},
+    selectedBg = {0.32, 0.18, 0.22, 1},
 }
+
+-- Hash function for procedural weathering
+local function hash(a, b)
+    local h = (a * 374761393 + b * 668265263) % 2147483647
+    h = ((h * 1274126177) % 2147483647)
+    return (h % 1000) / 1000
+end
+
+-- Draw weathering effects on a panel
+local function drawWeathering(x, y, w, h)
+    -- Color blotches
+    local numBlotches = math.floor(w / 30)
+    for i = 1, numBlotches do
+        local bx = x + hash(i, 1) * w
+        local by = y + hash(1, i) * h
+        local bsize = 8 + hash(i, i) * 16
+        local colorVar = (hash(i * 3, i * 5) - 0.5) * 0.06
+        local isDark = hash(i * 7, i * 11) > 0.5
+
+        if isDark then
+            love.graphics.setColor(0, 0, 0, 0.08 + colorVar)
+        else
+            love.graphics.setColor(0.6, 0.5, 0.7, 0.06 + colorVar)
+        end
+        love.graphics.ellipse("fill", bx, by, bsize, bsize * 0.6)
+    end
+
+    -- Sparse cracks
+    local numCracks = 3 + math.floor(hash(w, h) * 4)
+    for c = 1, numCracks do
+        local cx = x + hash(c, 100) * w
+        local cy = y + hash(100, c) * h
+        local angle = hash(c, 101) * math.pi * 2
+        local length = 10 + hash(c, 102) * 20
+
+        love.graphics.setColor(0, 0, 0, 0.15)
+        love.graphics.setLineWidth(1)
+        local px, py = cx, cy
+        for s = 1, math.floor(length / 3) do
+            angle = angle + (hash(c * s, s) - 0.5) * 0.6
+            local nx = px + math.cos(angle) * 3
+            local ny = py + math.sin(angle) * 2
+            if nx > x + 5 and nx < x + w - 5 and ny > y + 5 and ny < y + h - 5 then
+                love.graphics.line(px, py, nx, ny)
+                px, py = nx, ny
+            end
+        end
+    end
+
+    -- Surface noise (grain)
+    local numNoise = math.floor(w * h / 80)
+    for i = 1, numNoise do
+        local px = x + hash(i, 400) * w
+        local py = y + hash(400, i) * h
+        if hash(i * 3, 401) > 0.45 then
+            love.graphics.setColor(0.7, 0.6, 0.8, 0.05)
+        else
+            love.graphics.setColor(0, 0, 0, 0.07)
+        end
+        love.graphics.rectangle("fill", px, py, 1, 1)
+    end
+
+    -- Worn edges (top and bottom)
+    for i = 0, w - 1 do
+        if hash(i, 999) > 0.5 then
+            local alpha = 0.08 + hash(i, 1000) * 0.1
+            love.graphics.setColor(0.5, 0.4, 0.6, alpha)
+            love.graphics.rectangle("fill", x + i, y, 1, 1 + hash(i, 1001))
+        end
+        if hash(i, 998) > 0.5 then
+            local alpha = 0.05 + hash(i, 997) * 0.08
+            love.graphics.setColor(0, 0, 0, alpha)
+            love.graphics.rectangle("fill", x + i, y + h - 1 - hash(i, 996), 1, 1)
+        end
+    end
+end
+
+-- Draw a styled panel (matching title screen style)
+local function drawStyledPanel(x, y, w, h)
+    -- Panel shadow
+    love.graphics.setColor(0, 0, 0, 0.4)
+    love.graphics.rectangle("fill", x + 6, y + 6, w, h, 8)
+
+    -- Panel background with gradient
+    for i = 0, h - 1 do
+        local t = i / h
+        local alpha = UI.panelBg[4] - t * 0.1
+        love.graphics.setColor(UI.panelBg[1], UI.panelBg[2], UI.panelBg[3], alpha)
+        love.graphics.rectangle("fill", x, y + i, w, 1)
+    end
+
+    -- Weathering effects
+    drawWeathering(x, y, w, h)
+
+    -- Decorative top border (accent color)
+    love.graphics.setColor(UI.selectedBg[1], UI.selectedBg[2], UI.selectedBg[3], 1)
+    love.graphics.rectangle("fill", x, y, w, 3)
+    love.graphics.setColor(UI.buttonBorderHover[1], UI.buttonBorderHover[2], UI.buttonBorderHover[3], 0.6)
+    love.graphics.rectangle("fill", x, y, w, 1)
+
+    -- Side borders (subtle)
+    love.graphics.setColor(UI.panelBorder[1], UI.panelBorder[2], UI.panelBorder[3], 0.4)
+    love.graphics.setLineWidth(1)
+    love.graphics.line(x, y + 3, x, y + h)
+    love.graphics.line(x + w, y + 3, x + w, y + h)
+
+    -- Bottom accent
+    love.graphics.setColor(UI.buttonBg[1], UI.buttonBg[2], UI.buttonBg[3], 0.5)
+    love.graphics.rectangle("fill", x, y + h - 2, w, 2)
+end
 
 -- Button definitions
 local buttons = {}
@@ -66,6 +179,17 @@ local enemyButtons = {}
 local dropdownButtons = {}
 
 function GameConfig.load()
+    -- Load background image
+    local success, result = pcall(function()
+        return love.graphics.newImage("images/hero_vs_goblin_army_dark_tower.png")
+    end)
+    if success then
+        bgImage = result
+    else
+        bgImage = nil
+        print("GameConfig: Could not load background image")
+    end
+
     -- Reset to defaults
     config = {
         mapSize = 64,
@@ -80,17 +204,20 @@ function GameConfig.load()
     }
     activeDropdown = nil
     hoveredElement = nil
-    
+
     GameConfig.buildUI()
 end
 
 function GameConfig.buildUI()
     buttons = {}
     enemyButtons = {}
-    
+
     local screenW, screenH = love.graphics.getDimensions()
     local panelW, panelH = 500, 680  -- Increased height for all options
-    local panelX = (screenW - panelW) / 2
+    local infoPanelW = 280
+    local gap = 20
+    local totalW = panelW + gap + infoPanelW
+    local panelX = (screenW - totalW) / 2
     local panelY = (screenH - panelH) / 2
     
     local contentX = panelX + 30
@@ -331,48 +458,51 @@ end
 
 function GameConfig.draw()
     local screenW, screenH = love.graphics.getDimensions()
-    
-    -- Background
-    love.graphics.setColor(0.08, 0.06, 0.05, 1)
-    love.graphics.rectangle("fill", 0, 0, screenW, screenH)
-    
-    -- Subtle pattern
-    love.graphics.setColor(0.1, 0.08, 0.07, 0.5)
-    for y = 0, screenH, 20 do
-        for x = 0, screenW, 20 do
-            if (x + y) % 40 == 0 then
-                love.graphics.rectangle("fill", x, y, 10, 10)
-            end
-        end
+
+    -- Background image
+    if bgImage then
+        local imgW, imgH = bgImage:getWidth(), bgImage:getHeight()
+        local scale = math.max(screenW / imgW, screenH / imgH)
+        local drawW = imgW * scale
+        local drawH = imgH * scale
+        local drawX = (screenW - drawW) / 2
+        local drawY = (screenH - drawH) / 2
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(bgImage, drawX, drawY, 0, scale, scale)
+
+        -- Darken overlay so UI is readable
+        love.graphics.setColor(0, 0, 0, 0.4)
+        love.graphics.rectangle("fill", 0, 0, screenW, screenH)
+    else
+        -- Fallback background
+        love.graphics.setColor(0.08, 0.06, 0.05, 1)
+        love.graphics.rectangle("fill", 0, 0, screenW, screenH)
     end
-    
-    -- Main panel
+
+    -- Main panel (shifted left to make room for info panel)
     local panelW, panelH = 500, 680
-    local panelX = (screenW - panelW) / 2
+    local infoPanelW = 280
+    local gap = 20
+    local totalW = panelW + gap + infoPanelW
+    local panelX = (screenW - totalW) / 2
     local panelY = (screenH - panelH) / 2
-    
-    -- Panel shadow
-    love.graphics.setColor(0, 0, 0, 0.5)
-    love.graphics.rectangle("fill", panelX + 6, panelY + 6, panelW, panelH, 8)
-    
-    -- Panel background
-    love.graphics.setColor(UI.panelBg)
-    love.graphics.rectangle("fill", panelX, panelY, panelW, panelH, 8)
-    
-    -- Panel border
-    love.graphics.setColor(UI.panelBorder)
-    love.graphics.setLineWidth(3)
-    love.graphics.rectangle("line", panelX, panelY, panelW, panelH, 8)
-    
+
+    -- Draw main panel with title screen style
+    drawStyledPanel(panelX, panelY, panelW, panelH)
+
     -- Title
     love.graphics.setFont(Game.fonts.large or Game.fonts.medium)
-    love.graphics.setColor(UI.textGold)
+    -- Title shadow
+    love.graphics.setColor(0, 0, 0, 0.5)
     local title = "New Game"
     local titleW = (Game.fonts.large or Game.fonts.medium):getWidth(title)
+    love.graphics.print(title, panelX + (panelW - titleW) / 2 + 1, panelY + 26)
+    -- Title text
+    love.graphics.setColor(UI.textGold)
     love.graphics.print(title, panelX + (panelW - titleW) / 2, panelY + 25)
-    
-    -- Decorative line
-    love.graphics.setColor(0.5, 0.45, 0.35, 0.6)
+
+    -- Decorative line under title
+    love.graphics.setColor(UI.panelBorder[1], UI.panelBorder[2], UI.panelBorder[3], 0.5)
     love.graphics.setLineWidth(2)
     love.graphics.line(panelX + 40, panelY + 65, panelX + panelW - 40, panelY + 65)
     
@@ -415,12 +545,114 @@ function GameConfig.draw()
     for _, btn in ipairs(enemyButtons) do
         GameConfig.drawEnemyButton(btn)
     end
-    
+
+    -- Info panel on the right
+    local infoPanelX = panelX + panelW + gap
+    local infoPanelH = panelH
+
+    -- Draw info panel with title screen style
+    drawStyledPanel(infoPanelX, panelY, infoPanelW, infoPanelH)
+
+    -- Info panel title
+    love.graphics.setFont(Game.fonts.medium)
+    -- Title shadow
+    love.graphics.setColor(0, 0, 0, 0.5)
+    local infoTitle = "Summary"
+    local infoTitleW = Game.fonts.medium:getWidth(infoTitle)
+    love.graphics.print(infoTitle, infoPanelX + (infoPanelW - infoTitleW) / 2 + 1, panelY + 21)
+    -- Title text
+    love.graphics.setColor(UI.textGold)
+    love.graphics.print(infoTitle, infoPanelX + (infoPanelW - infoTitleW) / 2, panelY + 20)
+
+    -- Decorative line
+    love.graphics.setColor(UI.panelBorder[1], UI.panelBorder[2], UI.panelBorder[3], 0.5)
+    love.graphics.setLineWidth(2)
+    love.graphics.line(infoPanelX + 20, panelY + 50, infoPanelX + infoPanelW - 20, panelY + 50)
+
+    -- Info content
+    local infoY = panelY + 70
+    local lineHeight = 28
+    love.graphics.setFont(Game.fonts.small)
+
+    -- Map info
+    love.graphics.setColor(UI.textMuted)
+    love.graphics.print("Map", infoPanelX + 20, infoY)
+    love.graphics.setColor(UI.textLight)
+    love.graphics.print(config.mapSize .. "x" .. config.mapSize .. " tiles", infoPanelX + 100, infoY)
+    infoY = infoY + lineHeight
+
+    -- Tileset
+    love.graphics.setColor(UI.textMuted)
+    love.graphics.print("Season", infoPanelX + 20, infoY)
+    love.graphics.setColor(UI.textLight)
+    local tilesetName = config.tileset:sub(1,1):upper() .. config.tileset:sub(2)
+    love.graphics.print(tilesetName, infoPanelX + 100, infoY)
+    infoY = infoY + lineHeight
+
+    -- Trees
+    love.graphics.setColor(UI.textMuted)
+    love.graphics.print("Trees", infoPanelX + 20, infoY)
+    love.graphics.setColor(UI.textLight)
+    local treeDensityLabel = "Medium"
+    for _, d in ipairs(treeDensities) do
+        if math.abs(d.value - config.treeDensity) < 0.01 then
+            treeDensityLabel = d.label
+            break
+        end
+    end
+    love.graphics.print(treeDensityLabel, infoPanelX + 100, infoY)
+    infoY = infoY + lineHeight
+
+    -- River
+    love.graphics.setColor(UI.textMuted)
+    love.graphics.print("River", infoPanelX + 20, infoY)
+    love.graphics.setColor(UI.textLight)
+    if config.riverEnabled then
+        love.graphics.print("Width " .. config.riverWidth .. ", " .. config.numBridges .. " bridge" .. (config.numBridges > 1 and "s" or ""), infoPanelX + 100, infoY)
+    else
+        love.graphics.print("None", infoPanelX + 100, infoY)
+    end
+    infoY = infoY + lineHeight + 10
+
+    -- Divider
+    love.graphics.setColor(UI.panelBorder[1], UI.panelBorder[2], UI.panelBorder[3], 0.4)
+    love.graphics.setLineWidth(1)
+    love.graphics.line(infoPanelX + 20, infoY, infoPanelX + infoPanelW - 20, infoY)
+    infoY = infoY + 15
+
+    -- Opponents section
+    love.graphics.setColor(UI.textGold)
+    love.graphics.setFont(Game.fonts.small)
+    love.graphics.print("Opponents (" .. #config.enemies .. ")", infoPanelX + 20, infoY)
+    infoY = infoY + lineHeight
+
+    love.graphics.setColor(UI.textLight)
+    for i, enemy in ipairs(config.enemies) do
+        local personality = enemy.personality:sub(1,1):upper() .. enemy.personality:sub(2)
+        love.graphics.print(i .. ". " .. enemy.name .. " (" .. personality .. ")", infoPanelX + 25, infoY)
+        infoY = infoY + lineHeight - 4
+        if infoY > panelY + infoPanelH - 60 then break end
+    end
+
+    -- Estimated game info at bottom
+    infoY = panelY + infoPanelH - 100
+    love.graphics.setColor(UI.panelBorder[1], UI.panelBorder[2], UI.panelBorder[3], 0.4)
+    love.graphics.line(infoPanelX + 20, infoY, infoPanelX + infoPanelW - 20, infoY)
+    infoY = infoY + 15
+
+    love.graphics.setColor(UI.textMuted)
+    love.graphics.setFont(Game.fonts.small)
+    local totalTiles = config.mapSize * config.mapSize
+    love.graphics.print("Total tiles: " .. totalTiles, infoPanelX + 20, infoY)
+    infoY = infoY + lineHeight - 6
+    local estimatedTrees = math.floor(totalTiles * config.treeDensity * 0.3)
+    love.graphics.print("Est. trees: ~" .. estimatedTrees, infoPanelX + 20, infoY)
+
     -- Draw dropdown if active
     if activeDropdown then
         GameConfig.drawDropdown()
     end
-    
+
     love.graphics.setColor(1, 1, 1, 1)
 end
 
@@ -430,84 +662,96 @@ function GameConfig.drawButton(btn)
     
     -- Background
     if isSelected then
-        love.graphics.setColor(0.4, 0.32, 0.2, 1)
+        love.graphics.setColor(UI.selectedBg)
     elseif isHovered then
         love.graphics.setColor(UI.buttonHover)
     else
         love.graphics.setColor(UI.buttonBg)
     end
     love.graphics.rectangle("fill", btn.x, btn.y, btn.w, btn.h, 4)
-    
-    -- Border
-    if isSelected or (btn.primary and isHovered) then
-        love.graphics.setColor(UI.buttonBorderHover)
-    elseif isHovered then
-        love.graphics.setColor(0.6, 0.55, 0.4, 1)
-    else
-        love.graphics.setColor(UI.buttonBorder)
+
+    -- Top highlight (subtle)
+    love.graphics.setColor(1, 1, 1, isSelected and 0.2 or 0.1)
+    love.graphics.line(btn.x + 4, btn.y + 1, btn.x + btn.w - 4, btn.y + 1)
+
+    -- Border (subtle, only on hover/select)
+    if isSelected or isHovered then
+        love.graphics.setColor(UI.buttonBorderHover[1], UI.buttonBorderHover[2], UI.buttonBorderHover[3], 0.6)
+        love.graphics.setLineWidth(1)
+        love.graphics.rectangle("line", btn.x, btn.y, btn.w, btn.h, 4)
     end
-    love.graphics.setLineWidth(2)
-    love.graphics.rectangle("line", btn.x, btn.y, btn.w, btn.h, 4)
-    
-    -- Text
+
+    -- Text shadow
     love.graphics.setFont(Game.fonts.small)
+    local textW = Game.fonts.small:getWidth(btn.text)
+    local textH = Game.fonts.small:getHeight()
+    love.graphics.setColor(0, 0, 0, 0.5)
+    love.graphics.print(btn.text, btn.x + (btn.w - textW) / 2 + 1, btn.y + (btn.h - textH) / 2 + 1)
+
+    -- Text
     if isSelected then
         love.graphics.setColor(UI.textGold)
     elseif isHovered then
-        love.graphics.setColor(1, 0.95, 0.85, 1)
-    else
         love.graphics.setColor(UI.textLight)
+    else
+        love.graphics.setColor(UI.textMuted)
     end
-    local textW = Game.fonts.small:getWidth(btn.text)
-    local textH = Game.fonts.small:getHeight()
     love.graphics.print(btn.text, btn.x + (btn.w - textW) / 2, btn.y + (btn.h - textH) / 2)
 end
 
 function GameConfig.drawEnemyButton(btn)
     local isHovered = hoveredElement == btn
     local isActive = activeDropdown and activeDropdown.enemyIndex == btn.enemyIndex
-    
+
     -- Background
     if isActive then
-        love.graphics.setColor(0.35, 0.3, 0.22, 1)
+        love.graphics.setColor(UI.selectedBg)
     elseif isHovered then
         love.graphics.setColor(UI.buttonHover)
     else
         love.graphics.setColor(UI.sectionBg)
     end
     love.graphics.rectangle("fill", btn.x, btn.y, btn.w, btn.h, 4)
-    
-    -- Border
+
+    -- Top highlight (subtle)
+    love.graphics.setColor(1, 1, 1, isActive and 0.2 or 0.1)
+    love.graphics.line(btn.x + 4, btn.y + 1, btn.x + btn.w - 4, btn.y + 1)
+
+    -- Border (subtle, only on hover/active)
     if isActive or isHovered then
-        love.graphics.setColor(UI.buttonBorderHover)
-    else
-        love.graphics.setColor(UI.buttonBorder)
+        love.graphics.setColor(UI.buttonBorderHover[1], UI.buttonBorderHover[2], UI.buttonBorderHover[3], 0.6)
+        love.graphics.setLineWidth(1)
+        love.graphics.rectangle("line", btn.x, btn.y, btn.w, btn.h, 4)
     end
-    love.graphics.setLineWidth(1)
-    love.graphics.rectangle("line", btn.x, btn.y, btn.w, btn.h, 4)
-    
-    -- Enemy number
+
+    -- Enemy number with shadow
     love.graphics.setFont(Game.fonts.small)
+    love.graphics.setColor(0, 0, 0, 0.5)
+    love.graphics.print(btn.enemyIndex .. ".", btn.x + 9, btn.y + 9)
     love.graphics.setColor(UI.textMuted)
     love.graphics.print(btn.enemyIndex .. ".", btn.x + 8, btn.y + 8)
-    
-    -- Enemy name
+
+    -- Enemy name with shadow
+    love.graphics.setColor(0, 0, 0, 0.5)
+    love.graphics.print(btn.text, btn.x + 31, btn.y + 9)
     love.graphics.setColor(UI.textGold)
     love.graphics.print(btn.text, btn.x + 30, btn.y + 8)
-    
+
     -- Dropdown arrow
     love.graphics.setColor(UI.textMuted)
     local arrowX = btn.x + btn.w - 20
     local arrowY = btn.y + btn.h / 2
     love.graphics.polygon("fill", arrowX, arrowY - 3, arrowX + 8, arrowY - 3, arrowX + 4, arrowY + 4)
-    
-    -- Personality description
+
+    -- Personality description with shadow
     local enemy = config.enemies[btn.enemyIndex]
     if enemy then
         for _, p in ipairs(personalities) do
             if p.id == enemy.personality then
-                love.graphics.setColor(UI.textMuted)
                 love.graphics.setFont(Game.fonts.small)
+                love.graphics.setColor(0, 0, 0, 0.5)
+                love.graphics.print(p.desc, btn.x + btn.w + 16, btn.y + 9)
+                love.graphics.setColor(UI.textMuted)
                 love.graphics.print(p.desc, btn.x + btn.w + 15, btn.y + 8)
                 break
             end
@@ -542,37 +786,58 @@ function GameConfig.drawDropdown()
     
     -- Shadow
     love.graphics.setColor(0, 0, 0, 0.6)
-    love.graphics.rectangle("fill", dropX + 3, dropY + 3, dropW, dropH, 4)
-    
-    -- Background
-    love.graphics.setColor(UI.dropdownBg)
-    love.graphics.rectangle("fill", dropX, dropY, dropW, dropH, 4)
-    
-    -- Border
-    love.graphics.setColor(UI.buttonBorder)
+    love.graphics.rectangle("fill", dropX + 4, dropY + 4, dropW, dropH, 4)
+
+    -- Background with gradient
+    for i = 0, dropH - 1 do
+        local t = i / dropH
+        local alpha = UI.dropdownBg[4] - t * 0.08
+        love.graphics.setColor(UI.dropdownBg[1], UI.dropdownBg[2], UI.dropdownBg[3], alpha)
+        love.graphics.rectangle("fill", dropX, dropY + i, dropW, 1)
+    end
+
+    -- Top border accent
+    love.graphics.setColor(UI.accentPrimary[1], UI.accentPrimary[2], UI.accentPrimary[3], 0.6)
+    love.graphics.setLineWidth(2)
+    love.graphics.line(dropX + 4, dropY, dropX + dropW - 4, dropY)
+
+    -- Subtle side borders
+    love.graphics.setColor(1, 1, 1, 0.05)
     love.graphics.setLineWidth(1)
-    love.graphics.rectangle("line", dropX, dropY, dropW, dropH, 4)
-    
+    love.graphics.line(dropX, dropY + 4, dropX, dropY + dropH - 4)
+    love.graphics.line(dropX + dropW, dropY + 4, dropX + dropW, dropY + dropH - 4)
+
     -- Items
     for _, btn in ipairs(dropdownButtons) do
         local isHovered = hoveredElement == btn
         local isSelected = config.enemies[btn.enemyIndex].personality == btn.personality.id
-        
+
         if isSelected then
             love.graphics.setColor(UI.selectedBg)
             love.graphics.rectangle("fill", btn.x, btn.y, btn.w, btn.h, 3)
+            -- Top highlight on selected
+            love.graphics.setColor(1, 1, 1, 0.15)
+            love.graphics.line(btn.x + 3, btn.y + 1, btn.x + btn.w - 3, btn.y + 1)
         elseif isHovered then
-            love.graphics.setColor(0.28, 0.24, 0.18, 1)
+            love.graphics.setColor(UI.buttonHover)
             love.graphics.rectangle("fill", btn.x, btn.y, btn.w, btn.h, 3)
+            -- Top highlight on hover
+            love.graphics.setColor(1, 1, 1, 0.1)
+            love.graphics.line(btn.x + 3, btn.y + 1, btn.x + btn.w - 3, btn.y + 1)
         end
-        
+
+        -- Text shadow
         love.graphics.setFont(Game.fonts.small)
+        love.graphics.setColor(0, 0, 0, 0.5)
+        love.graphics.print(btn.personality.name, btn.x + 11, btn.y + 6)
+
+        -- Text
         if isSelected then
             love.graphics.setColor(UI.textGold)
         elseif isHovered then
-            love.graphics.setColor(1, 0.95, 0.85, 1)
-        else
             love.graphics.setColor(UI.textLight)
+        else
+            love.graphics.setColor(UI.textMuted)
         end
         love.graphics.print(btn.personality.name, btn.x + 10, btn.y + 5)
     end
