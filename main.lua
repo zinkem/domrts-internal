@@ -311,6 +311,59 @@ To add new game mechanics:
     → gameplay.lua: update(), handleRightClick(), mousepressed()
 
 ================================================================================
+CODING CONVENTIONS & GOTCHAS:
+================================================================================
+
+LUA UPVALUE LIMIT:
+    Lua has a hard limit of 60 upvalues per function. An upvalue is any local
+    variable from an enclosing scope that a function references.
+
+    gameplay.lua is at ~52 upvalues. To avoid hitting the limit:
+
+    1. NEW FEATURES GO IN SEPARATE MODULES
+       - Create new_feature.lua with its own state
+       - gameplay.lua just requires and calls it
+       - Example: surrender.lua handles surrender dialog + credits screen
+
+    2. If you must add to gameplay.lua:
+       - Modules are consolidated in the M table (M.Farm, M.Peon, etc.)
+       - Add new requires to M, not as separate locals
+       - Group related state into tables, not individual locals
+
+MODULE PATTERN:
+    -- Good: state on self, passed to functions
+    function Module.new()
+        return { items = {}, count = 0 }
+    end
+    function Module.update(self, dt)
+        for _, item in ipairs(self.items) do ... end
+    end
+
+    -- Avoid: module-level locals (become upvalues)
+    local items = {}
+    local count = 0
+    function Module.update(dt)
+        for _, item in ipairs(items) do ... end  -- upvalue!
+    end
+
+SCENE STRUCTURE:
+    Every scene module should export:
+        .load(options)      - Initialize state
+        .update(dt)         - Game logic
+        .draw()             - Rendering
+        .keypressed(key)    - Optional
+        .mousepressed(x,y,b) - Optional
+        .mousereleased(x,y,b) - Optional
+        .wheelmoved(x,y)    - Optional
+
+OPTIONAL MODULES:
+    Use pcall for modules that may not exist:
+        pcall(function() M.LumberMill = require("lumbermill") end)
+
+    Check before use:
+        if M.LumberMill then M.LumberMill.update(dt) end
+
+================================================================================
 ]]
 
 --[[
