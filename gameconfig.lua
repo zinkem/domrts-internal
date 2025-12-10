@@ -797,7 +797,7 @@ function GameConfig.drawDropdown()
     end
 
     -- Top border accent
-    love.graphics.setColor(UI.accentPrimary[1], UI.accentPrimary[2], UI.accentPrimary[3], 0.6)
+    love.graphics.setColor(UI.buttonBorderHover[1], UI.buttonBorderHover[2], UI.buttonBorderHover[3], 0.6)
     love.graphics.setLineWidth(2)
     love.graphics.line(dropX + 4, dropY, dropX + dropW - 4, dropY)
 
