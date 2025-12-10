@@ -75,15 +75,26 @@ function Audio.playRandomMusic()
     currentMusic:play()
 end
 
+-- Track if we were disabled (to know when to restart)
+local wasDisabled = false
+
 -- Update audio (call each frame to check if music ended)
 function Audio.update(dt)
     if not Game.settings.musicEnabled then
         if currentMusic and currentMusic:isPlaying() then
             currentMusic:stop()
         end
+        wasDisabled = true
         return
     end
-    
+
+    -- If just re-enabled, start playing
+    if wasDisabled then
+        wasDisabled = false
+        Audio.playRandomMusic()
+        return
+    end
+
     -- Check if music stopped and play next random track
     if currentMusic and not currentMusic:isPlaying() then
         Audio.playRandomMusic()

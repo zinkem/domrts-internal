@@ -67,105 +67,45 @@ AI.PERSONALITIES = {
 
 function AI.new(params)
     local self = setmetatable({}, AI)
-    
+
     self.team = params.team or (Teams and Teams.ENEMY or 2)
     self.townHall = params.townHall
     self.map = params.map
-    
+
     -- Resources (AI has its own economy)
     self.gold = params.startGold or 1000
     self.lumber = params.startLumber or 400
-    
+
     -- Unit/building tracking
     self.peons = {}
     self.footmen = {}
     self.farms = {}
     self.barracksBuildings = {}
-    
+
     -- Peon assignment tracking
     self.totalPeonsSpawned = params.startingPeons or 7
     self.peonsOnGold = 6  -- Starting assignment
     self.peonsOnLumber = 1
-    
+
     -- Building state tracking
     self.isBuildingFarm = false
     self.isBuildingBarracks = false
-    
+
     -- Timers
     self.thinkTimer = 0
     self.thinkInterval = 0.5
     self.gameTime = 0
-    self.lastLogTime = 0
-    self.logInterval = 5.0  -- Log every 5 seconds
-    
+
     -- Load personality
     local personalityName = params.personality or "blinky"
     self.personality = AI.PERSONALITIES[personalityName]
     self.buildOrderIndex = 1
     self.buildOrderComplete = false
-    
+
     -- Attack tracking
     self.lastAttackTime = 0
-    
-    self:log("AI initialized with personality: " .. self.personality.name)
-    self:logBuildOrder()
-    
+
     return self
-end
-
--- Logging function
-function AI:log(message)
-    local timeStr = string.format("[%02d:%02d]", 
-        math.floor(self.gameTime / 60), 
-        math.floor(self.gameTime % 60))
-    print(timeStr .. " [AI] " .. message)
-end
-
-function AI:logBuildOrder()
-    self:log("Build Order:")
-    for i, item in ipairs(self.personality.buildOrder) do
-        local marker = i == self.buildOrderIndex and " --> " or "     "
-        local cost = AI.COSTS[item.type]
-        local costStr = ""
-        if cost then
-            costStr = string.format(" (G:%d L:%d)", cost.gold, cost.lumber)
-        end
-        self:log(marker .. i .. ". " .. item.type .. costStr)
-    end
-end
-
-function AI:logStatus()
-    local current, max = self:getPopulation()
-    self:log(string.format("Resources: Gold=%d, Lumber=%d | Pop: %d/%d | Peons: %d gold, %d lumber | Footmen: %d",
-        self.gold, self.lumber, current, max, self.peonsOnGold, self.peonsOnLumber, #self.footmen))
-    
-    -- Log building status
-    local buildingStatus = {}
-    if self.isBuildingFarm then table.insert(buildingStatus, "Farm") end
-    if self.isBuildingBarracks then table.insert(buildingStatus, "Barracks") end
-    if #buildingStatus > 0 then
-        self:log("Building: " .. table.concat(buildingStatus, ", "))
-    end
-    
-    -- Log what we're waiting for
-    if not self.buildOrderComplete and self.buildOrderIndex <= #self.personality.buildOrder then
-        local nextItem = self.personality.buildOrder[self.buildOrderIndex]
-        local cost = AI.COSTS[nextItem.type]
-        if cost then
-            local needGold = math.max(0, cost.gold - self.gold)
-            local needLumber = math.max(0, cost.lumber - self.lumber)
-            if needGold > 0 or needLumber > 0 then
-                self:log(string.format("Waiting for: %s (need G:%d L:%d more)",
-                    nextItem.type, needGold, needLumber))
-            elseif self:isSupplyCapped() then
-                self:log(string.format("Waiting for: %s (supply capped)", nextItem.type))
-            else
-                self:log(string.format("Ready for: %s", nextItem.type))
-            end
-        else
-            self:log(string.format("Next: %s", nextItem.type))
-        end
-    end
 end
 
 function AI:canAfford(gold, lumber)
@@ -392,18 +332,12 @@ end
 function AI:update(dt, goldMines, playerTownHall, createBuildingCallback, gameplayPeons, gameplayFootmen, gameplayFarms, gameplayBarracks)
     self.thinkTimer = self.thinkTimer + dt
     self.gameTime = self.gameTime + dt
-    
+
     if self.thinkTimer < self.thinkInterval then
         return
     end
     self.thinkTimer = 0
-    
-    -- Periodic status log
-    if self.gameTime - self.lastLogTime >= self.logInterval then
-        self.lastLogTime = self.gameTime
-        self:logStatus()
-    end
-    
+
     -- Don't do anything if townhall is dead
     if not self.townHall or (self.townHall.isDead and self.townHall:isDead()) then
         return
@@ -429,7 +363,6 @@ function AI:executeBuildOrder(goldMines, playerTownHall, createBuildingCallback)
     
     if self.buildOrderIndex > #self.personality.buildOrder then
         self.buildOrderComplete = true
-        self:log("Build order complete!")
         return
     end
     
@@ -452,123 +385,100 @@ function AI:executeBuildOrder(goldMines, playerTownHall, createBuildingCallback)
     end
     
     if success then
-        self:log("Completed build order step: " .. currentItem.type)
         self.buildOrderIndex = self.buildOrderIndex + 1
-        
-        -- Log remaining build order
-        if self.buildOrderIndex <= #self.personality.buildOrder then
-            local next = self.personality.buildOrder[self.buildOrderIndex]
-            self:log("Next: " .. next.type)
-        end
     end
 end
 
 function AI:tryBuildPeon(goldMines)
     if not self.townHall then return false end
     if self.townHall.isProducing then return false end
-    
+
     local cost = AI.COSTS.peon
     if not self:canAfford(cost.gold, cost.lumber) then return false end
-    
-    if self:isSupplyCapped() then 
-        self:log("Cannot build peon - supply capped!")
-        return false 
+
+    if self:isSupplyCapped() then
+        return false
     end
-    
+
     self:spend(cost.gold, cost.lumber)
     self.townHall:startProduction()
     self.totalPeonsSpawned = self.totalPeonsSpawned + 1
-    
+
+    -- Log AI queue action
+    if Game and Game.Replay then Game.Replay.log("QUEUE", "AI queued Peon at Town Hall") end
+
     return true
 end
 
 function AI:tryBuildFarm(createBuildingCallback)
     if self.isBuildingFarm then return false end  -- Already building one
-    
+
     local cost = AI.COSTS.farm
     if not self:canAfford(cost.gold, cost.lumber) then return false end
-    
+
     local peon = self:getIdlePeon()
-    if not peon then 
-        self:log("Cannot build farm - no available peon")
-        return false 
-    end
-    
+    if not peon then return false end
+
     local gridX, gridY = self:findBuildLocation(2)
-    if not gridX then 
-        self:log("Cannot build farm - no valid location")
-        return false 
-    end
-    
+    if not gridX then return false end
+
     self:spend(cost.gold, cost.lumber)
     self.isBuildingFarm = true
-    
+
     if createBuildingCallback then
         createBuildingCallback(peon, "farm", gridX, gridY, self.team)
     end
-    
-    self:log(string.format("Building farm at (%d, %d)", gridX, gridY))
+
     return true
 end
 
 function AI:tryBuildBarracks(createBuildingCallback)
     if self.isBuildingBarracks then return false end
     if #self.barracksBuildings > 0 then return true end  -- Already have one
-    
+
     local cost = AI.COSTS.barracks
     if not self:canAfford(cost.gold, cost.lumber) then return false end
-    
+
     local peon = self:getIdlePeon()
-    if not peon then 
-        self:log("Cannot build barracks - no available peon")
-        return false 
-    end
-    
+    if not peon then return false end
+
     local gridX, gridY = self:findBuildLocation(3)
-    if not gridX then 
-        self:log("Cannot build barracks - no valid location")
-        return false 
-    end
-    
+    if not gridX then return false end
+
     self:spend(cost.gold, cost.lumber)
     self.isBuildingBarracks = true
-    
+
     if createBuildingCallback then
         createBuildingCallback(peon, "barracks", gridX, gridY, self.team)
     end
-    
-    self:log(string.format("Building barracks at (%d, %d)", gridX, gridY))
+
     return true
 end
 
 function AI:tryTrainFootman()
-    if #self.barracksBuildings == 0 then 
-        self:log("Cannot train footman - no barracks")
-        return false 
-    end
-    
+    if #self.barracksBuildings == 0 then return false end
+
     local barracks = self.barracksBuildings[1]
     if barracks.isProducing then return false end
-    
+
     local cost = AI.COSTS.footman
     if not self:canAfford(cost.gold, cost.lumber) then return false end
-    
-    if self:isSupplyCapped() then 
-        self:log("Cannot train footman - supply capped!")
-        return false 
-    end
-    
+
+    if self:isSupplyCapped() then return false end
+
     self:spend(cost.gold, cost.lumber)
     barracks:startProduction("footman")
-    
-    self:log("Training footman")
+
+    -- Log AI queue action
+    if Game and Game.Replay then Game.Replay.log("QUEUE", "AI queued Footman at Barracks") end
+
     return true
 end
 
 function AI:tryAttack(playerTownHall)
     if not playerTownHall then return true end
     if playerTownHall.isDead and playerTownHall:isDead() then return true end
-    
+
     -- Gather idle footmen
     local attackers = {}
     for _, footman in ipairs(self.footmen) do
@@ -576,19 +486,16 @@ function AI:tryAttack(playerTownHall)
             table.insert(attackers, footman)
         end
     end
-    
+
     if #attackers < self.personality.attackWaveSize then
-        self:log(string.format("Waiting for attack wave: %d/%d footmen ready", 
-            #attackers, self.personality.attackWaveSize))
         return false
     end
-    
+
     -- Send them to attack!
-    self:log(string.format("ATTACKING with %d footmen!", #attackers))
     for _, footman in ipairs(attackers) do
         footman:setAttackTarget(playerTownHall)
     end
-    
+
     return true
 end
 
@@ -596,24 +503,21 @@ end
 function AI:onPeonSpawned(peon, goldMines)
     local peonNumber = self.totalPeonsSpawned
     local lumberRatio = self.personality.lumberRatio or 7
-    
+
     if peonNumber % lumberRatio == 0 then
         local treeX, treeY = self:findNearbyTree()
         if treeX and peon.goToTree then
             peon:goToTree(treeX, treeY)
-            self:log(string.format("Peon #%d -> lumber", peonNumber))
         else
             local mine = self:findClosestMine(peon.worldX, peon.worldY, goldMines)
             if mine and peon.goToMine then
                 peon:goToMine(mine)
-                self:log(string.format("Peon #%d -> gold (no trees)", peonNumber))
             end
         end
     else
         local mine = self:findClosestMine(peon.worldX, peon.worldY, goldMines)
         if mine and peon.goToMine then
             peon:goToMine(mine)
-            self:log(string.format("Peon #%d -> gold", peonNumber))
         end
     end
 end

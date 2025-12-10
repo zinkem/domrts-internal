@@ -6,51 +6,40 @@
     ENHANCED: Now includes particle effects and visual enhancements
 ]]
 
-local Map = require("map")
-local TownHall = require("townhall")
-local GoldMine = require("goldmine")
-local Peon = require("peon")
-local Farm = require("farm")
-local Barracks = require("barracks")
-local Footman = require("footman")
-local Pathfinding = require("pathfinding")
-local Requirements = require("requirements")
+-- All modules consolidated into one table to avoid upvalue limit
+local M = {
+    Map = require("map"),
+    TownHall = require("townhall"),
+    GoldMine = require("goldmine"),
+    Peon = require("peon"),
+    Farm = require("farm"),
+    Barracks = require("barracks"),
+    Footman = require("footman"),
+    Pathfinding = require("pathfinding"),
+    Requirements = require("requirements"),
+    ScoutTower = require("scouttower"),
+    UIDraw = require("ui_draw"),
+    CommandBar = require("command_bar"),
+    Surrender = require("surrender"),
+}
 
--- New buildings (optional, may not all be implemented yet)
-local LumberMill, Blacksmith, ArcheryRange, Stable, SiegeWorkshop
-pcall(function() LumberMill = require("lumbermill") end)
-pcall(function() Blacksmith = require("blacksmith") end)
-local ScoutTower = require("scouttower")
-pcall(function() ArcheryRange = require("archeryrange") end)
-pcall(function() Stable = require("stable") end)
-pcall(function() SiegeWorkshop = require("siegeworkshop") end)
-
--- New units (optional, may not all be implemented yet)
-local Archer, Knight, FlyingScout, Ballista, Kamikaze
-pcall(function() Archer = require("archer") end)
-pcall(function() Knight = require("knight") end)
-pcall(function() FlyingScout = require("flyingscout") end)
-pcall(function() Ballista = require("ballista") end)
-pcall(function() Kamikaze = require("kamikaze") end)
-local UIDraw = require("ui_draw")
-local CommandBar = require("command_bar")
-
--- Team system
-local Teams
-local Player
-local AI
-pcall(function() Teams = require("teams") end)
-pcall(function() Player = require("player") end)
-pcall(function() AI = require("ai") end)
-
--- Visual effects (optional - graceful fallback)
-local Effects, DrawUtils
-pcall(function() Effects = require("effects") end)
-pcall(function() DrawUtils = require("draw_utils") end)
-
--- Audio system (optional)
-local Audio
-pcall(function() Audio = require("audio") end)
+-- Optional modules (graceful fallback)
+pcall(function() M.LumberMill = require("lumbermill") end)
+pcall(function() M.Blacksmith = require("blacksmith") end)
+pcall(function() M.ArcheryRange = require("archeryrange") end)
+pcall(function() M.Stable = require("stable") end)
+pcall(function() M.SiegeWorkshop = require("siegeworkshop") end)
+pcall(function() M.Archer = require("archer") end)
+pcall(function() M.Knight = require("knight") end)
+pcall(function() M.FlyingScout = require("flyingscout") end)
+pcall(function() M.Ballista = require("ballista") end)
+pcall(function() M.Kamikaze = require("kamikaze") end)
+pcall(function() M.Teams = require("teams") end)
+pcall(function() M.Player = require("player") end)
+pcall(function() M.AI = require("ai") end)
+pcall(function() M.Effects = require("effects") end)
+pcall(function() M.DrawUtils = require("draw_utils") end)
+pcall(function() M.Audio = require("audio") end)
 
 local Gameplay = {}
 
@@ -58,7 +47,7 @@ local Gameplay = {}
 local elapsedTime = 0
 local victory = false
 local defeat = false
-local endScreenButton = nil  -- Button bounds for victory/defeat screen
+local endScreenButton = nil
 
 -- Game stats for victory screen
 local gameStats = {
@@ -227,7 +216,7 @@ local function checkAllMinesDepleted()
 end
 
 local function countPlayerUnits(unitList)
-    local playerTeam = Teams and Teams.PLAYER or 1
+    local playerTeam = M.Teams and M.Teams.PLAYER or 1
     local count = 0
     for _, unit in ipairs(unitList) do
         if unit.team == nil or unit.team == playerTeam then
@@ -240,7 +229,7 @@ end
 -- Check if entity belongs to human player (for command filtering)
 local function isPlayerOwned(entity)
     if not entity then return false end
-    local playerTeam = Teams and Teams.PLAYER or 1
+    local playerTeam = M.Teams and M.Teams.PLAYER or 1
     return entity.team == nil or entity.team == playerTeam
 end
 
@@ -272,11 +261,11 @@ local function calculatePopulation()
                  countPlayerUnits(ballistas) + countPlayerUnits(kamikazes)
 
     -- Only count player-owned farms
-    local playerTeam = Teams and Teams.PLAYER or 1
+    local playerTeam = M.Teams and M.Teams.PLAYER or 1
     maxPop = BASE_CAPACITY
     for _, farm in ipairs(farms) do
         if farm.completed and (farm.team == nil or farm.team == playerTeam) then
-            maxPop = maxPop + Farm.CAPACITY_BONUS
+            maxPop = maxPop + M.Farm.CAPACITY_BONUS
         end
     end
 end
@@ -383,16 +372,16 @@ end
 
 -- Helper: Draw stone panel background (using UIDraw module)
 local function drawStonePanel(x, y, w, h, cornerRadius)
-    UIDraw.drawStonePanel(x, y, w, h, cornerRadius)
+    M.UIDraw.drawStonePanel(x, y, w, h, cornerRadius)
 end
 
 -- Helper: Draw resource group with icon (using UIDraw module)
 local function drawResourceGroup(x, y, iconType, value, label)
-    UIDraw.drawResourceGroup(x, y, iconType, value, label, Game.fonts)
+    M.UIDraw.drawResourceGroup(x, y, iconType, value, label, Game.fonts)
 end
 
 local function drawTopBar(screenW)
-    UIDraw.drawTopBar(screenW, resources, currentPop, maxPop, elapsedTime, townHall.tier, Game.settings.gameSpeed, Game.fonts)
+    M.UIDraw.drawTopBar(screenW, resources, currentPop, maxPop, elapsedTime, townHall.tier, Game.settings.gameSpeed, Game.fonts)
 
     -- Debug mode checkbox (positioned left of the tier indicator)
     local checkboxSize = 16
@@ -426,13 +415,13 @@ local function drawTopBar(screenW)
 end
 
 local function drawMinimap(screenW)
-    local mmX, mmY, mmSize = UIDraw.drawMinimapFrame(screenW)
+    local mmX, mmY, mmSize = M.UIDraw.drawMinimapFrame(screenW)
 
     -- Draw actual minimap
     local mmScale = mmSize / map.width
     map:drawMinimap(mmX, mmY, mmSize)
 
-    local playerTeam = Teams and Teams.PLAYER or 1
+    local playerTeam = M.Teams and M.Teams.PLAYER or 1
 
     -- Helper to check if entity should show on minimap
     local function isMinimapVisible(entity, requireVisible)
@@ -533,7 +522,7 @@ end
 local function getCommandButtons()
     local buttons = {}
     local selEntity = selectedEntities[1]
-    local playerTeam = Teams and Teams.PLAYER or 1
+    local playerTeam = M.Teams and M.Teams.PLAYER or 1
 
     if not selEntity or selEntity.team ~= playerTeam then
         return buttons
@@ -586,10 +575,10 @@ local function getCommandButtons()
             hotkey = "F",
             text = "Farm",
             icon = "farm",
-            cost = Farm.COST_GOLD .. "/" .. Farm.COST_LUMBER,
-            enabled = canBuild and resources.gold >= Farm.COST_GOLD and resources.lumber >= Farm.COST_LUMBER,
+            cost = M.Farm.COST_GOLD .. "/" .. M.Farm.COST_LUMBER,
+            enabled = canBuild and resources.gold >= M.Farm.COST_GOLD and resources.lumber >= M.Farm.COST_LUMBER,
             action = function()
-                if resources.gold >= Farm.COST_GOLD and resources.lumber >= Farm.COST_LUMBER then
+                if resources.gold >= M.Farm.COST_GOLD and resources.lumber >= M.Farm.COST_LUMBER then
                     startBuildingPlacement(selEntity, "farm")
                 end
             end
@@ -598,10 +587,10 @@ local function getCommandButtons()
             hotkey = "B",
             text = "Barracks",
             icon = "barracks",
-            cost = Barracks.COST_GOLD .. "/" .. Barracks.COST_LUMBER,
-            enabled = canBuild and resources.gold >= Barracks.COST_GOLD and resources.lumber >= Barracks.COST_LUMBER,
+            cost = M.Barracks.COST_GOLD .. "/" .. M.Barracks.COST_LUMBER,
+            enabled = canBuild and resources.gold >= M.Barracks.COST_GOLD and resources.lumber >= M.Barracks.COST_LUMBER,
             action = function()
-                if resources.gold >= Barracks.COST_GOLD and resources.lumber >= Barracks.COST_LUMBER then
+                if resources.gold >= M.Barracks.COST_GOLD and resources.lumber >= M.Barracks.COST_LUMBER then
                     startBuildingPlacement(selEntity, "barracks")
                 end
             end
@@ -610,10 +599,10 @@ local function getCommandButtons()
             hotkey = "T",
             text = "Tower",
             icon = "tower",
-            cost = ScoutTower.COST_GOLD .. "/" .. ScoutTower.COST_LUMBER,
-            enabled = canBuild and resources.gold >= ScoutTower.COST_GOLD and resources.lumber >= ScoutTower.COST_LUMBER,
+            cost = M.ScoutTower.COST_GOLD .. "/" .. M.ScoutTower.COST_LUMBER,
+            enabled = canBuild and resources.gold >= M.ScoutTower.COST_GOLD and resources.lumber >= M.ScoutTower.COST_LUMBER,
             action = function()
-                if resources.gold >= ScoutTower.COST_GOLD and resources.lumber >= ScoutTower.COST_LUMBER then
+                if resources.gold >= M.ScoutTower.COST_GOLD and resources.lumber >= M.ScoutTower.COST_LUMBER then
                     startBuildingPlacement(selEntity, "scouttower")
                 end
             end
@@ -622,11 +611,11 @@ local function getCommandButtons()
             hotkey = "L",
             text = "Lumber Mill",
             icon = "lumbermill",
-            cost = LumberMill.COST_GOLD .. "/" .. LumberMill.COST_LUMBER,
-            enabled = canBuild and Requirements.canBuild("lumbermill") and resources.gold >= LumberMill.COST_GOLD and resources.lumber >= LumberMill.COST_LUMBER,
-            requirement = not Requirements.canBuild("lumbermill") and "Barracks" or nil,
+            cost = M.LumberMill.COST_GOLD .. "/" .. M.LumberMill.COST_LUMBER,
+            enabled = canBuild and M.Requirements.canBuild("lumbermill") and resources.gold >= M.LumberMill.COST_GOLD and resources.lumber >= M.LumberMill.COST_LUMBER,
+            requirement = not M.Requirements.canBuild("lumbermill") and "Barracks" or nil,
             action = function()
-                if Requirements.canBuild("lumbermill") and resources.gold >= LumberMill.COST_GOLD and resources.lumber >= LumberMill.COST_LUMBER then
+                if M.Requirements.canBuild("lumbermill") and resources.gold >= M.LumberMill.COST_GOLD and resources.lumber >= M.LumberMill.COST_LUMBER then
                     startBuildingPlacement(selEntity, "lumbermill")
                 end
             end
@@ -635,11 +624,11 @@ local function getCommandButtons()
             hotkey = "K",
             text = "Blacksmith",
             icon = "blacksmith",
-            cost = Blacksmith.COST_GOLD .. "/" .. Blacksmith.COST_LUMBER,
-            enabled = canBuild and Requirements.canBuild("blacksmith") and resources.gold >= Blacksmith.COST_GOLD and resources.lumber >= Blacksmith.COST_LUMBER,
-            requirement = not Requirements.canBuild("blacksmith") and "Barracks" or nil,
+            cost = M.Blacksmith.COST_GOLD .. "/" .. M.Blacksmith.COST_LUMBER,
+            enabled = canBuild and M.Requirements.canBuild("blacksmith") and resources.gold >= M.Blacksmith.COST_GOLD and resources.lumber >= M.Blacksmith.COST_LUMBER,
+            requirement = not M.Requirements.canBuild("blacksmith") and "Barracks" or nil,
             action = function()
-                if Requirements.canBuild("blacksmith") and resources.gold >= Blacksmith.COST_GOLD and resources.lumber >= Blacksmith.COST_LUMBER then
+                if M.Requirements.canBuild("blacksmith") and resources.gold >= M.Blacksmith.COST_GOLD and resources.lumber >= M.Blacksmith.COST_LUMBER then
                     startBuildingPlacement(selEntity, "blacksmith")
                 end
             end
@@ -648,11 +637,11 @@ local function getCommandButtons()
             hotkey = "E",
             text = "Stable",
             icon = "stable",
-            cost = Stable.COST_GOLD .. "/" .. Stable.COST_LUMBER,
-            enabled = canBuild and Requirements.canBuild("stable") and resources.gold >= Stable.COST_GOLD and resources.lumber >= Stable.COST_LUMBER,
-            requirement = not Requirements.canBuild("stable") and "Hold" or nil,
+            cost = M.Stable.COST_GOLD .. "/" .. M.Stable.COST_LUMBER,
+            enabled = canBuild and M.Requirements.canBuild("stable") and resources.gold >= M.Stable.COST_GOLD and resources.lumber >= M.Stable.COST_LUMBER,
+            requirement = not M.Requirements.canBuild("stable") and "Hold" or nil,
             action = function()
-                if Requirements.canBuild("stable") and resources.gold >= Stable.COST_GOLD and resources.lumber >= Stable.COST_LUMBER then
+                if M.Requirements.canBuild("stable") and resources.gold >= M.Stable.COST_GOLD and resources.lumber >= M.Stable.COST_LUMBER then
                     startBuildingPlacement(selEntity, "stable")
                 end
             end
@@ -661,11 +650,11 @@ local function getCommandButtons()
             hotkey = "G",
             text = "Siege",
             icon = "siegeworkshop",
-            cost = SiegeWorkshop.COST_GOLD .. "/" .. SiegeWorkshop.COST_LUMBER,
-            enabled = canBuild and Requirements.canBuild("siegeworkshop") and resources.gold >= SiegeWorkshop.COST_GOLD and resources.lumber >= SiegeWorkshop.COST_LUMBER,
-            requirement = not Requirements.canBuild("siegeworkshop") and "Keep" or nil,
+            cost = M.SiegeWorkshop.COST_GOLD .. "/" .. M.SiegeWorkshop.COST_LUMBER,
+            enabled = canBuild and M.Requirements.canBuild("siegeworkshop") and resources.gold >= M.SiegeWorkshop.COST_GOLD and resources.lumber >= M.SiegeWorkshop.COST_LUMBER,
+            requirement = not M.Requirements.canBuild("siegeworkshop") and "Keep" or nil,
             action = function()
-                if Requirements.canBuild("siegeworkshop") and resources.gold >= SiegeWorkshop.COST_GOLD and resources.lumber >= SiegeWorkshop.COST_LUMBER then
+                if M.Requirements.canBuild("siegeworkshop") and resources.gold >= M.SiegeWorkshop.COST_GOLD and resources.lumber >= M.SiegeWorkshop.COST_LUMBER then
                     startBuildingPlacement(selEntity, "siegeworkshop")
                 end
             end
@@ -674,11 +663,11 @@ local function getCommandButtons()
             hotkey = "H",
             text = "Town Hall",
             icon = "townhall",
-            cost = TownHall.COST_GOLD .. "/" .. TownHall.COST_LUMBER,
-            enabled = canBuild and Requirements.canBuild("townhall") and resources.gold >= TownHall.COST_GOLD and resources.lumber >= TownHall.COST_LUMBER,
-            requirement = not Requirements.canBuild("townhall") and "Hold" or nil,
+            cost = M.TownHall.COST_GOLD .. "/" .. M.TownHall.COST_LUMBER,
+            enabled = canBuild and M.Requirements.canBuild("townhall") and resources.gold >= M.TownHall.COST_GOLD and resources.lumber >= M.TownHall.COST_LUMBER,
+            requirement = not M.Requirements.canBuild("townhall") and "Hold" or nil,
             action = function()
-                if Requirements.canBuild("townhall") and resources.gold >= TownHall.COST_GOLD and resources.lumber >= TownHall.COST_LUMBER then
+                if M.Requirements.canBuild("townhall") and resources.gold >= M.TownHall.COST_GOLD and resources.lumber >= M.TownHall.COST_LUMBER then
                     startBuildingPlacement(selEntity, "townhall")
                 end
             end
@@ -700,6 +689,7 @@ local function getCommandButtons()
                 if selEntity:canProduce() and resources.gold >= selEntity.productionCost and currentPop < maxPop then
                     if selEntity:startProduction() then
                         resources.gold = resources.gold - selEntity.productionCost
+                        if Game.Replay then Game.Replay.log("QUEUE", "Player queued Peon at Town Hall") end
                     end
                 end
             end
@@ -707,19 +697,19 @@ local function getCommandButtons()
 
         -- Upgrade to Hold
         if selEntity.tier == 1 and not selEntity.isUpgrading then
-            local canUpgrade = Requirements.canUpgradeToHold() and selEntity:canUpgrade()
-            local canAfford = resources.gold >= TownHall.HOLD_COST_GOLD and resources.lumber >= TownHall.HOLD_COST_LUMBER
+            local canUpgrade = M.Requirements.canUpgradeToHold() and selEntity:canUpgrade()
+            local canAfford = resources.gold >= M.TownHall.HOLD_COST_GOLD and resources.lumber >= M.TownHall.HOLD_COST_LUMBER
             table.insert(buttons, {
                 hotkey = "U",
                 text = "Hold",
                 icon = "upgrade",
-                cost = TownHall.HOLD_COST_GOLD .. "/" .. TownHall.HOLD_COST_LUMBER,
+                cost = M.TownHall.HOLD_COST_GOLD .. "/" .. M.TownHall.HOLD_COST_LUMBER,
                 enabled = canUpgrade and canAfford,
-                requirement = not Requirements.hasBarracks() and "Barracks" or nil,
+                requirement = not M.Requirements.hasBarracks() and "Barracks" or nil,
                 action = function()
                     if canUpgrade and canAfford then
-                        resources.gold = resources.gold - TownHall.HOLD_COST_GOLD
-                        resources.lumber = resources.lumber - TownHall.HOLD_COST_LUMBER
+                        resources.gold = resources.gold - M.TownHall.HOLD_COST_GOLD
+                        resources.lumber = resources.lumber - M.TownHall.HOLD_COST_LUMBER
                         selEntity:startUpgrade()
                     end
                 end
@@ -728,11 +718,11 @@ local function getCommandButtons()
 
         -- Upgrade to Keep (requires Stable, Blacksmith, Lumber Mill)
         if selEntity.tier == 2 and not selEntity.isUpgrading then
-            local hasStable = Requirements.hasStable and Requirements.hasStable() or false
-            local hasBlacksmith = Requirements.hasBlacksmith and Requirements.hasBlacksmith() or false
-            local hasLumberMill = Requirements.hasLumberMill and Requirements.hasLumberMill() or false
+            local hasStable = M.Requirements.hasStable and M.Requirements.hasStable() or false
+            local hasBlacksmith = M.Requirements.hasBlacksmith and M.Requirements.hasBlacksmith() or false
+            local hasLumberMill = M.Requirements.hasLumberMill and M.Requirements.hasLumberMill() or false
             local canUpgrade = hasStable and hasBlacksmith and hasLumberMill and selEntity:canUpgrade()
-            local canAfford = resources.gold >= TownHall.KEEP_COST_GOLD and resources.lumber >= TownHall.KEEP_COST_LUMBER
+            local canAfford = resources.gold >= M.TownHall.KEEP_COST_GOLD and resources.lumber >= M.TownHall.KEEP_COST_LUMBER
 
             -- Determine which requirement to show
             local missingReq = nil
@@ -745,13 +735,13 @@ local function getCommandButtons()
                 hotkey = "U",
                 text = "Keep",
                 icon = "upgrade",
-                cost = TownHall.KEEP_COST_GOLD .. "/" .. TownHall.KEEP_COST_LUMBER,
+                cost = M.TownHall.KEEP_COST_GOLD .. "/" .. M.TownHall.KEEP_COST_LUMBER,
                 enabled = canUpgrade and canAfford,
                 requirement = missingReq,
                 action = function()
                     if canUpgrade and canAfford then
-                        resources.gold = resources.gold - TownHall.KEEP_COST_GOLD
-                        resources.lumber = resources.lumber - TownHall.KEEP_COST_LUMBER
+                        resources.gold = resources.gold - M.TownHall.KEEP_COST_GOLD
+                        resources.lumber = resources.lumber - M.TownHall.KEEP_COST_LUMBER
                         selEntity:startUpgrade()
                     end
                 end
@@ -762,24 +752,25 @@ local function getCommandButtons()
     -- Barracks commands
     if selEntity.type == "barracks" and selEntity.completed then
         local Barracks = require("barracks")
-        local canTrainFootman = selEntity:canProduce() and resources.gold >= Barracks.FOOTMAN_COST and currentPop < maxPop
+        local canTrainFootman = selEntity:canProduce() and resources.gold >= M.Barracks.FOOTMAN_COST and currentPop < maxPop
         table.insert(buttons, {
             hotkey = "T",
             text = "Footman",
             icon = "footman",
-            cost = tostring(Barracks.FOOTMAN_COST),
+            cost = tostring(M.Barracks.FOOTMAN_COST),
             enabled = canTrainFootman,
             action = function()
-                if selEntity:canProduce() and resources.gold >= Barracks.FOOTMAN_COST and currentPop < maxPop then
+                if selEntity:canProduce() and resources.gold >= M.Barracks.FOOTMAN_COST and currentPop < maxPop then
                     if selEntity:startProduction("footman") then
-                        resources.gold = resources.gold - Barracks.FOOTMAN_COST
+                        resources.gold = resources.gold - M.Barracks.FOOTMAN_COST
+                        if Game.Replay then Game.Replay.log("QUEUE", "Player queued Footman at Barracks") end
                     end
                 end
             end
         })
 
         -- Archer training (requires Lumber Mill)
-        local hasLumberMill = Requirements.hasLumberMill and Requirements.hasLumberMill() or false
+        local hasLumberMill = M.Requirements.hasLumberMill and M.Requirements.hasLumberMill() or false
         local archerCostGold = 150
         local archerCostLumber = 50
         local canTrainArcher = selEntity:canProduce() and hasLumberMill and
@@ -801,39 +792,41 @@ local function getCommandButtons()
                     if selEntity:startProduction("archer") then
                         resources.gold = resources.gold - archerCostGold
                         resources.lumber = resources.lumber - archerCostLumber
+                        if Game.Replay then Game.Replay.log("QUEUE", "Player queued Archer at Barracks") end
                     end
                 end
             end
         })
 
         -- Knight training (requires Stable)
-        local hasStable = Requirements.hasStable and Requirements.hasStable() or false
+        local hasStable = M.Requirements.hasStable and M.Requirements.hasStable() or false
         local canTrainKnight = selEntity:canProduce() and hasStable and
-                              resources.gold >= Barracks.KNIGHT_COST_GOLD and
-                              resources.lumber >= Barracks.KNIGHT_COST_LUMBER and
+                              resources.gold >= M.Barracks.KNIGHT_COST_GOLD and
+                              resources.lumber >= M.Barracks.KNIGHT_COST_LUMBER and
                               currentPop < maxPop
         table.insert(buttons, {
             hotkey = "K",
             text = "Knight",
             icon = "knight",
-            cost = Barracks.KNIGHT_COST_GOLD .. "/" .. Barracks.KNIGHT_COST_LUMBER,
+            cost = M.Barracks.KNIGHT_COST_GOLD .. "/" .. M.Barracks.KNIGHT_COST_LUMBER,
             enabled = canTrainKnight,
             requirement = not hasStable and "Stable" or nil,
             action = function()
                 if selEntity:canProduce() and hasStable and
-                   resources.gold >= Barracks.KNIGHT_COST_GOLD and
-                   resources.lumber >= Barracks.KNIGHT_COST_LUMBER and
+                   resources.gold >= M.Barracks.KNIGHT_COST_GOLD and
+                   resources.lumber >= M.Barracks.KNIGHT_COST_LUMBER and
                    currentPop < maxPop then
                     if selEntity:startProduction("knight") then
-                        resources.gold = resources.gold - Barracks.KNIGHT_COST_GOLD
-                        resources.lumber = resources.lumber - Barracks.KNIGHT_COST_LUMBER
+                        resources.gold = resources.gold - M.Barracks.KNIGHT_COST_GOLD
+                        resources.lumber = resources.lumber - M.Barracks.KNIGHT_COST_LUMBER
+                        if Game.Replay then Game.Replay.log("QUEUE", "Player queued Knight at Barracks") end
                     end
                 end
             end
         })
 
         -- Ballista training (requires Blacksmith)
-        local hasBlacksmith = Requirements.hasBlacksmith and Requirements.hasBlacksmith() or false
+        local hasBlacksmith = M.Requirements.hasBlacksmith and M.Requirements.hasBlacksmith() or false
         local ballistaCostGold = 500
         local ballistaCostLumber = 200
         local canTrainBallista = selEntity:canProduce() and hasBlacksmith and
@@ -855,6 +848,7 @@ local function getCommandButtons()
                     if selEntity:startProduction("ballista") then
                         resources.gold = resources.gold - ballistaCostGold
                         resources.lumber = resources.lumber - ballistaCostLumber
+                        if Game.Replay then Game.Replay.log("QUEUE", "Player queued Ballista at Barracks") end
                     end
                 end
             end
@@ -865,23 +859,23 @@ local function getCommandButtons()
     if selEntity.type == "archeryrange" and selEntity.completed then
         local ArcheryRange = require("archeryrange")
         local canTrain = selEntity:canProduce() and
-                        resources.gold >= ArcheryRange.ARCHER_COST_GOLD and
-                        resources.lumber >= ArcheryRange.ARCHER_COST_LUMBER and
+                        resources.gold >= M.ArcheryRange.ARCHER_COST_GOLD and
+                        resources.lumber >= M.ArcheryRange.ARCHER_COST_LUMBER and
                         currentPop < maxPop
         table.insert(buttons, {
             hotkey = "A",
             text = "Archer",
             icon = "archer",
-            cost = ArcheryRange.ARCHER_COST_GOLD .. "/" .. ArcheryRange.ARCHER_COST_LUMBER,
+            cost = M.ArcheryRange.ARCHER_COST_GOLD .. "/" .. M.ArcheryRange.ARCHER_COST_LUMBER,
             enabled = canTrain,
             action = function()
                 if selEntity:canProduce() and
-                   resources.gold >= ArcheryRange.ARCHER_COST_GOLD and
-                   resources.lumber >= ArcheryRange.ARCHER_COST_LUMBER and
+                   resources.gold >= M.ArcheryRange.ARCHER_COST_GOLD and
+                   resources.lumber >= M.ArcheryRange.ARCHER_COST_LUMBER and
                    currentPop < maxPop then
                     if selEntity:startProduction() then
-                        resources.gold = resources.gold - ArcheryRange.ARCHER_COST_GOLD
-                        resources.lumber = resources.lumber - ArcheryRange.ARCHER_COST_LUMBER
+                        resources.gold = resources.gold - M.ArcheryRange.ARCHER_COST_GOLD
+                        resources.lumber = resources.lumber - M.ArcheryRange.ARCHER_COST_LUMBER
                     end
                 end
             end
@@ -894,23 +888,23 @@ local function getCommandButtons()
 
         -- Flying Scout
         local canTrainScout = selEntity:canProduce() and
-                             resources.gold >= SiegeWorkshop.FLYINGSCOUT_COST_GOLD and
-                             resources.lumber >= SiegeWorkshop.FLYINGSCOUT_COST_LUMBER and
+                             resources.gold >= M.SiegeWorkshop.FLYINGSCOUT_COST_GOLD and
+                             resources.lumber >= M.SiegeWorkshop.FLYINGSCOUT_COST_LUMBER and
                              currentPop < maxPop
         table.insert(buttons, {
             hotkey = "S",
             text = "Scout",
             icon = "flyingscout",
-            cost = SiegeWorkshop.FLYINGSCOUT_COST_GOLD .. "/" .. SiegeWorkshop.FLYINGSCOUT_COST_LUMBER,
+            cost = M.SiegeWorkshop.FLYINGSCOUT_COST_GOLD .. "/" .. M.SiegeWorkshop.FLYINGSCOUT_COST_LUMBER,
             enabled = canTrainScout,
             action = function()
                 if selEntity:canProduce() and
-                   resources.gold >= SiegeWorkshop.FLYINGSCOUT_COST_GOLD and
-                   resources.lumber >= SiegeWorkshop.FLYINGSCOUT_COST_LUMBER and
+                   resources.gold >= M.SiegeWorkshop.FLYINGSCOUT_COST_GOLD and
+                   resources.lumber >= M.SiegeWorkshop.FLYINGSCOUT_COST_LUMBER and
                    currentPop < maxPop then
                     if selEntity:startProduction("flyingscout") then
-                        resources.gold = resources.gold - SiegeWorkshop.FLYINGSCOUT_COST_GOLD
-                        resources.lumber = resources.lumber - SiegeWorkshop.FLYINGSCOUT_COST_LUMBER
+                        resources.gold = resources.gold - M.SiegeWorkshop.FLYINGSCOUT_COST_GOLD
+                        resources.lumber = resources.lumber - M.SiegeWorkshop.FLYINGSCOUT_COST_LUMBER
                     end
                 end
             end
@@ -918,23 +912,23 @@ local function getCommandButtons()
 
         -- Kamikaze
         local canTrainKamikaze = selEntity:canProduce() and
-                                resources.gold >= SiegeWorkshop.KAMIKAZE_COST_GOLD and
-                                resources.lumber >= SiegeWorkshop.KAMIKAZE_COST_LUMBER and
+                                resources.gold >= M.SiegeWorkshop.KAMIKAZE_COST_GOLD and
+                                resources.lumber >= M.SiegeWorkshop.KAMIKAZE_COST_LUMBER and
                                 currentPop < maxPop
         table.insert(buttons, {
             hotkey = "K",
             text = "Kamikaze",
             icon = "kamikaze",
-            cost = SiegeWorkshop.KAMIKAZE_COST_GOLD .. "/" .. SiegeWorkshop.KAMIKAZE_COST_LUMBER,
+            cost = M.SiegeWorkshop.KAMIKAZE_COST_GOLD .. "/" .. M.SiegeWorkshop.KAMIKAZE_COST_LUMBER,
             enabled = canTrainKamikaze,
             action = function()
                 if selEntity:canProduce() and
-                   resources.gold >= SiegeWorkshop.KAMIKAZE_COST_GOLD and
-                   resources.lumber >= SiegeWorkshop.KAMIKAZE_COST_LUMBER and
+                   resources.gold >= M.SiegeWorkshop.KAMIKAZE_COST_GOLD and
+                   resources.lumber >= M.SiegeWorkshop.KAMIKAZE_COST_LUMBER and
                    currentPop < maxPop then
                     if selEntity:startProduction("kamikaze") then
-                        resources.gold = resources.gold - SiegeWorkshop.KAMIKAZE_COST_GOLD
-                        resources.lumber = resources.lumber - SiegeWorkshop.KAMIKAZE_COST_LUMBER
+                        resources.gold = resources.gold - M.SiegeWorkshop.KAMIKAZE_COST_GOLD
+                        resources.lumber = resources.lumber - M.SiegeWorkshop.KAMIKAZE_COST_LUMBER
                     end
                 end
             end
@@ -944,17 +938,17 @@ local function getCommandButtons()
     -- Stable commands (Paladin upgrade)
     if selEntity.type == "stable" and selEntity.completed then
         local Stable = require("stable")
-        local canUpgrade = not selEntity.paladinUpgradeComplete and resources.gold >= Stable.PALADIN_UPGRADE_COST
+        local canUpgrade = not selEntity.paladinUpgradeComplete and resources.gold >= M.Stable.PALADIN_UPGRADE_COST
         if not selEntity.paladinUpgradeComplete then
             table.insert(buttons, {
                 hotkey = "P",
                 text = "Paladin",
                 icon = "upgrade",
-                cost = tostring(Stable.PALADIN_UPGRADE_COST),
+                cost = tostring(M.Stable.PALADIN_UPGRADE_COST),
                 enabled = canUpgrade,
                 action = function()
-                    if not selEntity.paladinUpgradeComplete and resources.gold >= Stable.PALADIN_UPGRADE_COST then
-                        resources.gold = resources.gold - Stable.PALADIN_UPGRADE_COST
+                    if not selEntity.paladinUpgradeComplete and resources.gold >= M.Stable.PALADIN_UPGRADE_COST then
+                        resources.gold = resources.gold - M.Stable.PALADIN_UPGRADE_COST
                         selEntity.paladinUpgradeComplete = true
                         addNotification("Paladin upgrade complete!")
                     end
@@ -968,10 +962,10 @@ local function getCommandButtons()
         local ScoutTower = require("scouttower")
 
         -- Guard Tower upgrade (requires Lumber Mill)
-        local guardGold, guardLumber = ScoutTower.GUARD_TOWER_COST_GOLD, ScoutTower.GUARD_TOWER_COST_LUMBER
-        local canUpgradeGuard = Requirements.canUpgradeToGuardTower() and
+        local guardGold, guardLumber = M.ScoutTower.GUARD_TOWER_COST_GOLD, M.ScoutTower.GUARD_TOWER_COST_LUMBER
+        local canUpgradeGuard = M.Requirements.canUpgradeToGuardTower() and
                                resources.gold >= guardGold and resources.lumber >= guardLumber
-        local guardReq = not Requirements.canUpgradeToGuardTower() and "Lumber Mill" or nil
+        local guardReq = not M.Requirements.canUpgradeToGuardTower() and "Lumber Mill" or nil
         table.insert(buttons, {
             hotkey = "G",
             text = "Guard Tower",
@@ -980,7 +974,7 @@ local function getCommandButtons()
             enabled = canUpgradeGuard,
             requirement = guardReq,
             action = function()
-                if Requirements.canUpgradeToGuardTower() and
+                if M.Requirements.canUpgradeToGuardTower() and
                    resources.gold >= guardGold and resources.lumber >= guardLumber then
                     if selEntity:startUpgrade("guardtower") then
                         resources.gold = resources.gold - guardGold
@@ -992,13 +986,13 @@ local function getCommandButtons()
         })
 
         -- Cannon Tower upgrade (requires Blacksmith + Keep)
-        local cannonGold, cannonLumber = ScoutTower.CANNON_TOWER_COST_GOLD, ScoutTower.CANNON_TOWER_COST_LUMBER
-        local canUpgradeCannon = Requirements.canUpgradeToCannonTower() and
+        local cannonGold, cannonLumber = M.ScoutTower.CANNON_TOWER_COST_GOLD, M.ScoutTower.CANNON_TOWER_COST_LUMBER
+        local canUpgradeCannon = M.Requirements.canUpgradeToCannonTower() and
                                 resources.gold >= cannonGold and resources.lumber >= cannonLumber
         local cannonReq = nil
-        if not Requirements.hasBlacksmith() then
+        if not M.Requirements.hasBlacksmith() then
             cannonReq = "Blacksmith"
-        elseif not Requirements.isKeep() then
+        elseif not M.Requirements.isKeep() then
             cannonReq = "Keep"
         end
         table.insert(buttons, {
@@ -1009,7 +1003,7 @@ local function getCommandButtons()
             enabled = canUpgradeCannon,
             requirement = cannonReq,
             action = function()
-                if Requirements.canUpgradeToCannonTower() and
+                if M.Requirements.canUpgradeToCannonTower() and
                    resources.gold >= cannonGold and resources.lumber >= cannonLumber then
                     if selEntity:startUpgrade("cannontower") then
                         resources.gold = resources.gold - cannonGold
@@ -1030,7 +1024,7 @@ local function drawCommandBar(screenW, screenH)
     commandBarY = barY
 
     -- Draw bar background
-    UIDraw.drawCommandBar(screenW, screenH)
+    M.UIDraw.drawCommandBar(screenW, screenH)
 
     local selEntity = selectedEntities[1]
 
@@ -1185,7 +1179,7 @@ local function drawCommandBar(screenW, screenH)
         primaryBtn.h = COMMAND_BUTTON_SIZE
         primaryBtn.hovered = hovered
 
-        UIDraw.drawCommandButton(x, btnY, COMMAND_BUTTON_SIZE, COMMAND_BUTTON_SIZE,
+        M.UIDraw.drawCommandButton(x, btnY, COMMAND_BUTTON_SIZE, COMMAND_BUTTON_SIZE,
             primaryBtn.text, primaryBtn.hotkey, primaryBtn.enabled, hovered, pressed, primaryBtn.icon)
 
         if hovered then
@@ -1210,7 +1204,7 @@ local function drawCommandBar(screenW, screenH)
         btn.h = COMMAND_BUTTON_SIZE
         btn.hovered = hovered
 
-        UIDraw.drawCommandButton(x, btnY, COMMAND_BUTTON_SIZE, COMMAND_BUTTON_SIZE,
+        M.UIDraw.drawCommandButton(x, btnY, COMMAND_BUTTON_SIZE, COMMAND_BUTTON_SIZE,
             btn.text, btn.hotkey, btn.enabled, hovered, pressed, btn.icon)
 
         if hovered then
@@ -1222,7 +1216,7 @@ local function drawCommandBar(screenW, screenH)
 
     -- Draw tooltip for hovered button (on top of everything)
     if hoveredBtn then
-        CommandBar.drawTooltip(hoveredBtn, hoveredX, hoveredY)
+        M.CommandBar.drawTooltip(hoveredBtn, hoveredX, hoveredY)
     end
 end
 
@@ -1247,7 +1241,7 @@ local function drawVictoryScreen()
     local boxX, boxY = (screenW - boxW) / 2, (screenH - boxH) / 2
 
     -- Draw stone panel using UIDraw
-    UIDraw.drawStonePanel(boxX, boxY, boxW, boxH, 10)
+    M.UIDraw.drawStonePanel(boxX, boxY, boxW, boxH, 10)
 
     -- Corner rivets
     local function drawRivet(cx, cy, radius)
@@ -1438,7 +1432,7 @@ local function drawDefeatScreen()
     local boxX, boxY = (screenW - boxW) / 2, (screenH - boxH) / 2
 
     -- Draw stone panel using UIDraw
-    UIDraw.drawStonePanel(boxX, boxY, boxW, boxH, 10)
+    M.UIDraw.drawStonePanel(boxX, boxY, boxW, boxH, 10)
 
     -- Corner rivets (darker for defeat)
     local function drawRivet(cx, cy, radius)
@@ -1593,15 +1587,15 @@ local function drawDefeatScreen()
 end
 
 local function getBuildingSize(buildingType)
-    if buildingType == "farm" then return Farm.GRID_SIZE or 2
-    elseif buildingType == "lumbermill" and LumberMill then return LumberMill.GRID_SIZE or 2
-    elseif buildingType == "blacksmith" and Blacksmith then return Blacksmith.GRID_SIZE or 2
-    elseif buildingType == "scouttower" then return ScoutTower.GRID_SIZE or 2
-    elseif buildingType == "stable" and Stable then return Stable.GRID_SIZE or 2
-    elseif buildingType == "barracks" then return Barracks.GRID_SIZE or 3
-    elseif buildingType == "archeryrange" and ArcheryRange then return ArcheryRange.GRID_SIZE or 3
-    elseif buildingType == "siegeworkshop" and SiegeWorkshop then return SiegeWorkshop.GRID_SIZE or 3
-    elseif buildingType == "townhall" then return TownHall.GRID_SIZE or 3
+    if buildingType == "farm" then return M.Farm.GRID_SIZE or 2
+    elseif buildingType == "lumbermill" and LumberMill then return M.LumberMill.GRID_SIZE or 2
+    elseif buildingType == "blacksmith" and Blacksmith then return M.Blacksmith.GRID_SIZE or 2
+    elseif buildingType == "scouttower" then return M.ScoutTower.GRID_SIZE or 2
+    elseif buildingType == "stable" and Stable then return M.Stable.GRID_SIZE or 2
+    elseif buildingType == "barracks" then return M.Barracks.GRID_SIZE or 3
+    elseif buildingType == "archeryrange" and ArcheryRange then return M.ArcheryRange.GRID_SIZE or 3
+    elseif buildingType == "siegeworkshop" and SiegeWorkshop then return M.SiegeWorkshop.GRID_SIZE or 3
+    elseif buildingType == "townhall" then return M.TownHall.GRID_SIZE or 3
     else return 3
     end
 end
@@ -1862,11 +1856,11 @@ local function aiCreateBuilding(peon, buildingType, gridX, gridY, team)
         local actualTeam = team or peon.team
 
         if buildingType == "farm" then
-            local building = Farm.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = actualTeam})
+            local building = M.Farm.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = actualTeam})
             building.builderPeon = peon
             table.insert(farms, building)
         elseif buildingType == "barracks" then
-            local building = Barracks.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = actualTeam})
+            local building = M.Barracks.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = actualTeam})
             building.builderPeon = peon
             table.insert(barracks, building)
         end
@@ -1874,35 +1868,35 @@ local function aiCreateBuilding(peon, buildingType, gridX, gridY, team)
 end
 
 local function createBuilding(gridX, gridY, buildingType, peon)
-    local team = peon and peon.team or (Teams and Teams.PLAYER or 1)
+    local team = peon and peon.team or (M.Teams and M.Teams.PLAYER or 1)
     local building = nil
 
     if buildingType == "farm" then
-        building = Farm.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = M.Farm.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(farms, building)
     elseif buildingType == "barracks" then
-        building = Barracks.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = M.Barracks.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(barracks, building)
     elseif buildingType == "lumbermill" and LumberMill then
-        building = LumberMill.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = M.LumberMill.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(lumberMills, building)
     elseif buildingType == "blacksmith" and Blacksmith then
-        building = Blacksmith.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = M.Blacksmith.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(blacksmiths, building)
     elseif buildingType == "scouttower" then
-        building = ScoutTower.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = M.ScoutTower.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(scoutTowers, building)
     elseif buildingType == "archeryrange" and ArcheryRange then
-        building = ArcheryRange.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = M.ArcheryRange.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(archeryRanges, building)
     elseif buildingType == "stable" and Stable then
-        building = Stable.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = M.Stable.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         -- Set callback for Paladin upgrade
         building.onPaladinUpgrade = function()
@@ -1912,31 +1906,36 @@ local function createBuilding(gridX, gridY, buildingType, peon)
         end
         table.insert(stables, building)
     elseif buildingType == "siegeworkshop" and SiegeWorkshop then
-        building = SiegeWorkshop.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = M.SiegeWorkshop.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(siegeWorkshops, building)
     elseif buildingType == "townhall" then
-        building = TownHall.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
+        building = M.TownHall.new({gridX = gridX, gridY = gridY, map = map, isBuilding = true, team = team})
         building.builderPeon = peon
         table.insert(townHalls, building)
     end
 
     -- Mark building as blocked in navigation grid
     if building then
-        Pathfinding.markBuilding(building, false)
+        M.Pathfinding.markBuilding(building, false)
+        -- Log building construction start
+        local playerTeam = M.Teams and M.Teams.PLAYER or 1
+        local teamName = team == playerTeam and "Player" or "AI"
+        local buildingName = buildingType:gsub("^%l", string.upper)  -- Capitalize first letter
+        if Game.Replay then Game.Replay.log("ORDER", teamName .. " started building " .. buildingName) end
     end
 end
 
 local function getBuildingCost(buildingType)
-    if buildingType == "farm" then return Farm.COST_GOLD, Farm.COST_LUMBER
-    elseif buildingType == "barracks" then return Barracks.COST_GOLD, Barracks.COST_LUMBER
-    elseif buildingType == "lumbermill" and LumberMill then return LumberMill.COST_GOLD, LumberMill.COST_LUMBER
-    elseif buildingType == "blacksmith" and Blacksmith then return Blacksmith.COST_GOLD, Blacksmith.COST_LUMBER
-    elseif buildingType == "scouttower" then return ScoutTower.COST_GOLD, ScoutTower.COST_LUMBER
-    elseif buildingType == "archeryrange" and ArcheryRange then return ArcheryRange.COST_GOLD, ArcheryRange.COST_LUMBER
-    elseif buildingType == "stable" and Stable then return Stable.COST_GOLD, Stable.COST_LUMBER
-    elseif buildingType == "siegeworkshop" and SiegeWorkshop then return SiegeWorkshop.COST_GOLD, SiegeWorkshop.COST_LUMBER
-    elseif buildingType == "townhall" then return TownHall.COST_GOLD, TownHall.COST_LUMBER
+    if buildingType == "farm" then return M.Farm.COST_GOLD, M.Farm.COST_LUMBER
+    elseif buildingType == "barracks" then return M.Barracks.COST_GOLD, M.Barracks.COST_LUMBER
+    elseif buildingType == "lumbermill" and LumberMill then return M.LumberMill.COST_GOLD, M.LumberMill.COST_LUMBER
+    elseif buildingType == "blacksmith" and Blacksmith then return M.Blacksmith.COST_GOLD, M.Blacksmith.COST_LUMBER
+    elseif buildingType == "scouttower" then return M.ScoutTower.COST_GOLD, M.ScoutTower.COST_LUMBER
+    elseif buildingType == "archeryrange" and ArcheryRange then return M.ArcheryRange.COST_GOLD, M.ArcheryRange.COST_LUMBER
+    elseif buildingType == "stable" and Stable then return M.Stable.COST_GOLD, M.Stable.COST_LUMBER
+    elseif buildingType == "siegeworkshop" and SiegeWorkshop then return M.SiegeWorkshop.COST_GOLD, M.SiegeWorkshop.COST_LUMBER
+    elseif buildingType == "townhall" then return M.TownHall.COST_GOLD, M.TownHall.COST_LUMBER
     end
     return 0, 0
 end
@@ -2113,7 +2112,7 @@ local function isBuilding(entity)
 end
 
 local function updateRequirementsState()
-    Requirements.setGameState({
+    M.Requirements.setGameState({
         townHall = townHall,
         barracks = barracks,
         farms = farms,
@@ -2132,7 +2131,12 @@ local function removeDeadUnits(unitList, isPlayer)
         local unit = unitList[i]
         if unit.isDead and unit:isDead() then
             -- Track stats for both sides
-            local playerTeam = Teams and Teams.PLAYER or 1
+            local playerTeam = M.Teams and M.Teams.PLAYER or 1
+            local teamName = unit.team == playerTeam and "Player" or "AI"
+            local unitType = unit.unitType or "Unit"
+            if Game.Replay then
+                Game.Replay.log("DEATH", teamName .. " " .. unitType .. " killed")
+            end
             if unit.team == playerTeam then
                 gameStats.unitsLost = gameStats.unitsLost + 1
                 gameStats.aiUnitsKilled = gameStats.aiUnitsKilled + 1
@@ -2142,7 +2146,7 @@ local function removeDeadUnits(unitList, isPlayer)
             end
             -- Spawn death effect
             if Effects then
-                Effects.blood(unit.worldX, unit.worldY)
+                M.Effects.blood(unit.worldX, unit.worldY)
             end
             table.remove(unitList, i)
         end
@@ -2155,7 +2159,12 @@ local function removeDeadBuildings(buildingList)
         local building = buildingList[i]
         if building.isDead and building:isDead() then
             -- Track stats for both sides
-            local playerTeam = Teams and Teams.PLAYER or 1
+            local playerTeam = M.Teams and M.Teams.PLAYER or 1
+            local teamName = building.team == playerTeam and "Player" or "AI"
+            local buildingType = building.buildingType or "Building"
+            if Game.Replay then
+                Game.Replay.log("DESTROY", teamName .. " " .. buildingType .. " destroyed")
+            end
             if building.team == playerTeam then
                 gameStats.buildingsLost = gameStats.buildingsLost + 1
                 gameStats.aiBuildingsDestroyed = gameStats.aiBuildingsDestroyed + 1
@@ -2166,7 +2175,7 @@ local function removeDeadBuildings(buildingList)
             -- Clear map area and update navGrid
             if building.gridX and building.gridSize and map then
                 -- Mark building area as walkable in navGrid
-                Pathfinding.markBuilding(building, true)
+                M.Pathfinding.markBuilding(building, true)
             end
             table.remove(buildingList, i)
         end
@@ -2175,8 +2184,8 @@ end
 
 -- Check victory/defeat conditions
 local function checkVictoryConditions()
-    local enemyTeam = Teams and Teams.ENEMY or 2
-    local playerTeam = Teams and Teams.PLAYER or 1
+    local enemyTeam = M.Teams and M.Teams.ENEMY or 2
+    local playerTeam = M.Teams and M.Teams.PLAYER or 1
 
     -- Check if all enemy buildings are destroyed
     local enemyBuildingsLeft = 0
@@ -2199,12 +2208,14 @@ local function checkVictoryConditions()
 
     if enemyBuildingsLeft == 0 then
         victory = true
+        if Game.Replay then Game.Replay.log("GAME", "Victory!") Game.Replay.finish() end
         return
     end
 
     -- Check if player's main townhall is destroyed
     if townHall and townHall.isDead and townHall:isDead() then
         defeat = true
+        if Game.Replay then Game.Replay.log("GAME", "Defeat") Game.Replay.finish() end
         return
     end
 end
@@ -2213,7 +2224,7 @@ end
 local function setupPeonCallbacks(peon)
     peon.onNotify = addNotification
 
-    local playerTeam = Teams and Teams.PLAYER or 1
+    local playerTeam = M.Teams and M.Teams.PLAYER or 1
     local isPlayerUnit = (peon.team == nil or peon.team == playerTeam)
 
     if isPlayerUnit then
@@ -2242,8 +2253,8 @@ local function setupPeonCallbacks(peon)
         -- AI peon callbacks
         peon.resourceCheck = function()
             if not enemyAI then return false, 0, 0 end
-            local gold = enemyAI.gold
-            local lumber = enemyAI.lumber
+            local gold = enemyM.AI.gold
+            local lumber = enemyM.AI.lumber
             local canAfford = gold >= peon.buildCostGold and lumber >= peon.buildCostLumber
             return canAfford, gold, lumber
         end
@@ -2286,11 +2297,28 @@ function Gameplay.load(options)
     input.cursorChargeProgress = 0
 
     -- Initialize visual effects system
-    if Effects then Effects.init() end
+    if Effects then M.Effects.init() end
 
     -- Initialize audio system
-    if Audio and Audio.init then Audio.init() end
-    if Audio and Audio.playRandomMusic then Audio.playRandomMusic() end
+    if Audio and M.Audio.init then M.Audio.init() end
+    if Audio and M.Audio.playRandomMusic then M.Audio.playRandomMusic() end
+
+    -- Initialize replay logger for new game
+    if Game.Replay then
+        Game.Replay.reset()
+        -- Log CONFIG first (at very top of replay)
+        Game.Replay.log("CONFIG", string.format("Map size: %d, Tileset: %s",
+            options.mapSize or 64, options.tileset or "summer"))
+        Game.Replay.log("CONFIG", string.format("Tree density: %.0f%%, River: %s",
+            (options.treeDensity or 0.50) * 100,
+            (options.riverEnabled ~= false) and "yes" or "no"))
+        if options.enemies and #options.enemies > 0 then
+            Game.Replay.log("CONFIG", string.format("AI: %s", options.enemies[1].personality or "blinky"))
+        end
+        Game.Replay.log("CONFIG", string.format("Starting resources: %d gold, %d lumber", 2000, 400))
+        -- Then log game start
+        Game.Replay.log("GAME", "New game started" .. (tutorialMode and " (Tutorial)" or ""))
+    end
 
     -- Pathfinding computed on-demand, no need to invalidate
 
@@ -2298,6 +2326,12 @@ function Gameplay.load(options)
     victory = false
     defeat = false
     endScreenButton = nil
+
+    -- Initialize surrender dialog
+    M.Surrender.init(function()
+        defeat = true
+    end)
+
     resources.gold = 2000
     resources.lumber = 400
     notifications = {}
@@ -2360,17 +2394,17 @@ function Gameplay.load(options)
         numBridges = options.numBridges or 2,
         riverWidth = options.riverWidth or 3
     }
-    map = Map.new(mapOptions)
+    map = M.Map.new(mapOptions)
     map:setViewport(0, UI.topBarHeight, screenW, screenH - UI.topBarHeight - 70)  -- 70 = command bar height
 
     -- Set up callback for tree depletion (updates navGrid)
     map.onTreeDepleted = function(gridX, gridY)
-        Pathfinding.markTile(gridX, gridY, true)  -- Mark depleted tree as walkable
+        M.Pathfinding.markTile(gridX, gridY, true)  -- Mark depleted tree as walkable
     end
 
     -- Human player team
-    local playerTeam = Teams and Teams.PLAYER or 1
-    local enemyTeam = Teams and Teams.ENEMY or 2
+    local playerTeam = M.Teams and M.Teams.PLAYER or 1
+    local enemyTeam = M.Teams and M.Teams.ENEMY or 2
 
     local buildingSize = 3
     local mapSize = options.mapSize or 64
@@ -2407,7 +2441,7 @@ function Gameplay.load(options)
     thGridX = math.max(edgeBuffer, math.min(mapSize - edgeBuffer - buildingSize, thGridX))
     thGridY = math.max(edgeBuffer, math.min(mapSize - edgeBuffer - buildingSize, thGridY))
     
-    townHall = TownHall.new({gridX = thGridX, gridY = thGridY, map = map, team = playerTeam})
+    townHall = M.TownHall.new({gridX = thGridX, gridY = thGridY, map = map, team = playerTeam})
 
     -- Clear trees around town hall (5 tile radius for peons and nearby buildings)
     local clearRadius = 5
@@ -2434,12 +2468,12 @@ function Gameplay.load(options)
         map:clearArea(m1X, m1Y, buildingSize, buildingSize)
     end
     
-    table.insert(goldMines, GoldMine.new({gridX = m1X, gridY = m1Y, gold = 50000, map = map}))
+    table.insert(goldMines, M.GoldMine.new({gridX = m1X, gridY = m1Y, gold = 50000, map = map}))
 
     -- Player starting farms (2 already built) - place on opposite side from mine (left of town hall)
     local farmX, farmY = map:findClearArea(2, 2, thGridX - 4, thGridY, 8)
     if farmX then
-        local startFarm = Farm.new({gridX = farmX, gridY = farmY, map = map, isBuilding = false, team = playerTeam})
+        local startFarm = M.Farm.new({gridX = farmX, gridY = farmY, map = map, isBuilding = false, team = playerTeam})
         startFarm.completed = true
         table.insert(farms, startFarm)
     end
@@ -2447,7 +2481,7 @@ function Gameplay.load(options)
     -- Second starting farm (also on left side)
     local farm2X, farm2Y = map:findClearArea(2, 2, thGridX - 4, thGridY + 3, 8)
     if farm2X then
-        local startFarm2 = Farm.new({gridX = farm2X, gridY = farm2Y, map = map, isBuilding = false, team = playerTeam})
+        local startFarm2 = M.Farm.new({gridX = farm2X, gridY = farm2Y, map = map, isBuilding = false, team = playerTeam})
         startFarm2.completed = true
         table.insert(farms, startFarm2)
     end
@@ -2455,7 +2489,7 @@ function Gameplay.load(options)
     -- Player starting peons - 7 total, 6 on gold, 1 on lumber (every 7th)
     local spawnX, spawnY = townHall:getSpawnPos()
     for i = 1, 7 do
-        local newPeon = Peon.new({
+        local newPeon = M.Peon.new({
             worldX = spawnX + ((i - 1) % 4) * 35,
             worldY = spawnY + math.floor((i - 1) / 4) * 30,
             map = map,
@@ -2507,7 +2541,7 @@ function Gameplay.load(options)
     enemyThGridX = math.max(edgeBuffer, math.min(mapSize - edgeBuffer - buildingSize, enemyThGridX))
     enemyThGridY = math.max(edgeBuffer, math.min(mapSize - edgeBuffer - buildingSize, enemyThGridY))
     
-    enemyTownHall = TownHall.new({gridX = enemyThGridX, gridY = enemyThGridY, map = map, team = enemyTeam})
+    enemyTownHall = M.TownHall.new({gridX = enemyThGridX, gridY = enemyThGridY, map = map, team = enemyTeam})
     table.insert(townHalls, enemyTownHall)  -- Store in additional townhalls list
 
     -- Clear trees around enemy town hall (5 tile radius for peons and nearby buildings)
@@ -2532,28 +2566,28 @@ function Gameplay.load(options)
         map:clearArea(m2X, m2Y, buildingSize, buildingSize)
     end
     
-    table.insert(goldMines, GoldMine.new({gridX = m2X, gridY = m2Y, gold = 50000, map = map}))
+    table.insert(goldMines, M.GoldMine.new({gridX = m2X, gridY = m2Y, gold = 50000, map = map}))
 
     -- Center gold mine (contested) - scale to map center
     local centerX = math.floor(mapSize / 2)
     local centerY = math.floor(mapSize / 2)
     local m3X, m3Y = map:findClearArea(buildingSize, buildingSize, centerX, centerY, 15)
-    table.insert(goldMines, GoldMine.new({gridX = m3X, gridY = m3Y, gold = 100000, map = map}))
+    table.insert(goldMines, M.GoldMine.new({gridX = m3X, gridY = m3Y, gold = 100000, map = map}))
 
     -- Additional gold mines for larger maps
     if mapSize >= 128 then
         -- Lower-right quadrant
         local m4X, m4Y = map:findClearArea(buildingSize, buildingSize, math.floor(mapSize * 0.7), math.floor(mapSize * 0.6), 12)
-        if m4X then table.insert(goldMines, GoldMine.new({gridX = m4X, gridY = m4Y, gold = 75000, map = map})) end
+        if m4X then table.insert(goldMines, M.GoldMine.new({gridX = m4X, gridY = m4Y, gold = 75000, map = map})) end
         -- Upper-left quadrant
         local m5X, m5Y = map:findClearArea(buildingSize, buildingSize, math.floor(mapSize * 0.3), math.floor(mapSize * 0.4), 12)
-        if m5X then table.insert(goldMines, GoldMine.new({gridX = m5X, gridY = m5Y, gold = 75000, map = map})) end
+        if m5X then table.insert(goldMines, M.GoldMine.new({gridX = m5X, gridY = m5Y, gold = 75000, map = map})) end
     end
 
     -- Enemy starting peons - 7 total, 6 on gold, 1 on lumber (every 7th)
     local enemySpawnX, enemySpawnY = enemyTownHall:getSpawnPos()
     for i = 1, 7 do
-        local newPeon = Peon.new({
+        local newPeon = M.Peon.new({
             worldX = enemySpawnX + ((i - 1) % 4) * 35,
             worldY = enemySpawnY + math.floor((i - 1) / 4) * 30,
             map = map,
@@ -2598,7 +2632,7 @@ function Gameplay.load(options)
     -- Enemy starting farm (already built) - place on opposite side from mine (right of town hall)
     local enemyFarmX, enemyFarmY = map:findClearArea(2, 2, enemyThGridX + 4, enemyThGridY, 8)
     if enemyFarmX then
-        local enemyFarm = Farm.new({gridX = enemyFarmX, gridY = enemyFarmY, map = map, isBuilding = false, team = enemyTeam})
+        local enemyFarm = M.Farm.new({gridX = enemyFarmX, gridY = enemyFarmY, map = map, isBuilding = false, team = enemyTeam})
         enemyFarm.completed = true
         table.insert(farms, enemyFarm)
     end
@@ -2613,7 +2647,7 @@ function Gameplay.load(options)
             aiPersonality = options.enemies[1].personality or "blinky"
         end
 
-        enemyAI = AI.new({
+        enemyAI = M.AI.new({
             team = enemyTeam,
             townHall = enemyTownHall,
             map = map,
@@ -2630,23 +2664,60 @@ function Gameplay.load(options)
     end
 
     -- Initialize navigation grid for pathfinding (after all buildings are placed)
-    Pathfinding.rebuildNavGrid(map, getAllBuildings())
+    M.Pathfinding.rebuildNavGrid(map, getAllBuildings())
 
     -- Set up gold mine depletion callbacks (to update navGrid when depleted)
     for _, mine in ipairs(goldMines) do
         mine.onDepleted = function(m)
-            Pathfinding.markBuilding(m, true)  -- Mark depleted mine as walkable
+            M.Pathfinding.markBuilding(m, true)  -- Mark depleted mine as walkable
         end
     end
 
     calculatePopulation()
     updateRequirementsState()
 
+    -- Log starting units to replay
+    if Game.Replay then
+        -- Player base
+        Game.Replay.log("SETUP", string.format("Player Town Hall at grid (%d, %d)", thGridX, thGridY))
+        local playerPeonCount, playerFarmCount = 0, 0
+        for _, peon in ipairs(peons) do
+            if peon.team == playerTeam then playerPeonCount = playerPeonCount + 1 end
+        end
+        for _, farm in ipairs(farms) do
+            if farm.team == playerTeam then playerFarmCount = playerFarmCount + 1 end
+        end
+        Game.Replay.log("SETUP", string.format("Player: %d Peons, %d Farms", playerPeonCount, playerFarmCount))
+
+        -- Enemy base
+        Game.Replay.log("SETUP", string.format("Enemy Town Hall at grid (%d, %d)", enemyThGridX, enemyThGridY))
+        local enemyPeonCount, enemyFarmCount = 0, 0
+        for _, peon in ipairs(peons) do
+            if peon.team == enemyTeam then enemyPeonCount = enemyPeonCount + 1 end
+        end
+        for _, farm in ipairs(farms) do
+            if farm.team == enemyTeam then enemyFarmCount = enemyFarmCount + 1 end
+        end
+        Game.Replay.log("SETUP", string.format("Enemy: %d Peons, %d Farms", enemyPeonCount, enemyFarmCount))
+
+        -- Gold mines
+        for i, mine in ipairs(goldMines) do
+            Game.Replay.log("SETUP", string.format("Gold Mine %d at (%d, %d) with %d gold",
+                i, mine.gridX or 0, mine.gridY or 0, mine.gold or 0))
+        end
+    end
+
     local thCenterX, thCenterY = townHall:getWorldCenter()
     map:centerOn(thCenterX, thCenterY)
 end
 
 function Gameplay.update(dt)
+    -- Update surrender dialog (even during victory/defeat for animation)
+    M.Surrender.update(dt)
+
+    -- Pause game if surrender dialog is active
+    if M.Surrender.isActive() then return end
+
     if victory or defeat then return end
 
     -- Update cursor state
@@ -2682,11 +2753,14 @@ function Gameplay.update(dt)
     local gameDt = dt * Game.settings.gameSpeed
 
     -- Update visual effects
-    if Effects then Effects.update(gameDt) end
-    if DrawUtils then DrawUtils.update(gameDt) end
+    if Effects then M.Effects.update(gameDt) end
+    if DrawUtils then M.DrawUtils.update(gameDt) end
 
     -- Update audio (check if music ended, play next)
-    if Audio and Audio.update then Audio.update(gameDt) end
+    if Audio and M.Audio.update then M.Audio.update(gameDt) end
+
+    -- Update replay logger
+    if Game.Replay then Game.Replay.tick(gameDt) end
 
     elapsedTime = elapsedTime + gameDt
 
@@ -2704,7 +2778,7 @@ function Gameplay.update(dt)
     map:update(dt, disableEdgeScroll)  -- Camera stays at real-time for responsiveness
 
     -- Update fog of war
-    local playerTeam = Teams and Teams.PLAYER or 1
+    local playerTeam = M.Teams and M.Teams.PLAYER or 1
     local allUnits = getAllUnits()
     local allBuildings = getAllBuildings()
     map:updateFog(allUnits, allBuildings, playerTeam)
@@ -2718,12 +2792,14 @@ function Gameplay.update(dt)
     local peonReady, upgradeComplete, _ = townHall:update(gameDt)
     if peonReady and currentPop < maxPop then
         local spawnX, spawnY = townHall:getSpawnPos()
-        local newPeon = Peon.new({worldX = spawnX, worldY = spawnY, map = map, team = townHall.team})
+        local newPeon = M.Peon.new({worldX = spawnX, worldY = spawnY, map = map, team = townHall.team})
         setupPeonCallbacks(newPeon)
         pushUnitOutOfBuildings(newPeon)
         table.insert(peons, newPeon)
         -- Track production
-        local playerTeam = Teams and Teams.PLAYER or 1
+        local playerTeam = M.Teams and M.Teams.PLAYER or 1
+        local teamName = townHall.team == playerTeam and "Player" or "AI"
+        if Game.Replay then Game.Replay.log("SPAWN", teamName .. " Peon trained") end
         if townHall.team == playerTeam then
             gameStats.peonsProduced = gameStats.peonsProduced + 1
         else
@@ -2748,14 +2824,17 @@ function Gameplay.update(dt)
             pushUnitOutOfBuildings(peon)
             farm.builderPeon = nil
             calculatePopulation()
-            -- Track building completion in timeline
+            -- Log and track building completion
+            local playerTeam = M.Teams and M.Teams.PLAYER or 1
+            local teamName = farm.team == playerTeam and "Player" or "AI"
+            if Game.Replay then Game.Replay.log("BUILD", teamName .. " Farm completed") end
             table.insert(gameStats.buildingTimeline, {
                 time = elapsedTime,
                 type = "Farm",
                 team = farm.team
             })
             -- Send AI peons back to mining
-            local enemyTeam = Teams and Teams.ENEMY or 2
+            local enemyTeam = M.Teams and M.Teams.ENEMY or 2
             if peon.team == enemyTeam then
                 local closestMine = findClosestMine(peon.worldX, peon.worldY)
                 if closestMine then
@@ -2773,14 +2852,17 @@ function Gameplay.update(dt)
             peon:finishBuilding(barrack)
             pushUnitOutOfBuildings(peon)
             barrack.builderPeon = nil
-            -- Track building completion in timeline
+            -- Log and track building completion
+            local playerTeam = M.Teams and M.Teams.PLAYER or 1
+            local teamName = barrack.team == playerTeam and "Player" or "AI"
+            if Game.Replay then Game.Replay.log("BUILD", teamName .. " Barracks completed") end
             table.insert(gameStats.buildingTimeline, {
                 time = elapsedTime,
                 type = "Barracks",
                 team = barrack.team
             })
             -- Send AI peons back to mining
-            local enemyTeam = Teams and Teams.ENEMY or 2
+            local enemyTeam = M.Teams and M.Teams.ENEMY or 2
             if peon.team == enemyTeam then
                 local closestMine = findClosestMine(peon.worldX, peon.worldY)
                 if closestMine then
@@ -2790,11 +2872,13 @@ function Gameplay.update(dt)
         end
         if unitType and currentPop < maxPop then
             local spawnX, spawnY = barrack:getSpawnPos()
-            local playerTeam = Teams and Teams.PLAYER or 1
+            local playerTeam = M.Teams and M.Teams.PLAYER or 1
+            local teamName = barrack.team == playerTeam and "Player" or "AI"
             if unitType == "footman" then
-                local newUnit = Footman.new({worldX = spawnX, worldY = spawnY, map = map, team = barrack.team})
+                local newUnit = M.Footman.new({worldX = spawnX, worldY = spawnY, map = map, team = barrack.team})
                 pushUnitOutOfBuildings(newUnit)
                 table.insert(footmen, newUnit)
+                if Game.Replay then Game.Replay.log("SPAWN", teamName .. " Footman trained") end
                 -- Track production
                 if barrack.team == playerTeam then
                     gameStats.footmenProduced = gameStats.footmenProduced + 1
@@ -2802,7 +2886,7 @@ function Gameplay.update(dt)
                     gameStats.aiFootmenProduced = gameStats.aiFootmenProduced + 1
                 end
             elseif unitType == "knight" then
-                local newUnit = Knight.new({worldX = spawnX, worldY = spawnY, map = map, team = barrack.team})
+                local newUnit = M.Knight.new({worldX = spawnX, worldY = spawnY, map = map, team = barrack.team})
                 -- Check if Paladin upgrade is active
                 for _, stable in ipairs(stables) do
                     if stable.completed and stable.hasPaladinUpgrade then
@@ -2812,14 +2896,17 @@ function Gameplay.update(dt)
                 end
                 pushUnitOutOfBuildings(newUnit)
                 table.insert(knights, newUnit)
+                if Game.Replay then Game.Replay.log("SPAWN", teamName .. " Knight trained") end
             elseif unitType == "archer" then
-                local newUnit = Archer.new({worldX = spawnX, worldY = spawnY, map = map, team = barrack.team})
+                local newUnit = M.Archer.new({worldX = spawnX, worldY = spawnY, map = map, team = barrack.team})
                 pushUnitOutOfBuildings(newUnit)
                 table.insert(archers, newUnit)
+                if Game.Replay then Game.Replay.log("SPAWN", teamName .. " Archer trained") end
             elseif unitType == "ballista" then
-                local newUnit = Ballista.new({worldX = spawnX, worldY = spawnY, map = map, team = barrack.team})
+                local newUnit = M.Ballista.new({worldX = spawnX, worldY = spawnY, map = map, team = barrack.team})
                 pushUnitOutOfBuildings(newUnit)
                 table.insert(ballistas, newUnit)
+                if Game.Replay then Game.Replay.log("SPAWN", teamName .. " Ballista trained") end
             end
             calculatePopulation()
         end
@@ -2832,6 +2919,9 @@ function Gameplay.update(dt)
             peon:finishBuilding(building)
             pushUnitOutOfBuildings(peon)
             building.builderPeon = nil
+            local playerTeam = M.Teams and M.Teams.PLAYER or 1
+            local teamName = building.team == playerTeam and "Player" or "AI"
+            if Game.Replay then Game.Replay.log("BUILD", teamName .. " Lumber Mill completed") end
         end
     end
 
@@ -2842,6 +2932,9 @@ function Gameplay.update(dt)
             peon:finishBuilding(building)
             pushUnitOutOfBuildings(peon)
             building.builderPeon = nil
+            local playerTeam = M.Teams and M.Teams.PLAYER or 1
+            local teamName = building.team == playerTeam and "Player" or "AI"
+            if Game.Replay then Game.Replay.log("BUILD", teamName .. " Blacksmith completed") end
         end
     end
 
@@ -2852,6 +2945,9 @@ function Gameplay.update(dt)
             peon:finishBuilding(building)
             pushUnitOutOfBuildings(peon)
             building.builderPeon = nil
+            local playerTeam = M.Teams and M.Teams.PLAYER or 1
+            local teamName = building.team == playerTeam and "Player" or "AI"
+            if Game.Replay then Game.Replay.log("BUILD", teamName .. " Scout Tower completed") end
         end
     end
 
@@ -2863,12 +2959,18 @@ function Gameplay.update(dt)
             peon:finishBuilding(building)
             pushUnitOutOfBuildings(peon)
             building.builderPeon = nil
+            local playerTeam = M.Teams and M.Teams.PLAYER or 1
+            local teamName = building.team == playerTeam and "Player" or "AI"
+            if Game.Replay then Game.Replay.log("BUILD", teamName .. " Archery Range completed") end
         end
         if archerReady and currentPop < maxPop then
             local spawnX, spawnY = building:getSpawnPos()
-            local newUnit = Archer.new({worldX = spawnX, worldY = spawnY, map = map, team = building.team})
+            local playerTeam = M.Teams and M.Teams.PLAYER or 1
+            local teamName = building.team == playerTeam and "Player" or "AI"
+            local newUnit = M.Archer.new({worldX = spawnX, worldY = spawnY, map = map, team = building.team})
             pushUnitOutOfBuildings(newUnit)
             table.insert(archers, newUnit)
+            if Game.Replay then Game.Replay.log("SPAWN", teamName .. " Archer trained") end
             calculatePopulation()
         end
     end
@@ -2880,6 +2982,9 @@ function Gameplay.update(dt)
             peon:finishBuilding(building)
             pushUnitOutOfBuildings(peon)
             building.builderPeon = nil
+            local playerTeam = M.Teams and M.Teams.PLAYER or 1
+            local teamName = building.team == playerTeam and "Player" or "AI"
+            if Game.Replay then Game.Replay.log("BUILD", teamName .. " Stable completed") end
         end
     end
 
@@ -2891,21 +2996,29 @@ function Gameplay.update(dt)
             peon:finishBuilding(building)
             pushUnitOutOfBuildings(peon)
             building.builderPeon = nil
+            local playerTeam = M.Teams and M.Teams.PLAYER or 1
+            local teamName = building.team == playerTeam and "Player" or "AI"
+            if Game.Replay then Game.Replay.log("BUILD", teamName .. " Siege Workshop completed") end
         end
         if unitType and currentPop < maxPop then
             local spawnX, spawnY = building:getSpawnPos()
+            local playerTeam = M.Teams and M.Teams.PLAYER or 1
+            local teamName = building.team == playerTeam and "Player" or "AI"
             if unitType == "flyingscout" then
-                local newUnit = FlyingScout.new({worldX = spawnX, worldY = spawnY, map = map, team = building.team})
+                local newUnit = M.FlyingScout.new({worldX = spawnX, worldY = spawnY, map = map, team = building.team})
                 pushUnitOutOfBuildings(newUnit)
                 table.insert(flyingScouts, newUnit)
+                if Game.Replay then Game.Replay.log("SPAWN", teamName .. " Flying Scout trained") end
             elseif unitType == "ballista" then
-                local newUnit = Ballista.new({worldX = spawnX, worldY = spawnY, map = map, team = building.team})
+                local newUnit = M.Ballista.new({worldX = spawnX, worldY = spawnY, map = map, team = building.team})
                 pushUnitOutOfBuildings(newUnit)
                 table.insert(ballistas, newUnit)
+                if Game.Replay then Game.Replay.log("SPAWN", teamName .. " Ballista trained") end
             elseif unitType == "kamikaze" then
-                local newUnit = Kamikaze.new({worldX = spawnX, worldY = spawnY, map = map, team = building.team})
+                local newUnit = M.Kamikaze.new({worldX = spawnX, worldY = spawnY, map = map, team = building.team})
                 pushUnitOutOfBuildings(newUnit)
                 table.insert(kamikazes, newUnit)
+                if Game.Replay then Game.Replay.log("SPAWN", teamName .. " Kamikaze trained") end
             end
             calculatePopulation()
         end
@@ -2923,24 +3036,26 @@ function Gameplay.update(dt)
 
         -- Handle peon spawning - check against appropriate team's population
         local canSpawn = false
-        local playerTeam = Teams and Teams.PLAYER or 1
-        local enemyTeam = Teams and Teams.ENEMY or 2
+        local playerTeam = M.Teams and M.Teams.PLAYER or 1
+        local enemyTeam = M.Teams and M.Teams.ENEMY or 2
 
         if building.team == playerTeam then
             canSpawn = peonReady and currentPop < maxPop
         elseif building.team == enemyTeam and enemyAI then
             -- AI handles its own population check
-            local aiPop = #enemyAI.peons + #enemyAI.footmen
-            local aiMaxPop = 4 + #enemyAI.farms * 4
+            local aiPop = #enemyM.AI.peons + #enemyM.AI.footmen
+            local aiMaxPop = 4 + #enemyM.AI.farms * 4
             canSpawn = peonReady and aiPop < aiMaxPop
         end
 
         if canSpawn then
             local spawnX, spawnY = building:getSpawnPos()
-            local newPeon = Peon.new({worldX = spawnX, worldY = spawnY, map = map, team = building.team})
+            local newPeon = M.Peon.new({worldX = spawnX, worldY = spawnY, map = map, team = building.team})
             setupPeonCallbacks(newPeon)
             pushUnitOutOfBuildings(newPeon)
             table.insert(peons, newPeon)
+            local teamName = building.team == playerTeam and "Player" or "AI"
+            if Game.Replay then Game.Replay.log("SPAWN", teamName .. " Peon trained") end
 
             -- Auto-send to mine or lumber based on team
             if building.team == enemyTeam and enemyAI then
@@ -2971,7 +3086,7 @@ function Gameplay.update(dt)
     local allBuildings = getAllBuildings()
 
     -- Peons - each peon uses their team's townhall for returning resources
-    local playerTeam = Teams and Teams.PLAYER or 1
+    local playerTeam = M.Teams and M.Teams.PLAYER or 1
     for _, peon in ipairs(peons) do
         local peonTownHall = townHall  -- Default to player's townhall
         if peon.team ~= playerTeam and enemyTownHall then
@@ -3077,6 +3192,7 @@ function Gameplay.update(dt)
     if checkAllMinesDepleted() then
         victory = true
         Game.finalTime = elapsedTime
+        if Game.Replay then Game.Replay.log("GAME", "Victory - All mines depleted!") Game.Replay.finish() end
     end
 end
 
@@ -3089,7 +3205,7 @@ function Gameplay.draw()
 
     love.graphics.setScissor(map.viewportX, map.viewportY, map.viewportW, map.viewportH)
 
-    local playerTeam = Teams and Teams.PLAYER or 1
+    local playerTeam = M.Teams and M.Teams.PLAYER or 1
 
     -- Helper to check if entity is visible based on fog
     local function isEntityVisible(entity, requireVisible)
@@ -3245,7 +3361,7 @@ function Gameplay.draw()
     end
 
     -- Draw particle effects (dust, sparks, etc)
-    if Effects then Effects.draw(map) end
+    if Effects then M.Effects.draw(map) end
 
     drawBuildingPlacement()
     drawBoxSelection()
@@ -3308,6 +3424,9 @@ function Gameplay.draw()
     if victory and not tutorialMode then drawVictoryScreen() end
     if defeat and not tutorialMode then drawDefeatScreen() end
 
+    -- Draw surrender dialog (on top of game, but under cursor)
+    M.Surrender.draw()
+
     -- Draw custom cursor (always on top)
     drawCursor()
 
@@ -3317,29 +3436,28 @@ end
 function Gameplay.keypressed(key)
     if (victory or defeat) and not tutorialMode then
         if key == "space" or key == "return" then
-            -- Return to title screen
             Game.SceneManager.switch("title")
         end
         return
     end
 
     if key == "escape" then
+        -- Check if surrender dialog is active first
+        if M.Surrender.isActive() then
+            M.Surrender.keypressed(key)
+            return
+        end
+
         if isPlacingBuilding then
             cancelBuildingPlacement()
         elseif input.attackMoveMode then
             input.attackMoveMode = false
+        elseif #selectedEntities > 0 then
+            -- Something selected, deselect it
+            clearSelection()
         else
-            -- Check if selected entity has a production queue to cancel
-            local selEntity = selectedEntities[1]
-            if selEntity and selEntity.cancelProduction and selEntity.getQueueSize and selEntity:getQueueSize() > 0 then
-                local refund = selEntity:cancelProduction()
-                if refund > 0 then
-                    resources.gold = resources.gold + refund
-                    -- TODO: Could add lumber refund if units cost lumber
-                end
-            else
-                clearSelection()
-            end
+            -- Nothing selected, show surrender dialog
+            M.Surrender.show()
         end
     end
 
@@ -3386,6 +3504,9 @@ function Gameplay.keypressed(key)
 end
 
 function Gameplay.mousepressed(x, y, button)
+    -- Forward to surrender dialog first
+    if M.Surrender.mousepressed(x, y, button) then return end
+
     if victory or defeat then return end
 
     -- Debug checkbox click
@@ -3432,7 +3553,7 @@ function Gameplay.mousepressed(x, y, button)
     if button == 1 and input.attackMoveMode then
         input.attackMoveMode = false
         local worldX, worldY = map:screenToWorld(x, y)
-        local playerTeam = Teams and Teams.PLAYER or 1
+        local playerTeam = M.Teams and M.Teams.PLAYER or 1
 
         -- Check if clicked on an enemy - attack it directly
         local clickedEnemy = nil
@@ -3567,6 +3688,9 @@ function Gameplay.mousemoved(x, y, dx, dy)
 end
 
 function Gameplay.mousereleased(x, y, button)
+    -- Forward to surrender dialog first
+    if M.Surrender.mousereleased(x, y, button) then return end
+
     -- Forward to selected entity UI first
     local selEntity = selectedEntities[1]
     if selEntity and selEntity.mousereleased then
@@ -3921,7 +4045,7 @@ function handleRightClick(x, y)
 
     local worldX, worldY = map:screenToWorld(x, y)
     local buildings = getAllBuildings()
-    local playerTeam = Teams and Teams.PLAYER or 1
+    local playerTeam = M.Teams and M.Teams.PLAYER or 1
 
     -- Check if clicked on an enemy unit
     local clickedEnemy = nil
@@ -4059,7 +4183,7 @@ function handleRightClick(x, y)
                 peon:goToMine(clickedMine)
             elseif clickedTownHall then
                 if peon.carryingGold > 0 or peon.carryingLumber > 0 then
-                    peon.state = Peon.STATE_RETURNING
+                    peon.state = M.Peon.STATE_RETURNING
                     peon.path = nil
                 else
                     peon:moveTo(worldX, worldY)
@@ -4088,7 +4212,7 @@ end
 
 -- Get game state for tutorial to check conditions
 function Gameplay.getTutorialState()
-    local playerTeam = Teams and Teams.PLAYER or 1
+    local playerTeam = M.Teams and M.Teams.PLAYER or 1
 
     -- Count player peons
     local peonCount = 0

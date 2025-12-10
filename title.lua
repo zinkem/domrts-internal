@@ -573,44 +573,137 @@ local function drawButton(btn, mx, my)
     return hovered
 end
 
--- Draw checkbox
-local function drawCheckbox(cb, mx, my)
-    local x, y, size = cb.x, cb.y, cb.size or 20
-    local hovered = mx >= x and mx <= x + size + 80 and my >= y and my <= y + size
+-- Hovered audio toggle for tooltip
+local hoveredToggle = nil
+
+-- Draw audio toggle with icon
+local function drawAudioToggle(cb, mx, my)
+    local x, y, size = cb.x, cb.y, cb.size or 32
+    local hovered = mx >= x and mx <= x + size and my >= y and my <= y + size
     local checked = cb.checked
-    
-    -- Box background
-    love.graphics.setColor(Colors.purpleDark[1], Colors.purpleDark[2], Colors.purpleDark[3], 0.8)
-    love.graphics.rectangle("fill", x, y, size, size, 3)
-    
-    -- Box border
+    local cx, cy = x + size/2, y + size/2
+
+    -- Track hovered for tooltip
+    if hovered then
+        hoveredToggle = cb
+    end
+
+    -- Background (circular)
+    if hovered then
+        love.graphics.setColor(Colors.purpleMid[1], Colors.purpleMid[2], Colors.purpleMid[3], 0.9)
+    else
+        love.graphics.setColor(Colors.purpleDark[1], Colors.purpleDark[2], Colors.purpleDark[3], 0.7)
+    end
+    love.graphics.circle("fill", cx, cy, size/2)
+
+    -- Border
     if hovered then
         love.graphics.setColor(Colors.purpleBright)
     else
-        love.graphics.setColor(Colors.purpleLight[1], Colors.purpleLight[2], Colors.purpleLight[3], 0.6)
+        love.graphics.setColor(Colors.purpleLight[1], Colors.purpleLight[2], Colors.purpleLight[3], 0.5)
     end
     love.graphics.setLineWidth(1)
-    love.graphics.rectangle("line", x, y, size, size, 3)
-    
-    -- Checkmark
+    love.graphics.circle("line", cx, cy, size/2)
+
+    -- Icon color (dimmed if off)
     if checked then
-        love.graphics.setColor(Colors.crimsonLight)
-        love.graphics.setLineWidth(2)
-        love.graphics.line(x + 4, y + size/2, x + size/2 - 1, y + size - 5)
-        love.graphics.line(x + size/2 - 1, y + size - 5, x + size - 4, y + 5)
+        if hovered then
+            love.graphics.setColor(Colors.crimsonLight)
+        else
+            love.graphics.setColor(Colors.textLight)
+        end
+    else
+        love.graphics.setColor(Colors.textMuted[1], Colors.textMuted[2], Colors.textMuted[3], 0.5)
     end
-    
-    -- Label
+
+    -- Draw icon based on type
+    if cb.icon == "music" then
+        -- Music note icon
+        love.graphics.setLineWidth(2)
+        -- Note head (oval)
+        love.graphics.ellipse("fill", cx - 3, cy + 4, 4, 3)
+        -- Stem
+        love.graphics.line(cx + 1, cy + 4, cx + 1, cy - 6)
+        -- Flag
+        love.graphics.line(cx + 1, cy - 6, cx + 5, cy - 3)
+    elseif cb.icon == "sfx" then
+        -- Speaker icon
+        love.graphics.setLineWidth(2)
+        -- Speaker body
+        local spkX = cx - 5
+        local spkY = cy
+        love.graphics.polygon("fill",
+            spkX - 2, spkY - 3,
+            spkX + 2, spkY - 3,
+            spkX + 2, spkY + 3,
+            spkX - 2, spkY + 3
+        )
+        -- Speaker cone
+        love.graphics.polygon("fill",
+            spkX + 2, spkY - 3,
+            spkX + 6, spkY - 6,
+            spkX + 6, spkY + 6,
+            spkX + 2, spkY + 3
+        )
+        -- Sound waves (if enabled)
+        if checked then
+            love.graphics.setLineWidth(1.5)
+            love.graphics.arc("line", "open", spkX + 6, spkY, 4, -math.pi/4, math.pi/4)
+            love.graphics.arc("line", "open", spkX + 6, spkY, 7, -math.pi/4, math.pi/4)
+        else
+            -- X mark when muted
+            love.graphics.setLineWidth(2)
+            love.graphics.line(spkX + 8, spkY - 4, spkX + 12, spkY + 4)
+            love.graphics.line(spkX + 12, spkY - 4, spkX + 8, spkY + 4)
+        end
+    end
+
+    return hovered
+end
+
+-- Draw tooltip for hovered audio toggle
+local function drawAudioTooltip()
+    if not hoveredToggle then return end
+
+    local mx, my = love.mouse.getPosition()
+    local tooltip = hoveredToggle.tooltip
+    if not tooltip then return end
+
+    -- Add status to tooltip
+    local status = hoveredToggle.checked and " (On)" or " (Off)"
+    tooltip = tooltip .. status
+
     local font = Game.fonts and Game.fonts.small or love.graphics.getFont()
     love.graphics.setFont(font)
-    if hovered then
-        love.graphics.setColor(Colors.textGold)
-    else
-        love.graphics.setColor(Colors.textLight[1], Colors.textLight[2], Colors.textLight[3], 0.8)
+
+    local padding = 8
+    local textW = font:getWidth(tooltip)
+    local textH = font:getHeight()
+    local tipW = textW + padding * 2
+    local tipH = textH + padding * 2
+
+    -- Position tooltip below and to the left of cursor
+    local tipX = hoveredToggle.x + hoveredToggle.size/2 - tipW/2
+    local tipY = hoveredToggle.y + hoveredToggle.size + 8
+
+    -- Keep on screen
+    local screenW = love.graphics.getWidth()
+    if tipX + tipW > screenW - 10 then
+        tipX = screenW - tipW - 10
     end
-    love.graphics.print(cb.label, x + size + 8, y + (size - font:getHeight()) / 2)
-    
-    return hovered
+
+    -- Background
+    love.graphics.setColor(0, 0, 0, 0.85)
+    love.graphics.rectangle("fill", tipX, tipY, tipW, tipH, 4)
+
+    -- Border
+    love.graphics.setColor(Colors.purpleLight[1], Colors.purpleLight[2], Colors.purpleLight[3], 0.6)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", tipX, tipY, tipW, tipH, 4)
+
+    -- Text
+    love.graphics.setColor(Colors.textLight)
+    love.graphics.print(tooltip, tipX + padding, tipY + padding)
 end
 
 -- Draw the side panel
@@ -878,11 +971,9 @@ function Title.load()
             action = function() Game.SceneManager.switch("tutorial") end
         },
         {
-            text = "Settings",
+            text = "Replays",
             x = btnX, y = btnStartY + btnSpacing * 3, w = btnW, h = btnH,
-            action = function() 
-                -- Could open settings menu
-            end
+            action = function() Game.SceneManager.switch("replaybrowser") end
         },
         {
             text = "Exit Game",
@@ -899,27 +990,33 @@ function Title.load()
         action = function() Game.SceneManager.switch("devpreview") end
     }
     
-    -- Checkboxes for audio
-    local cbY = panelY + panelH - 90
+    -- Audio toggles in top-right corner (icon-based)
+    local toggleSize = 32
+    local toggleSpacing = 10
+    local toggleY = 20
+    local toggleX = screenW - 20 - toggleSize  -- rightmost toggle
+
     checkboxes = {
         {
-            label = "Music",
-            x = btnX, y = cbY,
-            size = 22,
-            checked = Game.settings.musicEnabled,
-            toggle = function(cb)
-                cb.checked = not cb.checked
-                Game.settings.musicEnabled = cb.checked
-            end
-        },
-        {
-            label = "Sound FX",
-            x = btnX + 110, y = cbY,
-            size = 22,
+            icon = "sfx",  -- Sound effects icon
+            tooltip = "Sound Effects",
+            x = toggleX, y = toggleY,
+            size = toggleSize,
             checked = Game.settings.soundEnabled,
             toggle = function(cb)
                 cb.checked = not cb.checked
                 Game.settings.soundEnabled = cb.checked
+            end
+        },
+        {
+            icon = "music",  -- Music icon
+            tooltip = "Music",
+            x = toggleX - toggleSize - toggleSpacing, y = toggleY,
+            size = toggleSize,
+            checked = Game.settings.musicEnabled,
+            toggle = function(cb)
+                cb.checked = not cb.checked
+                Game.settings.musicEnabled = cb.checked
             end
         }
     }
@@ -1001,9 +1098,9 @@ function Title.update(dt)
         end
     end
     
-    -- Sync checkboxes with settings
-    if checkboxes[1] then checkboxes[1].checked = Game.settings.musicEnabled end
-    if checkboxes[2] then checkboxes[2].checked = Game.settings.soundEnabled end
+    -- Sync checkboxes with settings (1=sfx, 2=music)
+    if checkboxes[1] then checkboxes[1].checked = Game.settings.soundEnabled end
+    if checkboxes[2] then checkboxes[2].checked = Game.settings.musicEnabled end
 end
 
 function Title.draw()
@@ -1116,16 +1213,14 @@ function Title.draw()
         drawButton(btn, mx, my)
     end
     
-    -- Audio section label
-    local smallFont = Game.fonts and Game.fonts.small or love.graphics.getFont()
-    love.graphics.setFont(smallFont)
-    love.graphics.setColor(Colors.textMuted)
-    love.graphics.print("Audio", panelX + 20, panelY + panelH - 115)
-    
-    -- Checkboxes
+    -- Audio toggles (top-right corner)
+    hoveredToggle = nil  -- Reset before drawing
     for _, cb in ipairs(checkboxes) do
-        drawCheckbox(cb, mx, my)
+        drawAudioToggle(cb, mx, my)
     end
+
+    -- Draw tooltip last (on top of everything)
+    drawAudioTooltip()
     
     -- Small dev button in corner (gear/wrench icon)
     if devButton then
@@ -1212,11 +1307,13 @@ function Title.mousepressed(x, y, button)
         end
     end
     
-    -- Check checkboxes
+    -- Check audio toggles (circular hit area)
     for _, cb in ipairs(checkboxes) do
-        local size = cb.size or 20
-        if x >= cb.x and x <= cb.x + size + 80 and
-           y >= cb.y and y <= cb.y + size then
+        local size = cb.size or 32
+        local cx, cy = cb.x + size/2, cb.y + size/2
+        local dx, dy = x - cx, y - cy
+        local dist = math.sqrt(dx*dx + dy*dy)
+        if dist <= size/2 then
             if cb.toggle then cb.toggle(cb) end
             return
         end

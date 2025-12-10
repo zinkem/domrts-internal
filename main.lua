@@ -318,6 +318,10 @@ To add new game mechanics:
     Handles scene management and global state
 ]]
 
+-- Replay logging system
+local ReplayLogger
+pcall(function() ReplayLogger = require("replay_logger") end)
+
 -- Global game state
 Game = {
     settings = {
@@ -327,7 +331,8 @@ Game = {
         paletteShader = true  -- Enable retro pixel art shader for buildings
     },
     currentScene = nil,
-    scenes = {}
+    scenes = {},
+    Replay = ReplayLogger  -- Accessible globally as Game.Replay
 }
 
 -- Scene manager
@@ -398,6 +403,7 @@ function love.load()
     pcall(function() Game.SceneManager.register("gameconfig", require("gameconfig")) end)
     pcall(function() Game.SceneManager.register("tutorial", require("tutorial")) end)
     pcall(function() Game.SceneManager.register("devpreview", require("devpreview")) end)
+    pcall(function() Game.SceneManager.register("replaybrowser", require("replaybrowser")) end)
     
     -- Aliases for convenience
     Game.scenes["titlescreen"] = Game.scenes["title"]
