@@ -25,6 +25,7 @@ Map.TILE_BRIDGE = 5
 Map.FOG_UNEXPLORED = 0  -- Black, never seen
 Map.FOG_EXPLORED = 1    -- Dimmed, seen before but no vision
 Map.FOG_VISIBLE = 2     -- Full visibility, unit nearby
+Map.FOG_SCALE = 4       -- Fog resolution multiplier (fog cells per tile)
 
 -- Constants
 Map.TILE_SIZE = 32
@@ -76,12 +77,14 @@ function Map.new(options)
     -- Tree health tracking (harvests remaining)
     self.treeHealth = {}
     
-    -- Fog of war
+    -- Fog of war (higher resolution than tile grid)
     self.fogEnabled = true
     self.fog = {}
-    for y = 1, self.height do
+    self.fogWidth = self.width * Map.FOG_SCALE
+    self.fogHeight = self.height * Map.FOG_SCALE
+    for y = 1, self.fogHeight do
         self.fog[y] = {}
-        for x = 1, self.width do
+        for x = 1, self.fogWidth do
             self.fog[y][x] = Map.FOG_UNEXPLORED
         end
     end
@@ -548,8 +551,8 @@ function Map:updateFog(units, buildings, playerTeam)
     if not self.fogEnabled then return end
     
     -- Reset all visible tiles to explored (they were seen but no longer have vision)
-    for y = 1, self.height do
-        for x = 1, self.width do
+    for y = 1, self.fogHeight do
+        for x = 1, self.fogWidth do
             if self.fog[y][x] == Map.FOG_VISIBLE then
                 self.fog[y][x] = Map.FOG_EXPLORED
             end
@@ -597,28 +600,44 @@ function Map:updateFog(units, buildings, playerTeam)
     end
 end
 
--- Reveal area around a point
+-- Reveal area around a point (with 1-tile buffer of explored fog)
 function Map:revealArea(centerX, centerY, radius)
-    local radiusSq = radius * radius
-    for dy = -radius, radius do
-        for dx = -radius, radius do
-            if dx * dx + dy * dy <= radiusSq then
-                local x = centerX + dx
-                local y = centerY + dy
-                if x >= 1 and x <= self.width and y >= 1 and y <= self.height then
-                    self.fog[y][x] = Map.FOG_VISIBLE
+    local scale = Map.FOG_SCALE
+    local fogCenterX = (centerX - 1) * scale + scale / 2
+    local fogCenterY = (centerY - 1) * scale + scale / 2
+    local fogRadius = radius * scale
+    local bufferRadius = fogRadius + scale  -- 1 tile buffer
+    
+    local bufferSq = bufferRadius * bufferRadius
+    local radiusSq = fogRadius * fogRadius
+    
+    for dy = -bufferRadius, bufferRadius do
+        for dx = -bufferRadius, bufferRadius do
+            local distSq = dx * dx + dy * dy
+            if distSq <= bufferSq then
+                local fx = math.floor(fogCenterX + dx)
+                local fy = math.floor(fogCenterY + dy)
+                if fx >= 1 and fx <= self.fogWidth and fy >= 1 and fy <= self.fogHeight then
+                    if distSq < radiusSq then
+                        self.fog[fy][fx] = Map.FOG_VISIBLE
+                    elseif self.fog[fy][fx] == Map.FOG_UNEXPLORED then
+                        self.fog[fy][fx] = Map.FOG_EXPLORED
+                    end
                 end
             end
         end
     end
 end
 
--- Check fog state
+-- Check fog state (samples center of tile in fog grid)
 function Map:getTileFog(gridX, gridY)
     if gridX < 1 or gridX > self.width or gridY < 1 or gridY > self.height then
         return Map.FOG_UNEXPLORED
     end
-    return self.fog[gridY][gridX]
+    local scale = Map.FOG_SCALE
+    local fx = (gridX - 1) * scale + math.ceil(scale / 2)
+    local fy = (gridY - 1) * scale + math.ceil(scale / 2)
+    return self.fog[fy][fx]
 end
 
 function Map:isTileVisible(gridX, gridY)
@@ -895,26 +914,37 @@ function Map:draw()
     --===========================================
     -- PASS 3: Draw fog of war overlay with smooth edges
     --===========================================
-    if self.fogEnabled and self.fog and self.gridWidth and self.gridHeight then
+    if self.fogEnabled and self.fog and self.fogWidth and self.fogHeight then
+        local scale = Map.FOG_SCALE
+        local fogCellSize = self.tileSize / scale
+        
+        -- Calculate visible fog cell range
+        local fogStartX = math.floor(self.cameraX / fogCellSize) + 1
+        local fogStartY = math.floor(self.cameraY / fogCellSize) + 1
+        local fogEndX = math.ceil((self.cameraX + self.viewportW) / fogCellSize) + 1
+        local fogEndY = math.ceil((self.cameraY + self.viewportH) / fogCellSize) + 1
+        fogStartX = math.max(1, fogStartX)
+        fogStartY = math.max(1, fogStartY)
+        fogEndX = math.min(self.fogWidth, fogEndX)
+        fogEndY = math.min(self.fogHeight, fogEndY)
+        
         -- Helper function to check neighbor visibility
-        local function getNeighborVisibility(gx, gy)
-            if not gx or not gy then return Map.FOG_UNEXPLORED end
-            if gx < 1 or gy < 1 or gx > self.gridWidth or gy > self.gridHeight then
+        local function getNeighborVisibility(fx, fy)
+            if fx < 1 or fy < 1 or fx > self.fogWidth or fy > self.fogHeight then
                 return Map.FOG_UNEXPLORED
             end
-            if not self.fog[gy] then return Map.FOG_UNEXPLORED end
-            return self.fog[gy][gx] or Map.FOG_UNEXPLORED
+            if not self.fog[fy] then return Map.FOG_UNEXPLORED end
+            return self.fog[fy][fx] or Map.FOG_UNEXPLORED
         end
         
         -- Count visible neighbors for softening
-        local function countBrighterNeighbors(gx, gy, currentState)
-            if not currentState then currentState = Map.FOG_UNEXPLORED end
+        local function countBrighterNeighbors(fx, fy, currentState)
             local count = 0
             for dy = -1, 1 do
                 for dx = -1, 1 do
                     if dx ~= 0 or dy ~= 0 then
-                        local nVis = getNeighborVisibility(gx + dx, gy + dy)
-                        if nVis and nVis > currentState then
+                        local nVis = getNeighborVisibility(fx + dx, fy + dy)
+                        if nVis > currentState then
                             count = count + 1
                         end
                     end
@@ -923,51 +953,43 @@ function Map:draw()
             return count
         end
         
-        for y = startY, endY do
-            for x = startX, endX do
-                local fogState = Map.FOG_UNEXPLORED
-                if self.fog[y] and self.fog[y][x] then
-                    fogState = self.fog[y][x]
-                end
-                local worldX, worldY = self:gridToWorld(x, y)
-                local screenX, screenY = self:worldToScreen(worldX, worldY)
+        for fy = fogStartY, fogEndY do
+            for fx = fogStartX, fogEndX do
+                local fogState = self.fog[fy] and self.fog[fy][fx] or Map.FOG_UNEXPLORED
+                local screenX = (fx - 1) * fogCellSize - self.cameraX + self.viewportX
+                local screenY = (fy - 1) * fogCellSize - self.cameraY + self.viewportY
                 
                 if fogState == Map.FOG_UNEXPLORED then
-                    local brighterCount = countBrighterNeighbors(x, y, fogState)
+                    local brighterCount = countBrighterNeighbors(fx, fy, fogState)
                     
                     if brighterCount > 0 then
-                        -- Edge tile - softer black based on how many brighter neighbors
-                        local alpha = 1 - (brighterCount * 0.08)  -- 0.92 to 0.36 based on neighbors
-                        alpha = math.max(0.5, alpha)  -- Don't go below 0.5
+                        local alpha = 1 - (brighterCount * 0.08)
+                        alpha = math.max(0.5, alpha)
                         love.graphics.setColor(0, 0, 0, alpha)
                     else
-                        -- Completely surrounded by unexplored - solid black
                         love.graphics.setColor(0, 0, 0, 1)
                     end
-                    love.graphics.rectangle("fill", screenX, screenY, self.tileSize, self.tileSize)
+                    love.graphics.rectangle("fill", screenX, screenY, fogCellSize, fogCellSize)
                     
                 elseif fogState == Map.FOG_EXPLORED then
-                    local brighterCount = countBrighterNeighbors(x, y, fogState)
+                    local brighterCount = countBrighterNeighbors(fx, fy, fogState)
                     
                     if brighterCount > 0 then
-                        -- Edge of explored area near visible - lighter overlay
-                        local alpha = 0.6 - (brighterCount * 0.04)  -- 0.56 to 0.28
+                        local alpha = 0.6 - (brighterCount * 0.04)
                         alpha = math.max(0.35, alpha)
                         love.graphics.setColor(0, 0, 0, alpha)
                     else
-                        -- Standard explored overlay
                         love.graphics.setColor(0, 0, 0, 0.6)
                     end
-                    love.graphics.rectangle("fill", screenX, screenY, self.tileSize, self.tileSize)
+                    love.graphics.rectangle("fill", screenX, screenY, fogCellSize, fogCellSize)
                     
                 elseif fogState == Map.FOG_VISIBLE then
-                    -- Check for darker neighbors to add edge darkening (vignette effect)
                     local darkerCount = 0
                     for dy = -1, 1 do
                         for dx = -1, 1 do
                             if dx ~= 0 or dy ~= 0 then
-                                local nVis = getNeighborVisibility(x + dx, y + dy)
-                                if nVis and nVis < Map.FOG_VISIBLE then
+                                local nVis = getNeighborVisibility(fx + dx, fy + dy)
+                                if nVis < Map.FOG_VISIBLE then
                                     darkerCount = darkerCount + 1
                                 end
                             end
@@ -975,13 +997,11 @@ function Map:draw()
                     end
                     
                     if darkerCount > 0 then
-                        -- Edge of visible area - subtle vignette based on how many dark neighbors
-                        local alpha = darkerCount * 0.03  -- 0.03 to 0.24
+                        local alpha = darkerCount * 0.03
                         alpha = math.min(0.2, alpha)
                         love.graphics.setColor(0, 0, 0, alpha)
-                        love.graphics.rectangle("fill", screenX, screenY, self.tileSize, self.tileSize)
+                        love.graphics.rectangle("fill", screenX, screenY, fogCellSize, fogCellSize)
                     end
-                    -- FOG_VISIBLE with no dark neighbors = no overlay (full visibility)
                 end
             end
         end
@@ -1066,7 +1086,7 @@ function Map:drawMinimap(x, y, size)
     -- Draw terrain based on fog state
     for ty = 1, self.height do
         for tx = 1, self.width do
-            local fogState = self.fog[ty] and self.fog[ty][tx] or Map.FOG_UNEXPLORED
+            local fogState = self:getTileFog(tx, ty)
             
             if fogState ~= Map.FOG_UNEXPLORED then
                 local px = x + (tx-1) * scale
