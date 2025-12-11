@@ -15,9 +15,13 @@ local Teams
 pcall(function() Teams = require("teams") end)
 
 -- Visual enhancement modules (optional - graceful fallback if missing)
-local Effects, DrawUtils
+local Effects, DrawUtils, SpriteCache
 pcall(function() Effects = require("effects") end)
 pcall(function() DrawUtils = require("draw_utils") end)
+pcall(function() SpriteCache = require("sprite_cache") end)
+
+-- Peon sprite cache (initialized in Peon.prerenderSprites)
+local PeonSpriteCache = nil
 
 local Peon = {}
 Peon.__index = Peon
@@ -132,6 +136,291 @@ function Peon.new(params)
     self.lastPageKey = nil  -- Track page to avoid recreating buttons
     
     return self
+end
+
+-- Animation frame counts for sprite cache
+local PEON_ANIM_FRAMES = {
+    idle = 4,     -- Gentle breathing cycle
+    walk = 6,     -- Walk cycle
+    chop = 8,     -- Chopping cycle (faster)
+    harvest = 6,  -- Mining animation
+}
+
+-- Carry states for sprite cache
+local PEON_CARRY_STATES = {"none", "gold", "lumber"}
+
+-- Draw peon body at origin (0,0) with given animation parameters
+-- Used by both live drawing and sprite cache prerendering
+local function drawPeonBodyAtOrigin(params)
+    local x, y = 0, 0
+    local breathe = params.breathe or 0
+    local armSwing = params.armSwing or 0
+    local state = params.state or "idle"
+    local carry = params.carry or "none"
+    local axeAngle = params.axeAngle or 0
+
+    -- Feet
+    love.graphics.setColor(0.4, 0.3, 0.2, 1)
+    love.graphics.ellipse("fill", x - 5, y + 7, 5, 3)
+    love.graphics.ellipse("fill", x + 5, y + 7, 5, 3)
+
+    -- Legs
+    love.graphics.setColor(0.5, 0.35, 0.25, 1)
+    love.graphics.rectangle("fill", x - 6, y + 2, 5, 7, 1)
+    love.graphics.rectangle("fill", x + 1, y + 2, 5, 7, 1)
+
+    -- Body (work shirt) - with breathing
+    love.graphics.setColor(0.55, 0.45, 0.35, 1)
+    love.graphics.rectangle("fill", x - 8 - breathe * 0.5, y - 6, 16 + breathe, 12, 2)
+
+    -- Belt
+    love.graphics.setColor(0.35, 0.25, 0.15, 1)
+    love.graphics.rectangle("fill", x - 8, y + 1, 16, 3)
+    love.graphics.setColor(0.6, 0.5, 0.2, 1)
+    love.graphics.rectangle("fill", x - 2, y + 1, 4, 3)  -- Buckle
+
+    -- Arms - with slight swing when walking
+    love.graphics.setColor(0.55, 0.45, 0.35, 1)
+    love.graphics.rectangle("fill", x - 11, y - 4 + armSwing, 5, 10, 1)
+    love.graphics.rectangle("fill", x + 6, y - 4 - armSwing, 5, 10, 1)
+
+    -- Hands (skin tone)
+    love.graphics.setColor(0.85, 0.7, 0.55, 1)
+    love.graphics.circle("fill", x - 9, y + 4 + armSwing, 3)
+    love.graphics.circle("fill", x + 9, y + 4 - armSwing, 3)
+
+    -- Head
+    love.graphics.setColor(0.85, 0.7, 0.55, 1)
+    love.graphics.ellipse("fill", x, y - 10, 6, 7)
+
+    -- Hood/cap
+    love.graphics.setColor(0.5, 0.4, 0.3, 1)
+    love.graphics.arc("fill", x, y - 10, 7, math.pi, 2 * math.pi)
+    love.graphics.rectangle("fill", x - 7, y - 12, 14, 4, 1)
+
+    -- Face details
+    love.graphics.setColor(0.15, 0.1, 0.05, 1)
+    love.graphics.circle("fill", x - 2, y - 11, 1.5)  -- Left eye
+    love.graphics.circle("fill", x + 2, y - 11, 1.5)  -- Right eye
+    love.graphics.setColor(0.7, 0.5, 0.4, 1)
+    love.graphics.ellipse("fill", x, y - 8, 2, 1.5)  -- Nose
+
+    -- Tool based on state/carrying
+    local showAxe = state == "chop" or carry == "lumber"
+    local showPickaxe = state == "harvest" or carry == "gold"
+
+    if showAxe then
+        -- Axe with swing animation when chopping
+        love.graphics.push()
+        love.graphics.translate(x + 12, y)
+        love.graphics.rotate(axeAngle)
+        love.graphics.setColor(0.5, 0.35, 0.2, 1)
+        love.graphics.rectangle("fill", -2, -8, 2, 14, 1)  -- Handle
+        love.graphics.setColor(0.65, 0.65, 0.7, 1)
+        love.graphics.polygon("fill", -3, -8, 4, -6, 4, -2, -3, -4)  -- Blade
+        -- Blade highlight
+        love.graphics.setColor(0.85, 0.85, 0.9, 0.6)
+        love.graphics.line(-1, -7, 2, -5)
+        love.graphics.pop()
+    elseif showPickaxe then
+        -- Pickaxe
+        love.graphics.setColor(0.5, 0.35, 0.2, 1)
+        love.graphics.rectangle("fill", x + 10, y - 6, 2, 12, 1)  -- Handle
+        love.graphics.setColor(0.55, 0.55, 0.6, 1)
+        love.graphics.polygon("fill", x + 8, y - 8, x + 18, y - 6, x + 14, y - 2)  -- Pick head
+        -- Highlight
+        love.graphics.setColor(0.75, 0.75, 0.8, 0.5)
+        love.graphics.line(x + 10, y - 7, x + 15, y - 5)
+    end
+
+    -- Carried resources on back
+    if carry == "gold" then
+        -- Gold sack with shimmer
+        love.graphics.setColor(0.65, 0.5, 0.12, 1)
+        love.graphics.ellipse("fill", x, y - 2, 7, 6)
+        love.graphics.setColor(0.9, 0.75, 0.15, 1)
+        love.graphics.circle("fill", x - 2, y - 3, 3)
+        love.graphics.circle("fill", x + 2, y - 1, 2.5)
+        -- Gold shine
+        love.graphics.setColor(1, 0.95, 0.5, 0.7)
+        love.graphics.circle("fill", x - 3, y - 4, 1.5)
+    elseif carry == "lumber" then
+        -- Lumber bundle with wood grain hint
+        love.graphics.setColor(0.5, 0.35, 0.18, 1)
+        love.graphics.rectangle("fill", x - 4, y - 14, 3, 12, 1)
+        love.graphics.setColor(0.55, 0.4, 0.2, 1)
+        love.graphics.rectangle("fill", x - 1, y - 16, 3, 14, 1)
+        love.graphics.setColor(0.5, 0.36, 0.19, 1)
+        love.graphics.rectangle("fill", x + 2, y - 13, 3, 11, 1)
+        -- Wood highlights
+        love.graphics.setColor(0.65, 0.5, 0.3, 0.5)
+        love.graphics.line(x - 3, y - 13, x - 3, y - 5)
+        love.graphics.line(x, y - 15, x, y - 4)
+    end
+end
+
+-- Prerender all peon sprite frames to canvases
+-- Call once during game load
+function Peon.prerenderSprites()
+    if not SpriteCache then
+        print("SpriteCache not available, skipping peon prerendering")
+        return
+    end
+
+    print("Prerendering peon sprites...")
+
+    -- Canvas size: 64x64 with origin at center-bottom
+    PeonSpriteCache = SpriteCache.new(64, 64, {
+        originX = 32,
+        originY = 54  -- Leave room for jump animation
+    })
+
+    -- Prerender idle animation (breathing)
+    local idleFrames = {}
+    for i = 0, PEON_ANIM_FRAMES.idle - 1 do
+        table.insert(idleFrames, i)
+    end
+
+    PeonSpriteCache:prerender("idle", function(params)
+        local phase = params.frame / PEON_ANIM_FRAMES.idle * math.pi * 2
+        local breathe = math.sin(phase) * 0.5
+        drawPeonBodyAtOrigin({
+            state = "idle",
+            carry = params.carry,
+            breathe = breathe,
+            armSwing = 0,
+            axeAngle = 0
+        })
+    end, {
+        carry = PEON_CARRY_STATES,
+        frame = idleFrames
+    })
+
+    -- Prerender walk animation
+    local walkFrames = {}
+    for i = 0, PEON_ANIM_FRAMES.walk - 1 do
+        table.insert(walkFrames, i)
+    end
+
+    PeonSpriteCache:prerender("walk", function(params)
+        local phase = params.frame / PEON_ANIM_FRAMES.walk * math.pi * 2
+        local armSwing = math.sin(phase) * 2
+        drawPeonBodyAtOrigin({
+            state = "walk",
+            carry = params.carry,
+            breathe = 0,
+            armSwing = armSwing,
+            axeAngle = 0
+        })
+    end, {
+        carry = PEON_CARRY_STATES,
+        frame = walkFrames
+    })
+
+    -- Prerender chop animation
+    local chopFrames = {}
+    for i = 0, PEON_ANIM_FRAMES.chop - 1 do
+        table.insert(chopFrames, i)
+    end
+
+    PeonSpriteCache:prerender("chop", function(params)
+        local phase = params.frame / PEON_ANIM_FRAMES.chop * math.pi * 2
+        local axeAngle = math.sin(phase) * 0.4
+        drawPeonBodyAtOrigin({
+            state = "chop",
+            carry = "none",  -- Don't carry while chopping
+            breathe = 0,
+            armSwing = 0,
+            axeAngle = axeAngle
+        })
+    end, {
+        carry = {"none"},  -- Only one carry state when chopping
+        frame = chopFrames
+    })
+
+    -- Prerender harvest (mining) animation
+    local harvestFrames = {}
+    for i = 0, PEON_ANIM_FRAMES.harvest - 1 do
+        table.insert(harvestFrames, i)
+    end
+
+    PeonSpriteCache:prerender("harvest", function(params)
+        local phase = params.frame / PEON_ANIM_FRAMES.harvest * math.pi * 2
+        local armSwing = math.sin(phase) * 1.5
+        drawPeonBodyAtOrigin({
+            state = "harvest",
+            carry = "none",  -- Don't carry while harvesting
+            breathe = 0,
+            armSwing = armSwing,
+            axeAngle = 0
+        })
+    end, {
+        carry = {"none"},
+        frame = harvestFrames
+    })
+
+    local stats = PeonSpriteCache:getStats()
+    print(string.format("  Prerendered %d peon sprite canvases (%.2f MB VRAM)",
+        stats.canvasCount, stats.memoryMB))
+end
+
+-- Get current visual state and animation frame for sprite cache lookup
+function Peon:getVisualState()
+    local state, frameCount, animSpeed
+
+    -- Determine visual state based on peon state
+    if self.state == Peon.STATE_CHOPPING then
+        state = "chop"
+        frameCount = PEON_ANIM_FRAMES.chop
+        animSpeed = 12  -- Fast chop animation
+    elseif self.state == Peon.STATE_HARVESTING then
+        state = "harvest"
+        frameCount = PEON_ANIM_FRAMES.harvest
+        animSpeed = 8
+    elseif self.state == Peon.STATE_MOVING or self.state == Peon.STATE_RETURNING or self.state == Peon.STATE_GATHER_MOVING then
+        state = "walk"
+        frameCount = PEON_ANIM_FRAMES.walk
+        animSpeed = 10  -- Walk bob speed
+    else
+        state = "idle"
+        frameCount = PEON_ANIM_FRAMES.idle
+        animSpeed = 1.5  -- Slow breathing
+    end
+
+    -- Determine carry state
+    local carry
+    if self.carryingGold > 0 then
+        carry = "gold"
+    elseif self.carryingLumber > 0 then
+        carry = "lumber"
+    else
+        carry = "none"
+    end
+
+    -- For chop/harvest, override carry to none (tools shown instead)
+    if state == "chop" or state == "harvest" then
+        carry = "none"
+    end
+
+    -- Calculate animation frame (quantize continuous animTimer to discrete frames)
+    local phase = self.animTimer * animSpeed
+    local frame = math.floor(phase % frameCount)
+
+    -- Calculate vertical offset for bounce effects (not cached, applied during draw)
+    local yOffset = 0
+    if state == "chop" then
+        yOffset = math.abs(math.sin(self.animTimer * 12)) * 6
+    elseif state == "walk" then
+        yOffset = math.abs(math.sin(self.animTimer * 10)) * 2
+    elseif state == "idle" then
+        if DrawUtils then
+            yOffset = DrawUtils.getIdleBob(self.idleSeed, 0.8)
+        else
+            yOffset = math.sin(self.animTimer * 1.5 + self.idleSeed) * 1.2
+        end
+    end
+
+    return state, carry, frame, yOffset
 end
 
 function Peon:getScreenPos()
@@ -883,38 +1172,17 @@ end
 
 function Peon:draw()
     if not self.visible then return end
-    
+
     local x, y = self:getScreenPos()
-    
-    -- Animation offsets
-    local jumpOffset = 0
-    local idleBob = 0
-    local walkBob = 0
-    local breathe = 0
-    
-    -- State-based animations
-    if self.state == Peon.STATE_CHOPPING then
-        -- Jump up and down rapidly when chopping
-        jumpOffset = math.abs(math.sin(self.animTimer * 12)) * 6
-    elseif self.state == Peon.STATE_MOVING or self.state == Peon.STATE_RETURNING or self.state == Peon.STATE_GATHER_MOVING then
-        -- Bouncy walk
-        walkBob = math.abs(math.sin(self.animTimer * 10)) * 2
-    elseif self.state == Peon.STATE_IDLE then
-        -- Gentle breathing/shifting
-        if DrawUtils then
-            idleBob = DrawUtils.getIdleBob(self.idleSeed, 0.8)
-        else
-            idleBob = math.sin(self.animTimer * 1.5 + self.idleSeed) * 1.2
-        end
-    end
-    
-    -- Breathing animation (subtle chest expansion)
-    breathe = math.sin(self.animTimer * 2 + self.idleSeed) * 0.5
-    
-    y = y - jumpOffset - walkBob - idleBob
-    
-    -- Selection circle (don't apply movement offsets)
-    local baseY = y + jumpOffset + walkBob + idleBob
+
+    -- Get visual state and animation frame
+    local state, carry, frame, yOffset = self:getVisualState()
+
+    -- Apply vertical bounce offset
+    y = y - yOffset
+
+    -- Selection circle and shadow at base position (not affected by bounce)
+    local baseY = y + yOffset
     if self.selected then
         if DrawUtils then
             DrawUtils.drawSelection(x, baseY, self.radius + 2)
@@ -926,7 +1194,7 @@ function Peon:draw()
             love.graphics.circle("line", x, baseY, self.radius + 4)
         end
     end
-    
+
     -- Enhanced shadow (stays on ground)
     if DrawUtils then
         DrawUtils.drawShadow(x, baseY + 10, 11, 4, 0.4)
@@ -934,136 +1202,155 @@ function Peon:draw()
         love.graphics.setColor(0, 0, 0, 0.35)
         love.graphics.ellipse("fill", x, baseY + 10, 11, 4)
     end
-    
-    -- Draw the peon body with outline
-    local function drawBody()
-        -- Feet
-        love.graphics.setColor(0.4, 0.3, 0.2, 1)
-        love.graphics.ellipse("fill", x - 5, y + 7, 5, 3)
-        love.graphics.ellipse("fill", x + 5, y + 7, 5, 3)
-        
-        -- Legs
-        love.graphics.setColor(0.5, 0.35, 0.25, 1)
-        love.graphics.rectangle("fill", x - 6, y + 2, 5, 7, 1)
-        love.graphics.rectangle("fill", x + 1, y + 2, 5, 7, 1)
-        
-        -- Body (work shirt) - with breathing
-        love.graphics.setColor(0.55, 0.45, 0.35, 1)
-        love.graphics.rectangle("fill", x - 8 - breathe * 0.5, y - 6, 16 + breathe, 12, 2)
-        
-        -- Belt
-        love.graphics.setColor(0.35, 0.25, 0.15, 1)
-        love.graphics.rectangle("fill", x - 8, y + 1, 16, 3)
-        love.graphics.setColor(0.6, 0.5, 0.2, 1)
-        love.graphics.rectangle("fill", x - 2, y + 1, 4, 3)  -- Buckle
-        
-        -- Arms - with slight swing when walking
-        local armSwing = 0
-        if self.state == Peon.STATE_MOVING or self.state == Peon.STATE_RETURNING or self.state == Peon.STATE_GATHER_MOVING then
-            armSwing = math.sin(self.animTimer * 10) * 2
-        end
-        love.graphics.setColor(0.55, 0.45, 0.35, 1)
-        love.graphics.rectangle("fill", x - 11, y - 4 + armSwing, 5, 10, 1)
-        love.graphics.rectangle("fill", x + 6, y - 4 - armSwing, 5, 10, 1)
-        
-        -- Hands (skin tone)
-        love.graphics.setColor(0.85, 0.7, 0.55, 1)
-        love.graphics.circle("fill", x - 9, y + 4 + armSwing, 3)
-        love.graphics.circle("fill", x + 9, y + 4 - armSwing, 3)
-        
-        -- Head
-        love.graphics.setColor(0.85, 0.7, 0.55, 1)
-        love.graphics.ellipse("fill", x, y - 10, 6, 7)
-        
-        -- Hood/cap
-        love.graphics.setColor(0.5, 0.4, 0.3, 1)
-        love.graphics.arc("fill", x, y - 10, 7, math.pi, 2 * math.pi)
-        love.graphics.rectangle("fill", x - 7, y - 12, 14, 4, 1)
-        
-        -- Face details
-        love.graphics.setColor(0.15, 0.1, 0.05, 1)
-        love.graphics.circle("fill", x - 2, y - 11, 1.5)  -- Left eye
-        love.graphics.circle("fill", x + 2, y - 11, 1.5)  -- Right eye
-        love.graphics.setColor(0.7, 0.5, 0.4, 1)
-        love.graphics.ellipse("fill", x, y - 8, 2, 1.5)  -- Nose
-        
-        -- Tool based on state/carrying
-        if self.state == Peon.STATE_CHOPPING or self.carryingLumber > 0 then
-            -- Axe with swing animation when chopping
-            local axeAngle = 0
-            if self.state == Peon.STATE_CHOPPING then
-                axeAngle = math.sin(self.animTimer * 12) * 0.4
-            end
-            love.graphics.push()
-            love.graphics.translate(x + 12, y)
-            love.graphics.rotate(axeAngle)
-            love.graphics.setColor(0.5, 0.35, 0.2, 1)
-            love.graphics.rectangle("fill", -2, -8, 2, 14, 1)  -- Handle
-            love.graphics.setColor(0.65, 0.65, 0.7, 1)
-            love.graphics.polygon("fill", -3, -8, 4, -6, 4, -2, -3, -4)  -- Blade
-            -- Blade highlight
-            love.graphics.setColor(0.85, 0.85, 0.9, 0.6)
-            love.graphics.line(-1, -7, 2, -5)
-            love.graphics.pop()
-        elseif self.state == Peon.STATE_HARVESTING or self.carryingGold > 0 then
-            -- Pickaxe
-            love.graphics.setColor(0.5, 0.35, 0.2, 1)
-            love.graphics.rectangle("fill", x + 10, y - 6, 2, 12, 1)  -- Handle
-            love.graphics.setColor(0.55, 0.55, 0.6, 1)
-            love.graphics.polygon("fill", x + 8, y - 8, x + 18, y - 6, x + 14, y - 2)  -- Pick head
-            -- Highlight
-            love.graphics.setColor(0.75, 0.75, 0.8, 0.5)
-            love.graphics.line(x + 10, y - 7, x + 15, y - 5)
-        end
-        
-        -- Carried resources on back
-        if self.carryingGold > 0 then
-            -- Gold sack with shimmer
-            love.graphics.setColor(0.65, 0.5, 0.12, 1)
-            love.graphics.ellipse("fill", x, y - 2, 7, 6)
-            love.graphics.setColor(0.9, 0.75, 0.15, 1)
-            love.graphics.circle("fill", x - 2, y - 3, 3)
-            love.graphics.circle("fill", x + 2, y - 1, 2.5)
-            -- Gold shine
-            love.graphics.setColor(1, 0.95, 0.5, 0.7)
-            love.graphics.circle("fill", x - 3, y - 4, 1.5)
-        elseif self.carryingLumber > 0 then
-            -- Lumber bundle with wood grain hint
-            love.graphics.setColor(0.5, 0.35, 0.18, 1)
-            love.graphics.rectangle("fill", x - 4, y - 14, 3, 12, 1)
-            love.graphics.setColor(0.55, 0.4, 0.2, 1)
-            love.graphics.rectangle("fill", x - 1, y - 16, 3, 14, 1)
-            love.graphics.setColor(0.5, 0.36, 0.19, 1)
-            love.graphics.rectangle("fill", x + 2, y - 13, 3, 11, 1)
-            -- Wood highlights
-            love.graphics.setColor(0.65, 0.5, 0.3, 0.5)
-            love.graphics.line(x - 3, y - 13, x - 3, y - 5)
-            love.graphics.line(x, y - 15, x, y - 4)
-        end
-    end
-    
-    -- Draw outline then body (or with flash effect)
-    if DrawUtils and Effects then
-        -- Draw dark outline
+
+    -- Try to use cached canvas, fallback to live drawing
+    local canvas = PeonSpriteCache and PeonSpriteCache:get(state, carry, frame)
+
+    if canvas then
+        -- Use cached sprite: 5 canvas blits instead of ~175 primitive draws
+        -- Canvas origin is at (32, 54), so offset draw position accordingly
+        local drawX = x - 32
+        local drawY = y - 54
+
+        -- Draw outline (4 offset blits)
         love.graphics.setColor(0.1, 0.08, 0.05, 0.7)
         local offsets = {{-1.5, 0}, {1.5, 0}, {0, -1.5}, {0, 1.5}}
         for _, off in ipairs(offsets) do
-            love.graphics.push()
-            love.graphics.translate(off[1], off[2])
-            drawBody()
-            love.graphics.pop()
+            love.graphics.draw(canvas, drawX + off[1], drawY + off[2])
         end
-        
-        -- Draw body with flash effect if damaged
-        DrawUtils.applyFlash(self, drawBody)
+
+        -- Draw main sprite
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(canvas, drawX, drawY)
+
+        -- Flash effect for damage (drawn live, not cached)
+        if self.flashTimer and self.flashTimer > 0 then
+            love.graphics.setBlendMode("add")
+            love.graphics.setColor(1, 1, 1, 0.9)
+            love.graphics.draw(canvas, drawX, drawY)
+            love.graphics.setBlendMode("alpha")
+        end
     else
-        -- Fallback: just draw body
-        drawBody()
+        -- Fallback: live drawing when cache not available
+        local breathe = math.sin(self.animTimer * 2 + self.idleSeed) * 0.5
+
+        local function drawBody()
+            -- Feet
+            love.graphics.setColor(0.4, 0.3, 0.2, 1)
+            love.graphics.ellipse("fill", x - 5, y + 7, 5, 3)
+            love.graphics.ellipse("fill", x + 5, y + 7, 5, 3)
+
+            -- Legs
+            love.graphics.setColor(0.5, 0.35, 0.25, 1)
+            love.graphics.rectangle("fill", x - 6, y + 2, 5, 7, 1)
+            love.graphics.rectangle("fill", x + 1, y + 2, 5, 7, 1)
+
+            -- Body (work shirt) - with breathing
+            love.graphics.setColor(0.55, 0.45, 0.35, 1)
+            love.graphics.rectangle("fill", x - 8 - breathe * 0.5, y - 6, 16 + breathe, 12, 2)
+
+            -- Belt
+            love.graphics.setColor(0.35, 0.25, 0.15, 1)
+            love.graphics.rectangle("fill", x - 8, y + 1, 16, 3)
+            love.graphics.setColor(0.6, 0.5, 0.2, 1)
+            love.graphics.rectangle("fill", x - 2, y + 1, 4, 3)  -- Buckle
+
+            -- Arms
+            local armSwing = 0
+            if self.state == Peon.STATE_MOVING or self.state == Peon.STATE_RETURNING or self.state == Peon.STATE_GATHER_MOVING then
+                armSwing = math.sin(self.animTimer * 10) * 2
+            end
+            love.graphics.setColor(0.55, 0.45, 0.35, 1)
+            love.graphics.rectangle("fill", x - 11, y - 4 + armSwing, 5, 10, 1)
+            love.graphics.rectangle("fill", x + 6, y - 4 - armSwing, 5, 10, 1)
+
+            -- Hands (skin tone)
+            love.graphics.setColor(0.85, 0.7, 0.55, 1)
+            love.graphics.circle("fill", x - 9, y + 4 + armSwing, 3)
+            love.graphics.circle("fill", x + 9, y + 4 - armSwing, 3)
+
+            -- Head
+            love.graphics.setColor(0.85, 0.7, 0.55, 1)
+            love.graphics.ellipse("fill", x, y - 10, 6, 7)
+
+            -- Hood/cap
+            love.graphics.setColor(0.5, 0.4, 0.3, 1)
+            love.graphics.arc("fill", x, y - 10, 7, math.pi, 2 * math.pi)
+            love.graphics.rectangle("fill", x - 7, y - 12, 14, 4, 1)
+
+            -- Face details
+            love.graphics.setColor(0.15, 0.1, 0.05, 1)
+            love.graphics.circle("fill", x - 2, y - 11, 1.5)  -- Left eye
+            love.graphics.circle("fill", x + 2, y - 11, 1.5)  -- Right eye
+            love.graphics.setColor(0.7, 0.5, 0.4, 1)
+            love.graphics.ellipse("fill", x, y - 8, 2, 1.5)  -- Nose
+
+            -- Tool based on state/carrying
+            if self.state == Peon.STATE_CHOPPING or self.carryingLumber > 0 then
+                local axeAngle = 0
+                if self.state == Peon.STATE_CHOPPING then
+                    axeAngle = math.sin(self.animTimer * 12) * 0.4
+                end
+                love.graphics.push()
+                love.graphics.translate(x + 12, y)
+                love.graphics.rotate(axeAngle)
+                love.graphics.setColor(0.5, 0.35, 0.2, 1)
+                love.graphics.rectangle("fill", -2, -8, 2, 14, 1)
+                love.graphics.setColor(0.65, 0.65, 0.7, 1)
+                love.graphics.polygon("fill", -3, -8, 4, -6, 4, -2, -3, -4)
+                love.graphics.setColor(0.85, 0.85, 0.9, 0.6)
+                love.graphics.line(-1, -7, 2, -5)
+                love.graphics.pop()
+            elseif self.state == Peon.STATE_HARVESTING or self.carryingGold > 0 then
+                love.graphics.setColor(0.5, 0.35, 0.2, 1)
+                love.graphics.rectangle("fill", x + 10, y - 6, 2, 12, 1)
+                love.graphics.setColor(0.55, 0.55, 0.6, 1)
+                love.graphics.polygon("fill", x + 8, y - 8, x + 18, y - 6, x + 14, y - 2)
+                love.graphics.setColor(0.75, 0.75, 0.8, 0.5)
+                love.graphics.line(x + 10, y - 7, x + 15, y - 5)
+            end
+
+            -- Carried resources
+            if self.carryingGold > 0 then
+                love.graphics.setColor(0.65, 0.5, 0.12, 1)
+                love.graphics.ellipse("fill", x, y - 2, 7, 6)
+                love.graphics.setColor(0.9, 0.75, 0.15, 1)
+                love.graphics.circle("fill", x - 2, y - 3, 3)
+                love.graphics.circle("fill", x + 2, y - 1, 2.5)
+                love.graphics.setColor(1, 0.95, 0.5, 0.7)
+                love.graphics.circle("fill", x - 3, y - 4, 1.5)
+            elseif self.carryingLumber > 0 then
+                love.graphics.setColor(0.5, 0.35, 0.18, 1)
+                love.graphics.rectangle("fill", x - 4, y - 14, 3, 12, 1)
+                love.graphics.setColor(0.55, 0.4, 0.2, 1)
+                love.graphics.rectangle("fill", x - 1, y - 16, 3, 14, 1)
+                love.graphics.setColor(0.5, 0.36, 0.19, 1)
+                love.graphics.rectangle("fill", x + 2, y - 13, 3, 11, 1)
+                love.graphics.setColor(0.65, 0.5, 0.3, 0.5)
+                love.graphics.line(x - 3, y - 13, x - 3, y - 5)
+                love.graphics.line(x, y - 15, x, y - 4)
+            end
+        end
+
+        -- Draw with outline
+        if DrawUtils and Effects then
+            love.graphics.setColor(0.1, 0.08, 0.05, 0.7)
+            local offsets = {{-1.5, 0}, {1.5, 0}, {0, -1.5}, {0, 1.5}}
+            for _, off in ipairs(offsets) do
+                love.graphics.push()
+                love.graphics.translate(off[1], off[2])
+                drawBody()
+                love.graphics.pop()
+            end
+            DrawUtils.applyFlash(self, drawBody)
+        else
+            drawBody()
+        end
     end
-    
-    -- Draw health bar
+
+    -- Draw health bar (always live)
     self:drawHealthBar()
-    
+
     love.graphics.setLineWidth(1)
     love.graphics.setColor(1, 1, 1, 1)
 end

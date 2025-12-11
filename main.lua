@@ -429,6 +429,10 @@ function love.load(arg)
             local Benchmark = require("benchmarks.benchmark_building_collision")
             Benchmark.run()
             return
+        elseif a == "--benchmark-peon-rendering" then
+            local Benchmark = require("benchmarks.benchmark_peon_rendering")
+            Benchmark.run()
+            return
         end
     end
 
@@ -468,6 +472,12 @@ function love.load(arg)
         header = loadFont("fonts/knights-templar/Knight2.ttf", 24),
     }
     
+    -- Prerender sprite caches for performance
+    local Peon = require("peon")
+    if Peon.prerenderSprites then
+        Peon.prerenderSprites()
+    end
+
     -- Load and register scenes
     Game.SceneManager.register("title", require("title"))
     Game.SceneManager.register("gameplay", require("gameplay"))
