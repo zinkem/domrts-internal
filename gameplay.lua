@@ -45,9 +45,27 @@ pcall(function() M.Audio = require("audio") end)
 
 local Gameplay = {}
 
--- Persistent quadtree for spatial queries (refreshed once per frame)
+-- Persistent quadtrees for spatial queries (refreshed once per frame)
 local unitQuadtree = nil
+local buildingQuadtree = nil
 local WORLD_SIZE = 64 * 32  -- 64 tiles * 32 pixels
+
+-- Accessor functions for building quadtree (buildings use center of world bounds)
+local function getBuildingX(building)
+    if building.getWorldBounds then
+        local bx1, _, bx2, _ = building:getWorldBounds()
+        return (bx1 + bx2) / 2
+    end
+    return building.gridX and building.gridX * 32 + 16 or 0
+end
+
+local function getBuildingY(building)
+    if building.getWorldBounds then
+        local _, by1, _, by2 = building:getWorldBounds()
+        return (by1 + by2) / 2
+    end
+    return building.gridY and building.gridY * 32 + 16 or 0
+end
 
 -- Game state
 local elapsedTime = 0
@@ -315,6 +333,18 @@ local function refreshUnitQuadtree(allUnits)
     end
     for _, unit in ipairs(allUnits) do
         unitQuadtree:insert(unit, getUnitX, getUnitY)
+    end
+end
+
+-- Refresh building quadtree (buildings don't move, but can be built/destroyed)
+local function refreshBuildingQuadtree(allBuildings)
+    if not buildingQuadtree then
+        buildingQuadtree = M.Quadtree.new(0, 0, WORLD_SIZE, WORLD_SIZE)
+    else
+        buildingQuadtree:clear()
+    end
+    for _, building in ipairs(allBuildings) do
+        buildingQuadtree:insert(building, getBuildingX, getBuildingY)
     end
 end
 
@@ -2719,8 +2749,9 @@ function Gameplay.update(dt)
     local allBuildings = getAllBuildings()
     map:updateFog(allUnits, allBuildings, playerTeam)
 
-    -- Refresh quadtree once per frame for spatial queries
+    -- Refresh quadtrees once per frame for spatial queries
     refreshUnitQuadtree(allUnits)
+    refreshBuildingQuadtree(allBuildings)
 
     calculatePopulation()
     updateRequirementsState()
@@ -3027,6 +3058,7 @@ function Gameplay.update(dt)
     for _, peon in ipairs(peons) do
         -- Set quadtree reference for O(log n) unit separation lookups
         peon.unitQuadtreeRef = unitQuadtree
+        peon.buildingQuadtreeRef = buildingQuadtree
         local peonTownHall = townHall  -- Default to player's townhall
         if peon.team ~= playerTeam and enemyTownHall then
             peonTownHall = enemyTownHall

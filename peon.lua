@@ -262,6 +262,28 @@ function Peon:getUnitSeparation()
     return sepX, sepY
 end
 
+-- Building collision query radius: peon radius + max building half-size (3x3 tiles = 48 pixels)
+local BUILDING_QUERY_RADIUS = 14 + 48 + 16  -- Extra margin for safety
+
+-- Accessor functions for building quadtree queries
+local function getBuildingQX(b)
+    if b.getWorldBounds then
+        local bx1, _, bx2, _ = b:getWorldBounds()
+        return (bx1 + bx2) / 2
+    end
+    return b.gridX and b.gridX * 32 + 16 or 0
+end
+local function getBuildingQY(b)
+    if b.getWorldBounds then
+        local _, by1, _, by2 = b:getWorldBounds()
+        return (by1 + by2) / 2
+    end
+    return b.gridY and b.gridY * 32 + 16 or 0
+end
+
+-- Reusable table for building queries (avoids allocation)
+local buildingQueryResults = {}
+
 function Peon:canMoveTo(newX, newY, buildings)
     -- Check tree collision
     if self.map then
@@ -271,18 +293,30 @@ function Peon:canMoveTo(newX, newY, buildings)
             return false
         end
     end
-    
+
     if not buildings then return true end
-    
-    for _, b in ipairs(buildings) do
+
+    -- Use quadtree for spatial lookup if available
+    local nearbyBuildings
+    if self.buildingQuadtreeRef then
+        -- Clear reusable table
+        for i = 1, #buildingQueryResults do buildingQueryResults[i] = nil end
+        -- Query buildings near the target position
+        nearbyBuildings = self.buildingQuadtreeRef:query(newX, newY, BUILDING_QUERY_RADIUS, buildingQueryResults, getBuildingQX, getBuildingQY)
+    else
+        -- Fallback to checking all buildings
+        nearbyBuildings = buildings
+    end
+
+    for _, b in ipairs(nearbyBuildings) do
         -- Skip collision check for target mine (peon needs to walk into it)
         if self.targetMine and b == self.targetMine then
             goto continue
         end
-        
+
         local currentPen = self:getBuildingPenetration(self.worldX, self.worldY, b)
         local newPen = self:getBuildingPenetration(newX, newY, b)
-        
+
         if newPen > 0 then
             -- Would be inside building
             if currentPen > 0 then
@@ -295,10 +329,10 @@ function Peon:canMoveTo(newX, newY, buildings)
                 return false
             end
         end
-        
+
         ::continue::
     end
-    
+
     return true
 end
 
