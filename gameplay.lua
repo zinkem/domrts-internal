@@ -22,6 +22,7 @@ local M = {
     CommandBar = require("command_bar"),
     Surrender = require("surrender"),
     BuildingPlacement = require("building_placement"),
+    Quadtree = require("quadtree"),
 }
 
 -- Optional modules (graceful fallback)
@@ -43,6 +44,10 @@ pcall(function() M.DrawUtils = require("draw_utils") end)
 pcall(function() M.Audio = require("audio") end)
 
 local Gameplay = {}
+
+-- Persistent quadtree for spatial queries (refreshed once per frame)
+local unitQuadtree = nil
+local WORLD_SIZE = 64 * 32  -- 64 tiles * 32 pixels
 
 -- Game state
 local elapsedTime = 0
@@ -294,6 +299,25 @@ local function getAllUnits()
     return units
 end
 
+-- Accessor functions for quadtree
+local function getUnitX(unit) return unit.worldX end
+local function getUnitY(unit) return unit.worldY end
+
+-- Maximum separation query radius (largest possible unit radius * 2)
+local MAX_SEPARATION_RADIUS = 32
+
+-- Refresh the persistent quadtree with current unit positions (O(n) once per frame)
+local function refreshUnitQuadtree(allUnits)
+    if not unitQuadtree then
+        unitQuadtree = M.Quadtree.new(0, 0, WORLD_SIZE, WORLD_SIZE)
+    else
+        unitQuadtree:clear()
+    end
+    for _, unit in ipairs(allUnits) do
+        unitQuadtree:insert(unit, getUnitX, getUnitY)
+    end
+end
+
 local function separateUnits()
     local allUnits = getAllUnits()
     local allBuildings = getAllBuildings()
@@ -315,19 +339,30 @@ local function separateUnits()
         return false
     end
 
+    -- Use persistent quadtree (already refreshed at start of frame)
+    local qt = unitQuadtree
+
     -- Multiple passes for better separation
     for pass = 1, 3 do
-        for i = 1, #allUnits do
-            for j = i + 1, #allUnits do
-                local a, b = allUnits[i], allUnits[j]
+        for _, a in ipairs(allUnits) do
+            -- Skip if peon carrying gold or heading to mine
+            local aCarryingGold = a.carryingGold and a.carryingGold > 0
+            local aTargetingMine = a.targetMine ~= nil
+            if aCarryingGold or aTargetingMine then
+                goto continue_a
+            end
 
-                -- Skip collision if either unit is a peon carrying gold or heading to mine
-                local aCarryingGold = a.carryingGold and a.carryingGold > 0
+            -- Query nearby units using quadtree
+            local nearby = qt:query(a.worldX, a.worldY, MAX_SEPARATION_RADIUS, nil, getUnitX, getUnitY)
+
+            for _, b in ipairs(nearby) do
+                if a == b then goto continue_b end
+
+                -- Skip if peon carrying gold or heading to mine
                 local bCarryingGold = b.carryingGold and b.carryingGold > 0
-                local aTargetingMine = a.targetMine ~= nil
                 local bTargetingMine = b.targetMine ~= nil
-                if aCarryingGold or bCarryingGold or aTargetingMine or bTargetingMine then
-                    goto continue
+                if bCarryingGold or bTargetingMine then
+                    goto continue_b
                 end
 
                 local dx = b.worldX - a.worldX
@@ -339,7 +374,7 @@ local function separateUnits()
                     local overlap = (minDist - dist) / 2 + 0.5
                     local nx, ny = dx / dist, dy / dist
 
-                    -- Push apart
+                    -- Calculate new positions
                     local ax, ay = a.worldX - nx * overlap, a.worldY - ny * overlap
                     local bx, by = b.worldX + nx * overlap, b.worldY + ny * overlap
 
@@ -361,8 +396,10 @@ local function separateUnits()
                     end
                 end
 
-                ::continue::
+                ::continue_b::
             end
+
+            ::continue_a::
         end
     end
     return allUnits, allBuildings
@@ -2323,7 +2360,13 @@ function Gameplay.load(options)
     local playerStartX = math.max(edgeBuffer, math.floor(mapSize * 0.15))
     local playerStartY = math.min(mapSize - edgeBuffer - buildingSize, math.floor(mapSize * 0.7))
     local thGridX, thGridY = map:findClearArea(buildingSize, buildingSize, playerStartX, playerStartY, 15)
-    
+
+    -- Fallback if no clear area found - force clear the preferred location
+    if not thGridX then
+        thGridX, thGridY = playerStartX, playerStartY
+        map:clearArea(thGridX, thGridY, buildingSize + 2, buildingSize + 2)
+    end
+
     -- Clamp townhall position to respect edge buffer
     thGridX = math.max(edgeBuffer, math.min(mapSize - edgeBuffer - buildingSize, thGridX))
     thGridY = math.max(edgeBuffer, math.min(mapSize - edgeBuffer - buildingSize, thGridY))
@@ -2423,7 +2466,13 @@ function Gameplay.load(options)
     local enemyStartX = math.min(mapSize - edgeBuffer - buildingSize, math.floor(mapSize * 0.8))
     local enemyStartY = math.max(edgeBuffer, math.floor(mapSize * 0.2))
     local enemyThGridX, enemyThGridY = map:findClearArea(buildingSize, buildingSize, enemyStartX, enemyStartY, 15)
-    
+
+    -- Fallback if no clear area found - force clear the preferred location
+    if not enemyThGridX then
+        enemyThGridX, enemyThGridY = enemyStartX, enemyStartY
+        map:clearArea(enemyThGridX, enemyThGridY, buildingSize + 2, buildingSize + 2)
+    end
+
     -- Clamp enemy townhall position to respect edge buffer
     enemyThGridX = math.max(edgeBuffer, math.min(mapSize - edgeBuffer - buildingSize, enemyThGridX))
     enemyThGridY = math.max(edgeBuffer, math.min(mapSize - edgeBuffer - buildingSize, enemyThGridY))
@@ -2669,6 +2718,9 @@ function Gameplay.update(dt)
     local allUnits = getAllUnits()
     local allBuildings = getAllBuildings()
     map:updateFog(allUnits, allBuildings, playerTeam)
+
+    -- Refresh quadtree once per frame for spatial queries
+    refreshUnitQuadtree(allUnits)
 
     calculatePopulation()
     updateRequirementsState()
@@ -2973,6 +3025,8 @@ function Gameplay.update(dt)
     -- Peons - each peon uses their team's townhall for returning resources
     local playerTeam = M.Teams and M.Teams.PLAYER or 1
     for _, peon in ipairs(peons) do
+        -- Set quadtree reference for O(log n) unit separation lookups
+        peon.unitQuadtreeRef = unitQuadtree
         local peonTownHall = townHall  -- Default to player's townhall
         if peon.team ~= playerTeam and enemyTownHall then
             peonTownHall = enemyTownHall
@@ -2982,32 +3036,32 @@ function Gameplay.update(dt)
 
     -- Footmen
     for _, footman in ipairs(footmen) do
-        footman:update(gameDt, buildings, allUnits, allBuildings)
+        footman:update(gameDt, buildings, unitQuadtree, allUnits, allBuildings)
     end
 
     -- Archers
     for _, archer in ipairs(archers) do
-        archer:update(gameDt, buildings, allUnits, allBuildings)
+        archer:update(gameDt, buildings, unitQuadtree, allUnits, allBuildings)
     end
 
     -- Knights
     for _, knight in ipairs(knights) do
-        knight:update(gameDt, buildings, allUnits, allBuildings)
+        knight:update(gameDt, buildings, unitQuadtree, allUnits, allBuildings)
     end
 
     -- Flying Scouts
     for _, unit in ipairs(flyingScouts) do
-        unit:update(gameDt, buildings, allUnits, allBuildings)
+        unit:update(gameDt, buildings, unitQuadtree, allUnits, allBuildings)
     end
 
     -- Ballistas
     for _, unit in ipairs(ballistas) do
-        unit:update(gameDt, buildings, allUnits, allBuildings)
+        unit:update(gameDt, buildings, unitQuadtree, allUnits, allBuildings)
     end
 
     -- Kamikazes
     for _, unit in ipairs(kamikazes) do
-        unit:update(gameDt, buildings, allUnits, allBuildings)
+        unit:update(gameDt, buildings, unitQuadtree, allUnits, allBuildings)
     end
 
     -- Remove dead units

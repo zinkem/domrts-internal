@@ -22,6 +22,13 @@ pcall(function() DrawUtils = require("draw_utils") end)
 local Peon = {}
 Peon.__index = Peon
 
+-- Accessor functions for quadtree queries
+local function getUnitX(unit) return unit.worldX end
+local function getUnitY(unit) return unit.worldY end
+
+-- Reusable table for quadtree queries (avoids allocation per query)
+local separationQueryResults = {}
+
 -- States
 Peon.STATE_IDLE = "Idle"
 Peon.STATE_MOVING = "Moving"
@@ -113,7 +120,8 @@ function Peon.new(params)
     -- Reference to resources (set by gameplay for gather-move)
     self.resourcesRef = nil
     self.goldMinesRef = nil
-    self.allUnitsRef = nil  -- Reference to all units (for collision/separation)
+    self.allUnitsRef = nil  -- Reference to all units (fallback for collision/separation)
+    self.unitQuadtreeRef = nil  -- Reference to unit quadtree (for O(log n) collision lookups)
     
     -- Notification callback (set by gameplay)
     self.onNotify = nil
@@ -188,34 +196,46 @@ end
 
 -- Get separation force from nearby units (pushes units apart when overlapping)
 -- Same approach as Unit class - standard RTS behavior
-function Peon:getUnitSeparation(allUnits)
+-- Uses quadtree for O(log n) neighbor lookup when available
+function Peon:getUnitSeparation()
     -- Skip separation when actively mining with gold
     if self:shouldIgnoreUnitCollisions() then
         return 0, 0
     end
-    
+
     local sepX, sepY = 0, 0
     local separationDist = self.radius * 2.5  -- Start separating when within ~2.5 radii
-    
-    if not allUnits then return 0, 0 end
-    
-    for _, other in ipairs(allUnits) do
+
+    -- Use quadtree query if available, otherwise fall back to linear scan
+    local nearbyUnits
+    if self.unitQuadtreeRef then
+        -- Clear and reuse the results table to avoid allocation
+        for i = 1, #separationQueryResults do
+            separationQueryResults[i] = nil
+        end
+        nearbyUnits = self.unitQuadtreeRef:query(self.worldX, self.worldY, separationDist, separationQueryResults, getUnitX, getUnitY)
+    else
+        nearbyUnits = self.allUnitsRef
+    end
+
+    if not nearbyUnits then return 0, 0 end
+
+    for _, other in ipairs(nearbyUnits) do
         if other ~= self and other.worldX and other.worldY then
             -- Skip invisible units (inside buildings)
             if other.visible == false then
                 goto continue
             end
-            
+
             -- Skip other units that are also ignoring collisions (other mining peons with gold)
             if other.shouldIgnoreUnitCollisions and other:shouldIgnoreUnitCollisions() then
                 goto continue
             end
-            
+
             local dx = self.worldX - other.worldX
             local dy = self.worldY - other.worldY
             local dist = math.sqrt(dx * dx + dy * dy)
-            local minDist = self.radius + (other.radius or 14)
-            
+
             if dist < separationDist and dist > 0.1 then
                 -- Push away from other unit proportional to how close we are
                 local force = (separationDist - dist) / separationDist
@@ -227,18 +247,18 @@ function Peon:getUnitSeparation(allUnits)
                 sepX = sepX + math.cos(angle)
                 sepY = sepY + math.sin(angle)
             end
-            
+
             ::continue::
         end
     end
-    
+
     -- Normalize if too strong
     local len = math.sqrt(sepX * sepX + sepY * sepY)
     if len > 1 then
         sepX = sepX / len
         sepY = sepY / len
     end
-    
+
     return sepX, sepY
 end
 
@@ -329,7 +349,7 @@ end
 -- If blocked, find alternative directions that maintain full speed
 function Peon:tryMove(dirX, dirY, moveSpeed, buildings)
     -- Apply unit separation force (same as Unit class)
-    local sepX, sepY = self:getUnitSeparation(self.allUnitsRef)
+    local sepX, sepY = self:getUnitSeparation()
     local sepStrength = 0.3
     
     -- Apply separation to direction
@@ -1229,7 +1249,7 @@ function Peon:moveTowardTarget(dt, buildings)
         local dirY = dy / dist
         
         -- Apply unit separation force (same as Unit class)
-        local sepX, sepY = self:getUnitSeparation(self.allUnitsRef)
+        local sepX, sepY = self:getUnitSeparation()
         local sepStrength = 0.3
         
         dirX = dirX + sepX * sepStrength

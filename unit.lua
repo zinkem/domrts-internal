@@ -21,6 +21,13 @@ pcall(function() Audio = require("audio") end)
 local Unit = {}
 Unit.__index = Unit
 
+-- Accessor functions for quadtree queries (defined at module level for reuse)
+local function getUnitX(unit) return unit.worldX end
+local function getUnitY(unit) return unit.worldY end
+
+-- Reusable table for quadtree queries (avoids allocation per query)
+local separationQueryResults = {}
+
 -- Default stats (overridden by subclasses)
 Unit.RADIUS = 14
 Unit.SPEED = 60
@@ -167,19 +174,31 @@ end
 
 -- Get separation force from nearby units (pushes units apart when overlapping)
 -- This is the standard industry approach (Starcraft, Warcraft)
-function Unit:getUnitSeparation(allUnits)
+-- Uses quadtree for O(log n) neighbor lookup when available
+function Unit:getUnitSeparation(allUnits, unitQuadtree)
     local sepX, sepY = 0, 0
     local separationDist = self.radius * 2.5  -- Start separating when within ~2.5 radii
-    
-    if not allUnits then return 0, 0 end
-    
-    for _, other in ipairs(allUnits) do
+
+    -- Use quadtree query if available, otherwise fall back to linear scan
+    local nearbyUnits
+    if unitQuadtree then
+        -- Clear and reuse the results table to avoid allocation
+        for i = 1, #separationQueryResults do
+            separationQueryResults[i] = nil
+        end
+        nearbyUnits = unitQuadtree:query(self.worldX, self.worldY, separationDist, separationQueryResults, getUnitX, getUnitY)
+    else
+        nearbyUnits = allUnits
+    end
+
+    if not nearbyUnits then return 0, 0 end
+
+    for _, other in ipairs(nearbyUnits) do
         if other ~= self and other.worldX and other.worldY then
             local dx = self.worldX - other.worldX
             local dy = self.worldY - other.worldY
             local dist = math.sqrt(dx * dx + dy * dy)
-            local minDist = self.radius + (other.radius or 14)
-            
+
             if dist < separationDist and dist > 0.1 then
                 -- Push away from other unit proportional to how close we are
                 local force = (separationDist - dist) / separationDist
@@ -193,31 +212,31 @@ function Unit:getUnitSeparation(allUnits)
             end
         end
     end
-    
+
     -- Normalize if too strong
     local len = math.sqrt(sepX * sepX + sepY * sepY)
     if len > 1 then
         sepX = sepX / len
         sepY = sepY / len
     end
-    
+
     return sepX, sepY
 end
 
 -- Simple movement along path - paths are pre-validated by A*
 -- Only checks terrain as a safety net
-function Unit:moveToward(targetX, targetY, dt, allUnits)
+function Unit:moveToward(targetX, targetY, dt, allUnits, unitQuadtree)
     local dx = targetX - self.worldX
     local dy = targetY - self.worldY
     local dist = math.sqrt(dx * dx + dy * dy)
-    
+
     if dist < 1 then return end
-    
+
     local dirX = dx / dist
     local dirY = dy / dist
-    
-    -- Apply unit-unit separation
-    local sepX, sepY = self:getUnitSeparation(allUnits)
+
+    -- Apply unit-unit separation (uses quadtree for O(log n) lookup when available)
+    local sepX, sepY = self:getUnitSeparation(allUnits, unitQuadtree)
     
     -- Increase separation strength when close to final destination (within 2 tiles = 64px)
     -- This helps units spread out when they're bunching up at a target
@@ -291,13 +310,13 @@ function Unit:distanceTo(target)
     return math.max(0, centerDist - targetRadius)
 end
 
-function Unit:updateAttacking(dt, buildings, allUnits, allBuildings)
+function Unit:updateAttacking(dt, buildings, unitQuadtree, allBuildings)
     -- Check if target is dead or gone
     if not self.attackTarget or (self.attackTarget.isDead and self.attackTarget:isDead()) then
         self.attackTarget = nil
         self.state = "Idle"
         -- Try to find new target
-        self:checkForEnemies(allUnits, allBuildings)
+        self:checkForEnemies(unitQuadtree, allBuildings)
         return
     end
     
@@ -384,31 +403,30 @@ function Unit:updateAttacking(dt, buildings, allUnits, allBuildings)
 
             if self.currentWaypoint <= #self.path then
                 wp = self.path[self.currentWaypoint]
-                self:moveToward(wp.x, wp.y, dt, allUnits)
+                self:moveToward(wp.x, wp.y, dt, nil, unitQuadtree)
             end
         end
         -- No fallback movement - units stop if no valid path
     end
 end
 
-function Unit:checkForEnemies(allUnits, allBuildings)
+function Unit:checkForEnemies(unitQuadtree, allBuildings)
     local sightRange = self:getSightRangePixels()
     local myTeam = self.team
-    
-    -- Check units first
-    if allUnits then
-        for _, unit in ipairs(allUnits) do
-            if unit ~= self and unit.team and unit.team ~= myTeam and unit.hp and unit.hp > 0 then
-                local dist = self:distanceTo(unit)
-                if dist <= sightRange then
-                    self:setAttackTarget(unit)
-                    return
-                end
-            end
+
+    -- Check units first using quadtree for O(log n) lookup
+    if unitQuadtree then
+        local function isEnemy(unit)
+            return unit ~= self and unit.team and unit.team ~= myTeam and unit.hp and unit.hp > 0
+        end
+        local enemy = unitQuadtree:findAny(self.worldX, self.worldY, sightRange, getUnitX, getUnitY, isEnemy)
+        if enemy then
+            self:setAttackTarget(enemy)
+            return
         end
     end
-    
-    -- Check buildings
+
+    -- Check buildings (still O(n) - could add building quadtree later)
     if allBuildings then
         for _, building in ipairs(allBuildings) do
             if building.team and building.team ~= myTeam and building.hp and building.hp > 0 then
@@ -465,12 +483,12 @@ function Unit:drawHealthBar()
     love.graphics.rectangle("line", barX - 1, barY - 1, barWidth + 2, barHeight + 2)
 end
 
-function Unit:update(dt, buildings, allUnits, allBuildings)
+function Unit:update(dt, buildings, unitQuadtree, allUnits, allBuildings)
     -- Update attack cooldown
     if self.attackCooldown > 0 then
         self.attackCooldown = self.attackCooldown - dt
     end
-    
+
     -- Update flash timer
     if self.flashTimer and self.flashTimer > 0 then
         self.flashTimer = self.flashTimer - dt
@@ -486,32 +504,32 @@ function Unit:update(dt, buildings, allUnits, allBuildings)
     if self.attackAnimTimer and self.attackAnimTimer > 0 then
         self.attackAnimTimer = self.attackAnimTimer - dt
     end
-    
+
     -- Stuck detection - track position history
     self.stuckTimer = (self.stuckTimer or 0) + dt
     if self.stuckTimer >= 0.5 then
         self.stuckTimer = 0
-        
+
         -- Store position history (keep last 4 samples = 2 seconds)
         self.posHistory = self.posHistory or {}
         table.insert(self.posHistory, {x = self.worldX, y = self.worldY})
         if #self.posHistory > 4 then
             table.remove(self.posHistory, 1)
         end
-        
+
         -- Check if stuck (not moving but should be)
         if #self.posHistory >= 4 and (self.state == "Moving" or self.state == "Attacking" or self.state == "AttackMoving") then
             local oldPos = self.posHistory[1]
             local dx = self.worldX - oldPos.x
             local dy = self.worldY - oldPos.y
             local movedDist = math.sqrt(dx * dx + dy * dy)
-            
+
             -- If moved less than 5 pixels in 2 seconds while trying to move, we're stuck
             if movedDist < 5 then
                 -- Just clear path to force recalculation - don't nudge randomly
                 self.path = nil
                 self.posHistory = {}
-                
+
                 -- If attacking and stuck, just stop - we're probably as close as we can get
                 if self.state == "Attacking" and self.attackTarget then
                     -- Stay in attacking state, let attack logic handle it
@@ -519,20 +537,20 @@ function Unit:update(dt, buildings, allUnits, allBuildings)
             end
         end
     end
-    
+
     if self.state == "Attacking" then
-        self:updateAttacking(dt, buildings, allUnits, allBuildings)
+        self:updateAttacking(dt, buildings, unitQuadtree, allBuildings)
     elseif self.state == "Moving" then
-        self:updateMoving(dt, buildings, allUnits)
+        self:updateMoving(dt, buildings, allUnits, unitQuadtree)
     elseif self.state == "AttackMoving" then
-        self:updateAttackMoving(dt, buildings, allUnits, allBuildings)
+        self:updateAttackMoving(dt, buildings, unitQuadtree, allBuildings)
     elseif self.state == "Idle" then
-        -- Auto-acquire targets
-        self:checkForEnemies(allUnits, allBuildings)
+        -- Auto-acquire targets using quadtree for O(log n) lookup
+        self:checkForEnemies(unitQuadtree, allBuildings)
     end
 end
 
-function Unit:updateMoving(dt, buildings, allUnits)
+function Unit:updateMoving(dt, buildings, allUnits, unitQuadtree)
     if not self.targetX or not self.targetY then
         self.state = "Idle"
         return
@@ -568,36 +586,31 @@ function Unit:updateMoving(dt, buildings, allUnits)
         
         if self.currentWaypoint <= #self.path then
             wp = self.path[self.currentWaypoint]
-            self:moveToward(wp.x, wp.y, dt, allUnits)
+            self:moveToward(wp.x, wp.y, dt, allUnits, unitQuadtree)
         end
     else
         -- No path or reached end - move directly toward target
-        self:moveToward(self.targetX, self.targetY, dt, allUnits)
+        self:moveToward(self.targetX, self.targetY, dt, allUnits, unitQuadtree)
     end
 end
 
-function Unit:updateAttackMoving(dt, buildings, allUnits, allBuildings)
+function Unit:updateAttackMoving(dt, buildings, unitQuadtree, allBuildings)
     -- Attack-move: move toward destination but attack any enemies in range
-    
-    -- First check for enemies in sight range
+
+    -- First check for enemies in sight range using quadtree
     local sightRange = self:getSightRangePixels()
     local myTeam = self.team
     local foundEnemy = nil
-    
-    -- Check units
-    if allUnits then
-        for _, unit in ipairs(allUnits) do
-            if unit ~= self and unit.team and unit.team ~= myTeam and unit.hp and unit.hp > 0 then
-                local dist = self:distanceTo(unit)
-                if dist <= sightRange then
-                    foundEnemy = unit
-                    break
-                end
-            end
+
+    -- Check units using quadtree for O(log n) lookup
+    if unitQuadtree then
+        local function isEnemy(unit)
+            return unit ~= self and unit.team and unit.team ~= myTeam and unit.hp and unit.hp > 0
         end
+        foundEnemy = unitQuadtree:findAny(self.worldX, self.worldY, sightRange, getUnitX, getUnitY, isEnemy)
     end
-    
-    -- Check buildings if no unit found
+
+    -- Check buildings if no unit found (still O(n) - could add building quadtree later)
     if not foundEnemy and allBuildings then
         for _, building in ipairs(allBuildings) do
             if building.team and building.team ~= myTeam and building.hp and building.hp > 0 then
@@ -609,7 +622,7 @@ function Unit:updateAttackMoving(dt, buildings, allUnits, allBuildings)
             end
         end
     end
-    
+
     -- If enemy found, switch to attacking
     if foundEnemy then
         self:setAttackTarget(foundEnemy)
@@ -652,11 +665,11 @@ function Unit:updateAttackMoving(dt, buildings, allUnits, allBuildings)
 
         if self.currentWaypoint <= #self.path then
             wp = self.path[self.currentWaypoint]
-            self:moveToward(wp.x, wp.y, dt, allUnits)
+            self:moveToward(wp.x, wp.y, dt, nil, unitQuadtree)
         end
     elseif self.path then
         -- Have path but finished it - move directly toward target
-        self:moveToward(self.targetX, self.targetY, dt, allUnits)
+        self:moveToward(self.targetX, self.targetY, dt, nil, unitQuadtree)
     end
     -- If no path and on cooldown, just wait
 end

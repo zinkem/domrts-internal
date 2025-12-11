@@ -414,7 +414,15 @@ function love.load(arg)
     -- Check for benchmark mode
     for _, a in ipairs(arg or {}) do
         if a == "--benchmark" then
-            local Benchmark = require("benchmark_getAllUnits")
+            local Benchmark = require("benchmarks.benchmark_getAllUnits")
+            Benchmark.run()
+            return
+        elseif a == "--benchmark-quadtree" then
+            local Benchmark = require("benchmarks.benchmark_quadtree")
+            Benchmark.run()
+            return
+        elseif a == "--benchmark-combat" then
+            local Benchmark = require("benchmarks.benchmark_combat")
             Benchmark.run()
             return
         end
