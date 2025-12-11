@@ -5,14 +5,11 @@ Performance Optimization Work Plan
 
 ### High Impact
 
-1. getAllUnits() / getAllBuildings() called 3+ times per frame (gameplay.lua:2971, 3041, 3150)
-   - Creates new tables each call, iterates 7 unit types + 10 building types
-   - Fix: Cache once per frame at start of update/draw
+1. ✅ DONE (7f9419d) getAllUnits() / getAllBuildings() called 3+ times per frame
+   - Removed redundant calls, cached results per frame
 
-2. Unit separation - O(n²) distance calculations (unit.lua:170-205)
-   - Every moving unit calculates sqrt distance to ALL other units
-   - 20 units = 400 sqrt calls per frame just for separation
-   - Fix: Spatial hash grid for neighbor lookup
+2. ✅ DONE (6b905d0) Unit separation - O(n²) distance calculations
+   - Implemented quadtree spatial partitioning for neighbor lookup
 
 3. Peon collision - checks ALL buildings per move attempt (peon.lua:245-283)
    - canMoveTo() loops all buildings, called up to 8x per peon per frame
@@ -62,6 +59,7 @@ Performance Optimization Work Plan
 
 ## Recommended Priority Order
 
-1. Cache getAllUnits/getAllBuildings per frame - easy fix, high impact
-2. Spatial hash for unit separation - moderate effort, removes O(n²)
+1. ✅ DONE - Cache getAllUnits/getAllBuildings per frame
+2. ✅ DONE - Quadtree for unit separation (replaced spatial hash approach)
 3. Canvas cache for peon outlines - moderate effort, 5x fewer draw calls per peon
+4. Peon collision spatial partitioning - can reuse quadtree
