@@ -1,0 +1,45 @@
+#!/bin/bash
+# post-commit hook
+# Shows commit confirmation and workplan reminders
+
+PROJECT_ROOT=$(git rev-parse --show-toplevel)
+
+echo ""
+echo "============================================================"
+echo " COMMIT SUCCESSFUL"
+echo "============================================================"
+echo ""
+
+# Show what was just committed
+echo "Committed:"
+git log -1 --pretty=format:"  %h %s" HEAD
+echo ""
+echo ""
+
+# Show files changed
+echo "Files changed:"
+git diff-tree --no-commit-id --name-status -r HEAD | sed 's/^/  /'
+echo ""
+
+# Show workplan if it exists
+if [ -f "$PROJECT_ROOT/workplan.txt" ]; then
+    echo "============================================================"
+    echo " WORKPLAN REMINDER"
+    echo "============================================================"
+    echo ""
+    echo "Current priorities from workplan.txt:"
+    echo ""
+    # Show the Priority Order section
+    sed -n '/## Recommended Priority Order/,/^---$/p' "$PROJECT_ROOT/workplan.txt" | head -20 | sed 's/^/  /'
+    echo ""
+fi
+
+echo "============================================================"
+echo " NEXT STEPS"
+echo "============================================================"
+echo ""
+echo "  - Test the changes manually"
+echo "  - Check for regressions in affected modules"
+echo "  - Consider: does workplan.txt need updating?"
+echo ""
+echo "============================================================"

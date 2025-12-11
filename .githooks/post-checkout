@@ -1,0 +1,56 @@
+#!/bin/bash
+# post-checkout hook
+# Shows recent commits and context when switching branches
+
+PREV_HEAD=$1
+NEW_HEAD=$2
+BRANCH_CHECKOUT=$3  # 1 if branch checkout, 0 if file checkout
+
+# Only run for branch checkouts
+if [ "$BRANCH_CHECKOUT" != "1" ]; then
+    exit 0
+fi
+
+PROJECT_ROOT=$(git rev-parse --show-toplevel)
+BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
+
+echo ""
+echo "============================================================"
+echo " SWITCHED TO: $BRANCH_NAME"
+echo "============================================================"
+echo ""
+
+# Show recent commits on this branch
+echo "Recent commits on this branch:"
+echo ""
+git log --oneline -10 | sed 's/^/  /'
+echo ""
+
+# Show if there are uncommitted changes
+if [ -n "$(git status --porcelain)" ]; then
+    echo "============================================================"
+    echo " WARNING: Uncommitted changes present"
+    echo "============================================================"
+    git status --short | sed 's/^/  /'
+    echo ""
+fi
+
+# Show workplan summary
+if [ -f "$PROJECT_ROOT/workplan.txt" ]; then
+    echo "============================================================"
+    echo " WORKPLAN: Current Priorities"
+    echo "============================================================"
+    echo ""
+    sed -n '/## Recommended Priority Order/,/^---$/p' "$PROJECT_ROOT/workplan.txt" | head -15 | sed 's/^/  /'
+    echo ""
+fi
+
+# Hint about recent high-risk areas
+echo "============================================================"
+echo " RECENT CHANGES (potential bug sources)"
+echo "============================================================"
+echo ""
+echo "Files changed in last 5 commits:"
+git diff --stat HEAD~5..HEAD 2>/dev/null | tail -10 | sed 's/^/  /' || echo "  (fewer than 5 commits on branch)"
+echo ""
+echo "============================================================"

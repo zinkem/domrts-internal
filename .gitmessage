@@ -1,0 +1,33 @@
+# <type>: <subject>
+# |<---- Keep subject under 50 chars ---->|
+#
+# Types: feat, fix, refactor, perf, docs, test, chore
+#
+# Body: Explain WHAT changed and WHY (not how - the diff shows how)
+# Wrap at 72 characters.
+
+
+# --- Bug Risk Assessment ---
+# Risk: [low/medium/high]
+# Areas to watch:
+
+# --- Modules Affected ---
+# [ ] gameplay.lua - main game loop, state management
+# [ ] unit.lua - base unit behavior, combat, movement
+# [ ] peon.lua - worker AI, resource gathering
+# [ ] pathfinding.lua - A* navigation, path caching
+# [ ] map.lua - terrain, fog of war, tiles
+# [ ] building.lua - structures, placement
+# [ ] ui/ - interface components
+# [ ] other:
+
+# --- Testing ---
+# [ ] Manual playtest
+# [ ] Specific scenario tested:
+# [ ] No testing (explain why):
+
+# --- Review Checklist ---
+# [ ] No debug prints left in code
+# [ ] No commented-out code (delete it, git has history)
+# [ ] Changes match the commit subject
+# [ ] Risk assessment is honest

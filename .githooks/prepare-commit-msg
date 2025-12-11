@@ -1,0 +1,50 @@
+#!/bin/bash
+# prepare-commit-msg hook
+# Injects commit template and staged diff for AI context
+
+COMMIT_MSG_FILE=$1
+COMMIT_SOURCE=$2  # message, template, merge, squash, or commit
+SHA1=$3
+
+# Only modify for new commits (not merges, amends with existing message, etc.)
+if [ "$COMMIT_SOURCE" = "message" ]; then
+    # User provided -m flag, skip injection
+    exit 0
+fi
+
+if [ "$COMMIT_SOURCE" = "merge" ]; then
+    # Merge commit, keep default message
+    exit 0
+fi
+
+# Get the project root
+PROJECT_ROOT=$(git rev-parse --show-toplevel)
+
+# Start with our template
+if [ -f "$PROJECT_ROOT/.gitmessage" ]; then
+    cat "$PROJECT_ROOT/.gitmessage" > "$COMMIT_MSG_FILE"
+fi
+
+# Add separator
+echo "" >> "$COMMIT_MSG_FILE"
+echo "# ============================================================" >> "$COMMIT_MSG_FILE"
+echo "# STAGED CHANGES FOR REVIEW" >> "$COMMIT_MSG_FILE"
+echo "# (Everything below is context - will not appear in commit)" >> "$COMMIT_MSG_FILE"
+echo "# ============================================================" >> "$COMMIT_MSG_FILE"
+echo "#" >> "$COMMIT_MSG_FILE"
+
+# Add file statistics
+echo "# FILES CHANGED:" >> "$COMMIT_MSG_FILE"
+git diff --cached --stat | sed 's/^/# /' >> "$COMMIT_MSG_FILE"
+echo "#" >> "$COMMIT_MSG_FILE"
+
+# Add recent commits for context
+echo "# RECENT COMMITS (for context):" >> "$COMMIT_MSG_FILE"
+git log --oneline -5 | sed 's/^/# /' >> "$COMMIT_MSG_FILE"
+echo "#" >> "$COMMIT_MSG_FILE"
+
+# Add the full diff
+echo "# FULL DIFF:" >> "$COMMIT_MSG_FILE"
+echo "# ------------------------------------------------------------" >> "$COMMIT_MSG_FILE"
+git diff --cached | sed 's/^/# /' >> "$COMMIT_MSG_FILE"
+echo "# ============================================================" >> "$COMMIT_MSG_FILE"
