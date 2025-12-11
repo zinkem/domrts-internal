@@ -2177,8 +2177,8 @@ local function setupPeonCallbacks(peon)
         -- AI peon callbacks
         peon.resourceCheck = function()
             if not enemyAI then return false, 0, 0 end
-            local gold = enemyM.AI.gold
-            local lumber = enemyM.AI.lumber
+            local gold = enemyAI.gold
+            local lumber = enemyAI.lumber
             local canAfford = gold >= peon.buildCostGold and lumber >= peon.buildCostLumber
             return canAfford, gold, lumber
         end
@@ -2980,8 +2980,8 @@ function Gameplay.update(dt)
             canSpawn = peonReady and currentPop < maxPop
         elseif building.team == enemyTeam and enemyAI then
             -- AI handles its own population check
-            local aiPop = #enemyM.AI.peons + #enemyM.AI.footmen
-            local aiMaxPop = 4 + #enemyM.AI.farms * 4
+            local aiPop = #enemyAI.peons + #enemyAI.footmen
+            local aiMaxPop = 4 + #enemyAI.farms * 4
             canSpawn = peonReady and aiPop < aiMaxPop
         end
 
