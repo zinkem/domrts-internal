@@ -19,9 +19,18 @@ local config = {
     riverEnabled = true,
     numBridges = 2,      -- 1 to 4
     riverWidth = 3,      -- 1 to 5
-    enemies = {
-        { name = "Blinky", personality = "blinky" }
+    players = {
+        { type = "human", name = "Player 1" },
+        { type = "ai", name = "Blinky", personality = "blinky", showFog = false }
     }
+}
+
+-- Max players based on map size
+local maxPlayersByMapSize = {
+    [64] = 2,
+    [128] = 4,
+    [192] = 6,
+    [256] = 8
 }
 
 -- Available options
@@ -45,9 +54,16 @@ local personalities = {
     { name = "Passive", id = "passive", desc = "Never attacks" },
 }
 
+-- Player slot types
+local playerTypes = {
+    { id = "human", name = "Human" },
+    { id = "ai", name = "AI" },
+    { id = "none", name = "None" },
+}
+
 -- UI state
 local hoveredElement = nil
-local activeDropdown = nil  -- { enemyIndex = n } or nil
+local activeDropdown = nil  -- { playerIndex = n, dropdownType = "type" or "personality" } or nil
 local scrollY = 0
 
 -- UI Colors (moonlight theme - matching title screen)
@@ -178,7 +194,7 @@ end
 
 -- Button definitions
 local buttons = {}
-local enemyButtons = {}
+local playerButtons = {}  -- Player slot buttons
 local dropdownButtons = {}
 
 function GameConfig.load()
@@ -204,8 +220,9 @@ function GameConfig.load()
         riverEnabled = true,
         numBridges = 2,
         riverWidth = 3,
-        enemies = {
-            { name = "Blinky", personality = "blinky" }
+        players = {
+            { type = "human", name = "Player 1" },
+            { type = "ai", name = "Blinky", personality = "blinky", showFog = false }
         }
     }
     activeDropdown = nil
@@ -214,9 +231,33 @@ function GameConfig.load()
     GameConfig.buildUI()
 end
 
+-- Helper: Get max players for current map size
+local function getMaxPlayers()
+    return maxPlayersByMapSize[config.mapSize] or 2
+end
+
+-- Helper: Check if there's a human player
+local function hasHumanPlayer()
+    for _, player in ipairs(config.players) do
+        if player.type == "human" then
+            return true
+        end
+    end
+    return false
+end
+
+-- Helper: Adjust player count when map size changes
+local function adjustPlayersForMapSize()
+    local maxPlayers = getMaxPlayers()
+    -- Remove excess players
+    while #config.players > maxPlayers do
+        table.remove(config.players)
+    end
+end
+
 function GameConfig.buildUI()
     buttons = {}
-    enemyButtons = {}
+    playerButtons = {}
 
     local screenW, screenH = love.graphics.getDimensions()
     local panelW, panelH = 500, 680  -- Increased height for all options
@@ -225,11 +266,11 @@ function GameConfig.buildUI()
     local totalW = panelW + gap + infoPanelW
     local panelX = (screenW - totalW) / 2
     local panelY = (screenH - panelH) / 2
-    
+
     local contentX = panelX + 30
     local btnW = 80
     local btnH = 32
-    
+
     -- Map size buttons
     local mapSizeY = panelY + 100
     for i, size in ipairs(mapSizes) do
@@ -239,7 +280,11 @@ function GameConfig.buildUI()
             w = btnW,
             h = btnH,
             text = size .. "x" .. size,
-            action = function() config.mapSize = size end,
+            action = function()
+                config.mapSize = size
+                adjustPlayersForMapSize()
+                GameConfig.buildUI()
+            end,
             isSelected = function() return config.mapSize == size end,
             category = "mapSize"
         })
@@ -325,49 +370,52 @@ function GameConfig.buildUI()
         end
     end
     
-    -- Add/Remove enemy buttons
-    local enemyY = panelY + 410
+    -- Player slots section
+    local playersY = panelY + 410
+    local maxPlayers = getMaxPlayers()
+
+    -- Add/Remove player buttons
     table.insert(buttons, {
         x = contentX + 350,
-        y = enemyY - 5,
+        y = playersY - 5,
         w = 30,
         h = 26,
         text = "+",
         action = function()
-            if #config.enemies < 4 then
-                table.insert(config.enemies, { name = "Random", personality = "random" })
+            if #config.players < maxPlayers then
+                table.insert(config.players, { type = "ai", name = "Random", personality = "random", showFog = false })
                 GameConfig.buildUI()
             end
         end,
         isSelected = function() return false end,
-        category = "enemyControl"
+        category = "playerControl"
     })
-    
+
     table.insert(buttons, {
         x = contentX + 385,
-        y = enemyY - 5,
+        y = playersY - 5,
         w = 30,
         h = 26,
         text = "-",
         action = function()
-            if #config.enemies > 0 then
-                table.remove(config.enemies)
+            if #config.players > 1 then  -- Keep at least 1 player
+                table.remove(config.players)
                 GameConfig.buildUI()
             end
         end,
         isSelected = function() return false end,
-        category = "enemyControl"
+        category = "playerControl"
     })
-    
-    -- Enemy name buttons (clickable to show dropdown)
-    for i, enemy in ipairs(config.enemies) do
-        table.insert(enemyButtons, {
+
+    -- Player slot buttons
+    for i, player in ipairs(config.players) do
+        table.insert(playerButtons, {
             x = contentX,
-            y = enemyY + 30 + (i-1) * 40,
+            y = playersY + 30 + (i-1) * 40,
             w = 200,
             h = 32,
-            enemyIndex = i,
-            text = enemy.name
+            playerIndex = i,
+            player = player
         })
     end
     
@@ -410,21 +458,30 @@ function GameConfig.startGame()
         riverEnabled = config.riverEnabled,
         numBridges = config.numBridges,
         riverWidth = config.riverWidth,
-        enemies = {}
+        players = {},
+        spectatorMode = not hasHumanPlayer()
     }
-    
-    -- Convert enemy config to game format
-    for i, enemy in ipairs(config.enemies) do
-        local personality = enemy.personality
-        if personality == "random" then
-            local options = {"blinky", "pinky", "inky", "clyde"}
-            personality = options[math.random(#options)]
+
+    -- Convert player config to game format
+    for i, player in ipairs(config.players) do
+        if player.type ~= "none" then
+            local playerData = {
+                team = i,
+                type = player.type,
+                showFog = player.showFog or false
+            }
+            if player.type == "ai" then
+                local personality = player.personality or "random"
+                if personality == "random" then
+                    local options = {"blinky", "pinky", "inky", "clyde"}
+                    personality = options[math.random(#options)]
+                end
+                playerData.personality = personality
+            end
+            table.insert(gameOptions.players, playerData)
         end
-        table.insert(gameOptions.enemies, {
-            personality = personality
-        })
     end
-    
+
     -- Start gameplay with options
     Game.SceneManager.switch("gameplay", gameOptions)
 end
@@ -441,9 +498,9 @@ function GameConfig.update(dt)
         end
     end
     
-    -- Check enemy button hovers
+    -- Check player button hovers
     if not activeDropdown then
-        for _, btn in ipairs(enemyButtons) do
+        for _, btn in ipairs(playerButtons) do
             if mx >= btn.x and mx <= btn.x + btn.w and
                my >= btn.y and my <= btn.y + btn.h then
                 hoveredElement = btn
@@ -534,22 +591,23 @@ function GameConfig.draw()
         love.graphics.print("Bridges:", contentX + 280, panelY + 335)
     end
     
-    -- Section: Enemies
+    -- Section: Players
     love.graphics.setFont(Game.fonts.medium)
     love.graphics.setColor(UI.textLight)
-    love.graphics.print("Opponents", contentX, panelY + 385)
+    love.graphics.print("Players", contentX, panelY + 385)
     love.graphics.setFont(Game.fonts.small)
     love.graphics.setColor(UI.textMuted)
-    love.graphics.print("(click name to change)", contentX + 100, panelY + 390)
-    
+    local maxPlayers = getMaxPlayers()
+    love.graphics.print("(max " .. maxPlayers .. " for this map)", contentX + 75, panelY + 390)
+
     -- Draw all buttons
     for _, btn in ipairs(buttons) do
         GameConfig.drawButton(btn)
     end
-    
-    -- Draw enemy buttons
-    for _, btn in ipairs(enemyButtons) do
-        GameConfig.drawEnemyButton(btn)
+
+    -- Draw player buttons
+    for _, btn in ipairs(playerButtons) do
+        GameConfig.drawPlayerButton(btn)
     end
 
     -- Info panel on the right
@@ -626,16 +684,26 @@ function GameConfig.draw()
     love.graphics.line(infoPanelX + 20, infoY, infoPanelX + infoPanelW - 20, infoY)
     infoY = infoY + 15
 
-    -- Opponents section
+    -- Players section
     love.graphics.setColor(UI.textGold)
     love.graphics.setFont(Game.fonts.small)
-    love.graphics.print("Opponents (" .. #config.enemies .. ")", infoPanelX + 20, infoY)
+    local spectatorMode = not hasHumanPlayer()
+    local modeLabel = spectatorMode and " (Spectator)" or ""
+    love.graphics.print("Players (" .. #config.players .. ")" .. modeLabel, infoPanelX + 20, infoY)
     infoY = infoY + lineHeight
 
     love.graphics.setColor(UI.textLight)
-    for i, enemy in ipairs(config.enemies) do
-        local personality = enemy.personality:sub(1,1):upper() .. enemy.personality:sub(2)
-        love.graphics.print(i .. ". " .. enemy.name .. " (" .. personality .. ")", infoPanelX + 25, infoY)
+    for i, player in ipairs(config.players) do
+        local displayName = ""
+        if player.type == "human" then
+            displayName = i .. ". Human"
+        elseif player.type == "ai" then
+            local personality = (player.personality or "random"):sub(1,1):upper() .. (player.personality or "random"):sub(2)
+            displayName = i .. ". AI (" .. personality .. ")"
+        else
+            displayName = i .. ". Empty"
+        end
+        love.graphics.print(displayName, infoPanelX + 25, infoY)
         infoY = infoY + lineHeight - 4
         if infoY > panelY + infoPanelH - 60 then break end
     end
@@ -708,9 +776,11 @@ function GameConfig.drawButton(btn)
     love.graphics.print(btn.text, btn.x + (btn.w - textW) / 2, btn.y + (btn.h - textH) / 2)
 end
 
-function GameConfig.drawEnemyButton(btn)
+function GameConfig.drawPlayerButton(btn)
     local isHovered = hoveredElement == btn
-    local isActive = activeDropdown and activeDropdown.enemyIndex == btn.enemyIndex
+    local isActive = activeDropdown and activeDropdown.playerIndex == btn.playerIndex
+
+    local player = btn.player
 
     -- Background
     if isActive then
@@ -733,18 +803,25 @@ function GameConfig.drawEnemyButton(btn)
         love.graphics.rectangle("line", btn.x, btn.y, btn.w, btn.h, 4)
     end
 
-    -- Enemy number with shadow
+    -- Player number with shadow
     love.graphics.setFont(Game.fonts.small)
     love.graphics.setColor(0, 0, 0, 0.5)
-    love.graphics.print(btn.enemyIndex .. ".", btn.x + 9, btn.y + 9)
+    love.graphics.print(btn.playerIndex .. ".", btn.x + 9, btn.y + 9)
     love.graphics.setColor(UI.textMuted)
-    love.graphics.print(btn.enemyIndex .. ".", btn.x + 8, btn.y + 8)
+    love.graphics.print(btn.playerIndex .. ".", btn.x + 8, btn.y + 8)
 
-    -- Enemy name with shadow
+    -- Player type/name with shadow
+    local displayText = "Empty"
+    if player.type == "human" then
+        displayText = "Human"
+    elseif player.type == "ai" then
+        displayText = player.name or "AI"
+    end
+
     love.graphics.setColor(0, 0, 0, 0.5)
-    love.graphics.print(btn.text, btn.x + 31, btn.y + 9)
+    love.graphics.print(displayText, btn.x + 31, btn.y + 9)
     love.graphics.setColor(UI.textGold)
-    love.graphics.print(btn.text, btn.x + 30, btn.y + 8)
+    love.graphics.print(displayText, btn.x + 30, btn.y + 8)
 
     -- Dropdown arrow
     love.graphics.setColor(UI.textMuted)
@@ -752,47 +829,66 @@ function GameConfig.drawEnemyButton(btn)
     local arrowY = btn.y + btn.h / 2
     love.graphics.polygon("fill", arrowX, arrowY - 3, arrowX + 8, arrowY - 3, arrowX + 4, arrowY + 4)
 
-    -- Personality description with shadow
-    local enemy = config.enemies[btn.enemyIndex]
-    if enemy then
+    -- Description based on player type
+    local descText = ""
+    if player.type == "human" then
+        descText = "You"
+    elseif player.type == "ai" then
         for _, p in ipairs(personalities) do
-            if p.id == enemy.personality then
-                love.graphics.setFont(Game.fonts.small)
-                love.graphics.setColor(0, 0, 0, 0.5)
-                love.graphics.print(p.desc, btn.x + btn.w + 16, btn.y + 9)
-                love.graphics.setColor(UI.textMuted)
-                love.graphics.print(p.desc, btn.x + btn.w + 15, btn.y + 8)
+            if p.id == player.personality then
+                descText = p.desc
                 break
             end
         end
+    else
+        descText = "Slot disabled"
+    end
+
+    if descText ~= "" then
+        love.graphics.setFont(Game.fonts.small)
+        love.graphics.setColor(0, 0, 0, 0.5)
+        love.graphics.print(descText, btn.x + btn.w + 16, btn.y + 9)
+        love.graphics.setColor(UI.textMuted)
+        love.graphics.print(descText, btn.x + btn.w + 15, btn.y + 8)
     end
 end
 
 function GameConfig.drawDropdown()
     if not activeDropdown then return end
-    
-    local enemyBtn = enemyButtons[activeDropdown.enemyIndex]
-    if not enemyBtn then return end
-    
-    local dropX = enemyBtn.x
-    local dropY = enemyBtn.y + enemyBtn.h + 2
-    local dropW = enemyBtn.w
+
+    local playerBtn = playerButtons[activeDropdown.playerIndex]
+    if not playerBtn then return end
+
+    local player = config.players[activeDropdown.playerIndex]
+    local dropX = playerBtn.x
+    local dropY = playerBtn.y + playerBtn.h + 2
+    local dropW = playerBtn.w
     local itemH = 28
-    local dropH = #personalities * itemH + 4
-    
+
+    -- Build dropdown items: Human + AI personalities
+    -- Options: Human, then AI personalities (Blinky, Pinky, etc.)
+    local dropdownItems = {
+        { type = "human", name = "Human", desc = "You control this player" }
+    }
+    for _, p in ipairs(personalities) do
+        table.insert(dropdownItems, { type = "ai", name = p.name, personality = p.id, desc = p.desc })
+    end
+
+    local dropH = #dropdownItems * itemH + 4
+
     -- Build dropdown buttons
     dropdownButtons = {}
-    for i, p in ipairs(personalities) do
+    for i, item in ipairs(dropdownItems) do
         table.insert(dropdownButtons, {
             x = dropX + 2,
             y = dropY + 2 + (i-1) * itemH,
             w = dropW - 4,
             h = itemH - 2,
-            personality = p,
-            enemyIndex = activeDropdown.enemyIndex
+            item = item,
+            playerIndex = activeDropdown.playerIndex
         })
     end
-    
+
     -- Shadow
     love.graphics.setColor(0, 0, 0, 0.6)
     love.graphics.rectangle("fill", dropX + 4, dropY + 4, dropW, dropH, 4)
@@ -819,7 +915,12 @@ function GameConfig.drawDropdown()
     -- Items
     for _, btn in ipairs(dropdownButtons) do
         local isHovered = hoveredElement == btn
-        local isSelected = config.enemies[btn.enemyIndex].personality == btn.personality.id
+        local isSelected = false
+        if btn.item.type == "human" and player.type == "human" then
+            isSelected = true
+        elseif btn.item.type == "ai" and player.type == "ai" and player.personality == btn.item.personality then
+            isSelected = true
+        end
 
         if isSelected then
             love.graphics.setColor(UI.selectedBg)
@@ -838,7 +939,7 @@ function GameConfig.drawDropdown()
         -- Text shadow
         love.graphics.setFont(Game.fonts.small)
         love.graphics.setColor(0, 0, 0, 0.5)
-        love.graphics.print(btn.personality.name, btn.x + 11, btn.y + 6)
+        love.graphics.print(btn.item.name, btn.x + 11, btn.y + 6)
 
         -- Text
         if isSelected then
@@ -848,21 +949,30 @@ function GameConfig.drawDropdown()
         else
             love.graphics.setColor(UI.textMuted)
         end
-        love.graphics.print(btn.personality.name, btn.x + 10, btn.y + 5)
+        love.graphics.print(btn.item.name, btn.x + 10, btn.y + 5)
     end
 end
 
 function GameConfig.mousepressed(x, y, button)
     if button ~= 1 then return end
-    
+
     -- Check dropdown items first
     if activeDropdown then
         for _, btn in ipairs(dropdownButtons) do
             if x >= btn.x and x <= btn.x + btn.w and
                y >= btn.y and y <= btn.y + btn.h then
-                -- Select this personality
-                config.enemies[btn.enemyIndex].name = btn.personality.name
-                config.enemies[btn.enemyIndex].personality = btn.personality.id
+                -- Select this player type/personality
+                local player = config.players[btn.playerIndex]
+                if btn.item.type == "human" then
+                    player.type = "human"
+                    player.name = "Human"
+                    player.personality = nil
+                else
+                    player.type = "ai"
+                    player.name = btn.item.name
+                    player.personality = btn.item.personality
+                    player.showFog = player.showFog or false
+                end
                 activeDropdown = nil
                 GameConfig.buildUI()
                 return
@@ -872,16 +982,16 @@ function GameConfig.mousepressed(x, y, button)
         activeDropdown = nil
         return
     end
-    
-    -- Check enemy buttons (opens dropdown)
-    for _, btn in ipairs(enemyButtons) do
+
+    -- Check player buttons (opens dropdown)
+    for _, btn in ipairs(playerButtons) do
         if x >= btn.x and x <= btn.x + btn.w and
            y >= btn.y and y <= btn.y + btn.h then
-            activeDropdown = { enemyIndex = btn.enemyIndex }
+            activeDropdown = { playerIndex = btn.playerIndex }
             return
         end
     end
-    
+
     -- Check regular buttons
     for _, btn in ipairs(buttons) do
         if x >= btn.x and x <= btn.x + btn.w and
