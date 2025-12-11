@@ -411,26 +411,34 @@ Game.SceneManager = SceneManager
 
 -- Love2D callbacks
 function love.load(arg)
-    -- Check for benchmark mode
+    -- Check for benchmark mode: --benchmark-NAME loads benchmarks/benchmark_NAME.lua
     for _, a in ipairs(arg or {}) do
-        if a == "--benchmark" then
+        local benchmarkName = a:match("^%-%-benchmark%-(.+)$")
+        if benchmarkName then
+            -- Convert dashes to underscores for module name
+            local moduleName = "benchmarks.benchmark_" .. benchmarkName:gsub("-", "_")
+            local success, Benchmark = pcall(require, moduleName)
+            if success and Benchmark and Benchmark.run then
+                Benchmark.run()
+            else
+                print("Benchmark not found: " .. moduleName)
+                print("Available benchmarks in benchmarks/ folder:")
+                local info = love.filesystem.getInfo("benchmarks")
+                if info then
+                    local files = love.filesystem.getDirectoryItems("benchmarks")
+                    for _, f in ipairs(files) do
+                        local name = f:match("^benchmark_(.+)%.lua$")
+                        if name then
+                            print("  --benchmark-" .. name:gsub("_", "-"))
+                        end
+                    end
+                end
+                love.event.quit()
+            end
+            return
+        elseif a == "--benchmark" then
+            -- Legacy: bare --benchmark runs getAllUnits
             local Benchmark = require("benchmarks.benchmark_getAllUnits")
-            Benchmark.run()
-            return
-        elseif a == "--benchmark-quadtree" then
-            local Benchmark = require("benchmarks.benchmark_quadtree")
-            Benchmark.run()
-            return
-        elseif a == "--benchmark-combat" then
-            local Benchmark = require("benchmarks.benchmark_combat")
-            Benchmark.run()
-            return
-        elseif a == "--benchmark-building-collision" then
-            local Benchmark = require("benchmarks.benchmark_building_collision")
-            Benchmark.run()
-            return
-        elseif a == "--benchmark-peon-rendering" then
-            local Benchmark = require("benchmarks.benchmark_peon_rendering")
             Benchmark.run()
             return
         end
