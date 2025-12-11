@@ -63,6 +63,7 @@ stable (clean history of "blessed" states)
 - `develop` → `stable` via squash merge when stable
 - Releases cut from `stable` HEAD only, versions always increase
 - Hotfixes allowed on release branches, features are not
+- **NEVER force push** - make incremental fix commits instead of amending (squash merge cleans up)
 
 **Branch prefixes:**
 - `feature/` - new functionality
