@@ -2239,7 +2239,7 @@ function Gameplay.load(options)
         if options.enemies and #options.enemies > 0 then
             Game.Replay.log("CONFIG", string.format("AI: %s", options.enemies[1].personality or "blinky"))
         end
-        Game.Replay.log("CONFIG", string.format("Starting resources: %d gold, %d lumber", 2000, 400))
+        Game.Replay.log("CONFIG", string.format("Starting resources: %d gold, %d lumber", resources.gold, resources.lumber))
         -- Then log game start
         Game.Replay.log("GAME", "New game started" .. (tutorialMode and " (Tutorial)" or ""))
     end
