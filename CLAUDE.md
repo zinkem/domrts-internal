@@ -97,6 +97,18 @@ Buildings use a tech tree. Check `requirements.lua` for dependency validation.
 Check `git log --oneline -10` for recent changes.
 Recent commits are more likely to have undiscovered bugs.
 
+## Git Hooks
+
+This repo uses custom hooks in `.githooks/`. Enable with:
+```bash
+git config core.hooksPath .githooks
+```
+
+Hooks provide:
+- **prepare-commit-msg**: Injects diff into commit message for AI review
+- **post-commit**: Shows workplan reminders after each commit
+- **post-checkout**: Shows recent commits when switching branches
+
 ## Resources
 
 - [LÖVE 11.4 Wiki](https://love2d.org/wiki/Main_Page)
