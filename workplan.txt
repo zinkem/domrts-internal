@@ -1,0 +1,67 @@
+Performance Optimization Work Plan
+==================================
+
+## Performance Hotspots Found
+
+### High Impact
+
+1. getAllUnits() / getAllBuildings() called 3+ times per frame (gameplay.lua:2971, 3041, 3150)
+   - Creates new tables each call, iterates 7 unit types + 10 building types
+   - Fix: Cache once per frame at start of update/draw
+
+2. Unit separation - O(n²) distance calculations (unit.lua:170-205)
+   - Every moving unit calculates sqrt distance to ALL other units
+   - 20 units = 400 sqrt calls per frame just for separation
+   - Fix: Spatial hash grid for neighbor lookup
+
+3. Peon collision - checks ALL buildings per move attempt (peon.lua:245-283)
+   - canMoveTo() loops all buildings, called up to 8x per peon per frame
+   - Fix: Spatial partitioning or cache nearby buildings
+
+### Medium-High Impact
+
+4. Fog of war neighbor checking (map.lua:941-1006)
+   - 8 neighbor checks per visible fog cell (~475 cells x 8 = 3,800 lookups/frame)
+   - Fix: Cache fog edge states, only recalculate when fog changes
+
+5. Peon outline rendering - draws body 5x per peon (peon.lua:993-1004)
+   - 4 offset draws for outline + 1 actual = 5 complete body draws
+   - Fix: Render peon to canvas once, draw canvas 5x (much cheaper)
+
+6. Depth sorting every frame (gameplay.lua:3150-3247)
+   - Full O(n log n) sort of all units/buildings every draw
+   - Fix: Insertion sort maintaining sorted order, or dirty flag
+
+### Medium Impact
+
+7. Tree edge detection (map.lua:802-809)
+   - 4 tile lookups per tree tile, ~1,400 trees = 5,600 lookups
+   - Fix: Cache to canvas since trees rarely change
+
+8. Combat distance recalculation (unit.lua:305, 346, 356)
+   - Same distance calculated 3+ times per attacking unit
+   - Fix: Calculate once, pass as parameter
+
+9. Peon resource/drop-off search (peon.lua:585-620, 1134-1179)
+   - Linear search through all buildings/tiles each frame
+   - Fix: Cache nearest drop-off, invalidate only when buildings change
+
+---
+
+## Canvas Caching Opportunities
+
+| What              | Changes                  | Cache Strategy                              |
+|-------------------|--------------------------|---------------------------------------------|
+| Terrain/tiles     | Never during gameplay    | Render to canvas once at map load           |
+| Trees             | Only when chopped        | Re-render affected region to canvas         |
+| Fog of war edges  | When visibility changes  | Cache edge bitmask per cell                 |
+| Peon sprites      | Per animation frame      | Render each frame variant to small canvas   |
+| Building sprites  | Never (have BuildingRenderer) | Verify all buildings use it            |
+
+---
+
+## Recommended Priority Order
+
+1. Cache getAllUnits/getAllBuildings per frame - easy fix, high impact
+2. Spatial hash for unit separation - moderate effort, removes O(n²)
+3. Canvas cache for peon outlines - moderate effort, 5x fewer draw calls per peon
