@@ -45,6 +45,36 @@ Resolution: 1280x720 fixed. Isometric 2:1 projection.
 4. Fog of war neighbor checking
 5. Depth sorting every frame
 
+## Branch Strategy
+
+```
+develop (features land here via squash merge)
+    │
+    ▼ squash merge when ready
+stable (clean history of "blessed" states)
+    │
+    ├── release/1.0 (cut from stable, tagged)
+    ├── release/1.1 (cut from later stable commit)
+    └── release/1.2 (always forward, never backward)
+```
+
+**Rules:**
+- All PRs squash merge into `develop`
+- `develop` → `stable` via squash merge when stable
+- Releases cut from `stable` HEAD only, versions always increase
+- Hotfixes allowed on release branches, features are not
+- **NEVER force push** - make incremental fix commits instead of amending (squash merge cleans up)
+- **PR fix comments** - after each fix commit, add a PR comment summarizing: Issue, Root cause, Fix
+
+**Branch prefixes:**
+- `feature/` - new functionality
+- `bugfix/` - fixes for develop
+- `hotfix/` - fixes for release branches
+- `release/` - release branches (e.g., `release/1.0`)
+- `docs/` - documentation only
+
+**Labels:** `feature`, `bugfix`, `showstopping`, `tablestakes`
+
 ## Development Conventions
 
 ### Commit Messages
