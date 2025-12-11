@@ -42,6 +42,7 @@ pcall(function() M.AI = require("ai") end)
 pcall(function() M.Effects = require("effects") end)
 pcall(function() M.DrawUtils = require("draw_utils") end)
 pcall(function() M.Audio = require("audio") end)
+pcall(function() M.MusicPlayer = require("music_player") end)
 
 local Gameplay = {}
 
@@ -2227,6 +2228,9 @@ function Gameplay.load(options)
     if Audio and M.Audio.init then M.Audio.init() end
     if Audio and M.Audio.playRandomMusic then M.Audio.playRandomMusic() end
 
+    -- Initialize music player UI
+    if M.MusicPlayer then M.MusicPlayer.init(screenW, screenH) end
+
     -- Initialize replay logger for new game
     if Game.Replay then
         Game.Replay.reset()
@@ -2694,6 +2698,10 @@ function Gameplay.update(dt)
 
     -- Update audio (check if music ended, play next)
     if Audio and M.Audio.update then M.Audio.update(gameDt) end
+
+    -- Update music player UI
+    local screenW, screenH = love.graphics.getDimensions()
+    if M.MusicPlayer then M.MusicPlayer.update(gameDt, screenW, screenH) end
 
     -- Update replay logger
     if Game.Replay then Game.Replay.tick(gameDt) end
@@ -3312,6 +3320,9 @@ function Gameplay.draw()
     drawMinimap(screenW)
     drawCommandBar(screenW, screenH)
 
+    -- Draw music player (on top of top bar, but under dialogs)
+    if M.MusicPlayer then M.MusicPlayer.draw(screenW, screenH, Game.fonts) end
+
     -- Draw selected entity's UI (buttons, etc.)
     local selEntity = selectedEntities[1]
     if selEntity and selEntity.drawUI then
@@ -3448,6 +3459,9 @@ function Gameplay.keypressed(key)
 end
 
 function Gameplay.mousepressed(x, y, button)
+    -- Forward to music player first (top-most UI element)
+    if M.MusicPlayer and M.MusicPlayer.mousepressed(x, y, button) then return end
+
     -- Forward to surrender dialog first
     if M.Surrender.mousepressed(x, y, button) then return end
 
@@ -3598,6 +3612,9 @@ function Gameplay.mousepressed(x, y, button)
 end
 
 function Gameplay.mousemoved(x, y, dx, dy)
+    -- Forward to music player for drag handling
+    if M.MusicPlayer then M.MusicPlayer.mousemoved(x, y, dx, dy) end
+
     -- Handle minimap dragging (map handles this internally in update, but we can also do it here for responsiveness)
     if map:isMinimapDragging() then
         map:minimapNavigate(x, y)
@@ -3628,6 +3645,9 @@ function Gameplay.mousemoved(x, y, dx, dy)
 end
 
 function Gameplay.mousereleased(x, y, button)
+    -- Forward to music player for drag release
+    if M.MusicPlayer then M.MusicPlayer.mousereleased(x, y, button) end
+
     -- Forward to surrender dialog first
     if M.Surrender.mousereleased(x, y, button) then return end
 
@@ -3740,6 +3760,11 @@ function Gameplay.mousereleased(x, y, button)
             end
         end
     end
+end
+
+function Gameplay.wheelmoved(x, y)
+    -- Forward to music player for playlist scrolling
+    if M.MusicPlayer and M.MusicPlayer.wheelmoved(x, y) then return end
 end
 
 function handleLeftClick(x, y, shiftHeld)
