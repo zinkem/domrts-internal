@@ -425,6 +425,10 @@ function love.load(arg)
             local Benchmark = require("benchmarks.benchmark_combat")
             Benchmark.run()
             return
+        elseif a == "--benchmark-building-collision" then
+            local Benchmark = require("benchmarks.benchmark_building_collision")
+            Benchmark.run()
+            return
         end
     end
 
