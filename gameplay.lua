@@ -3430,6 +3430,27 @@ function Gameplay.keypressed(key)
         end
     end
 
+    -- Spacebar centers on selection
+    if key == "space" and #selectedEntities > 0 then
+        -- Find center of selection
+        local sumX, sumY = 0, 0
+        for _, entity in ipairs(selectedEntities) do
+            -- Units use worldX/worldY, buildings use gridX/gridY
+            if entity.worldX and entity.worldY then
+                sumX = sumX + entity.worldX
+                sumY = sumY + entity.worldY
+            elseif entity.gridX and entity.gridY then
+                -- Convert grid to world coordinates (center of building)
+                local size = entity.gridSize or 1
+                sumX = sumX + (entity.gridX + size / 2 - 0.5) * map.tileSize
+                sumY = sumY + (entity.gridY + size / 2 - 0.5) * map.tileSize
+            end
+        end
+        local centerX = sumX / #selectedEntities
+        local centerY = sumY / #selectedEntities
+        map:centerOn(centerX, centerY)
+    end
+
     -- Game speed controls
     if key == "1" then
         Game.settings.gameSpeed = 0.5
