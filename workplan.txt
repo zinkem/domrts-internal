@@ -11,37 +11,40 @@ Performance Optimization Work Plan
 2. ✅ DONE (6b905d0) Unit separation - O(n²) distance calculations
    - Implemented quadtree spatial partitioning for neighbor lookup
 
-3. Peon collision - checks ALL buildings per move attempt (peon.lua:245-283)
-   - canMoveTo() loops all buildings, called up to 8x per peon per frame
-   - Fix: Spatial partitioning or cache nearby buildings
+3. ✅ DONE (089cbc6) Peon collision - was checking ALL buildings per move attempt
+   - canMoveTo() now uses buildingQuadtreeRef for O(log n) lookup
+   - Part of building quadtree PR #46
 
 ### Medium-High Impact
 
-4. Fog of war neighbor checking (map.lua:941-1006)
+4. ⏸️ INVESTIGATED (PR #49) Fog of war neighbor checking (map.lua:941-1006)
    - 8 neighbor checks per visible fog cell (~475 cells x 8 = 3,800 lookups/frame)
-   - Fix: Cache fog edge states, only recalculate when fog changes
+   - Attempted fix: Cache fog edge states, only recalculate when fog changes
+   - Result: 4.8x faster idle, but 1.8x SLOWER during active gameplay
+   - Not merged - VISIBLE→EXPLORED reset pattern causes cache thrashing
+   - See retrospective: retrospectives/006-fog-edge-caching-rejected.md
 
-5. Peon outline rendering - draws body 5x per peon (peon.lua:993-1004)
-   - 4 offset draws for outline + 1 actual = 5 complete body draws
-   - Fix: Render peon to canvas once, draw canvas 5x (much cheaper)
+5. ✅ DONE (0c6810b) Peon outline rendering - was drawing body 5x per peon
+   - Now prerenders 44 sprite canvases at load time (0.69 MB VRAM)
+   - 6.1x faster rendering - PR #48
+
+### Medium Impact (Not Yet Investigated)
 
 6. Depth sorting every frame (gameplay.lua:3150-3247)
    - Full O(n log n) sort of all units/buildings every draw
-   - Fix: Insertion sort maintaining sorted order, or dirty flag
-
-### Medium Impact
+   - Potential fix: Insertion sort maintaining sorted order, or dirty flag
 
 7. Tree edge detection (map.lua:802-809)
    - 4 tile lookups per tree tile, ~1,400 trees = 5,600 lookups
-   - Fix: Cache to canvas since trees rarely change
+   - Potential fix: Cache to canvas since trees rarely change
 
 8. Combat distance recalculation (unit.lua:305, 346, 356)
    - Same distance calculated 3+ times per attacking unit
-   - Fix: Calculate once, pass as parameter
+   - Potential fix: Calculate once, pass as parameter
 
 9. Peon resource/drop-off search (peon.lua:585-620, 1134-1179)
    - Linear search through all buildings/tiles each frame
-   - Fix: Cache nearest drop-off, invalidate only when buildings change
+   - Potential fix: Cache nearest drop-off, invalidate only when buildings change
 
 ---
 
@@ -51,15 +54,17 @@ Performance Optimization Work Plan
 |-------------------|--------------------------|---------------------------------------------|
 | Terrain/tiles     | Never during gameplay    | Render to canvas once at map load           |
 | Trees             | Only when chopped        | Re-render affected region to canvas         |
-| Fog of war edges  | When visibility changes  | Cache edge bitmask per cell                 |
-| Peon sprites      | Per animation frame      | Render each frame variant to small canvas   |
+| Fog of war edges  | When visibility changes  | ⏸️ Investigated - not effective (PR #49)    |
+| Peon sprites      | Per animation frame      | ✅ DONE - PR #48                            |
 | Building sprites  | Never (have BuildingRenderer) | Verify all buildings use it            |
 
 ---
 
-## Recommended Priority Order
+## Summary
 
-1. ✅ DONE - Cache getAllUnits/getAllBuildings per frame
-2. ✅ DONE - Quadtree for unit separation (replaced spatial hash approach)
-3. Canvas cache for peon outlines - moderate effort, 5x fewer draw calls per peon
-4. Peon collision spatial partitioning - can reuse quadtree
+**Completed**: 5 of 9 hotspots addressed
+**Investigated but rejected**: 1 (fog caching - regressed active gameplay)
+**Remaining**: 3 medium-impact items (6-9), deprioritized since game feels good
+
+Current performance is acceptable. Remaining optimizations can be revisited if
+performance becomes an issue with larger maps or more units.
