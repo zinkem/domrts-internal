@@ -49,6 +49,67 @@ Teams.colors = {
         minimapUnit = {0.6, 0.6, 0.55, 1},
         minimapBuilding = {0.5, 0.5, 0.45, 1},
     },
+    -- Additional teams for multi-player (3-8)
+    [3] = {
+        name = "Green",
+        primary = {0.2, 0.65, 0.25, 1},       -- Green tunic
+        secondary = {0.3, 0.75, 0.35, 1},     -- Lighter green
+        dark = {0.1, 0.4, 0.12, 1},           -- Dark green
+        banner = {0.15, 0.6, 0.2, 1},         -- Green banner
+        emblem = {0.9, 0.9, 0.9, 1},          -- White emblem
+        minimapUnit = {0.3, 0.9, 0.35, 1},
+        minimapBuilding = {0.2, 0.7, 0.25, 1},
+    },
+    [4] = {
+        name = "Yellow",
+        primary = {0.8, 0.75, 0.2, 1},        -- Yellow tunic
+        secondary = {0.9, 0.85, 0.35, 1},     -- Lighter yellow
+        dark = {0.5, 0.45, 0.1, 1},           -- Dark yellow/gold
+        banner = {0.85, 0.8, 0.15, 1},        -- Yellow banner
+        emblem = {0.15, 0.15, 0.15, 1},       -- Black emblem
+        minimapUnit = {1, 0.95, 0.3, 1},
+        minimapBuilding = {0.85, 0.8, 0.2, 1},
+    },
+    [5] = {
+        name = "Purple",
+        primary = {0.55, 0.2, 0.65, 1},       -- Purple tunic
+        secondary = {0.7, 0.35, 0.8, 1},      -- Lighter purple
+        dark = {0.35, 0.1, 0.4, 1},           -- Dark purple
+        banner = {0.5, 0.15, 0.6, 1},         -- Purple banner
+        emblem = {0.9, 0.8, 0.3, 1},          -- Gold emblem
+        minimapUnit = {0.7, 0.3, 0.9, 1},
+        minimapBuilding = {0.55, 0.2, 0.7, 1},
+    },
+    [6] = {
+        name = "Cyan",
+        primary = {0.2, 0.65, 0.7, 1},        -- Cyan tunic
+        secondary = {0.35, 0.75, 0.8, 1},     -- Lighter cyan
+        dark = {0.1, 0.4, 0.45, 1},           -- Dark cyan
+        banner = {0.15, 0.6, 0.65, 1},        -- Cyan banner
+        emblem = {0.9, 0.9, 0.9, 1},          -- White emblem
+        minimapUnit = {0.3, 0.85, 0.9, 1},
+        minimapBuilding = {0.2, 0.65, 0.7, 1},
+    },
+    [7] = {
+        name = "Orange",
+        primary = {0.85, 0.5, 0.15, 1},       -- Orange tunic
+        secondary = {0.95, 0.6, 0.25, 1},     -- Lighter orange
+        dark = {0.55, 0.3, 0.08, 1},          -- Dark orange
+        banner = {0.9, 0.45, 0.1, 1},         -- Orange banner
+        emblem = {0.15, 0.15, 0.15, 1},       -- Black emblem
+        minimapUnit = {1, 0.6, 0.2, 1},
+        minimapBuilding = {0.9, 0.5, 0.15, 1},
+    },
+    [8] = {
+        name = "Pink",
+        primary = {0.8, 0.4, 0.55, 1},        -- Pink tunic
+        secondary = {0.9, 0.55, 0.65, 1},     -- Lighter pink
+        dark = {0.5, 0.2, 0.35, 1},           -- Dark pink
+        banner = {0.85, 0.35, 0.5, 1},        -- Pink banner
+        emblem = {0.9, 0.9, 0.9, 1},          -- White emblem
+        minimapUnit = {1, 0.5, 0.7, 1},
+        minimapBuilding = {0.85, 0.4, 0.55, 1},
+    },
 }
 
 -- Get team colors, with fallback to neutral

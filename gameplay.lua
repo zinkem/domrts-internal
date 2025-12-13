@@ -141,9 +141,14 @@ local flyingScouts = {}
 local ballistas = {}
 local kamikazes = {}
 
--- AI controller
+-- AI controller (legacy single-AI)
 local enemyAI = nil
 local enemyTownHall = nil
+
+-- Multi-player support
+local humanTeam = nil  -- Team number controlled by human (nil in spectator mode)
+local spectatorMode = false
+local aiControllers = {}  -- Table of AI controllers by team number
 
 local selectedEntities = {}  -- Support multiple selection
 
@@ -235,11 +240,17 @@ local function checkAllMinesDepleted()
     return true
 end
 
+-- Get human player's team (returns nil in spectator mode, or the human's team number)
+local function getHumanTeam()
+    return humanTeam
+end
+
 local function countPlayerUnits(unitList)
-    local playerTeam = M.Teams and M.Teams.PLAYER or 1
+    local team = getHumanTeam()
+    if not team then return 0 end  -- Spectator mode
     local count = 0
     for _, unit in ipairs(unitList) do
-        if unit.team == nil or unit.team == playerTeam then
+        if unit.team == nil or unit.team == team then
             count = count + 1
         end
     end
@@ -249,8 +260,9 @@ end
 -- Check if entity belongs to human player (for command filtering)
 local function isPlayerOwned(entity)
     if not entity then return false end
-    local playerTeam = M.Teams and M.Teams.PLAYER or 1
-    return entity.team == nil or entity.team == playerTeam
+    if spectatorMode then return false end  -- No ownership in spectator mode
+    local team = getHumanTeam()
+    return entity.team == nil or entity.team == team
 end
 
 -- Find the closest non-depleted gold mine to a world position
@@ -2138,27 +2150,58 @@ end
 
 -- Check victory/defeat conditions
 local function checkVictoryConditions()
-    local enemyTeam = M.Teams and M.Teams.ENEMY or 2
-    local playerTeam = M.Teams and M.Teams.PLAYER or 1
+    -- Count buildings per team
+    local function countBuildingsForTeam(team)
+        local count = 0
+        -- Check main townhall
+        if townHall and townHall.team == team and (not townHall.isDead or not townHall:isDead()) then
+            count = count + 1
+        end
+        for _, b in ipairs(townHalls) do
+            if b.team == team and (not b.isDead or not b:isDead()) then
+                count = count + 1
+            end
+        end
+        for _, b in ipairs(barracks) do
+            if b.team == team and (not b.isDead or not b:isDead()) then
+                count = count + 1
+            end
+        end
+        for _, b in ipairs(farms) do
+            if b.team == team and (not b.isDead or not b:isDead()) then
+                count = count + 1
+            end
+        end
+        return count
+    end
 
-    -- Check if all enemy buildings are destroyed
-    local enemyBuildingsLeft = 0
-    for _, b in ipairs(townHalls) do
-        if b.team == enemyTeam and (not b.isDead or not b:isDead()) then
-            enemyBuildingsLeft = enemyBuildingsLeft + 1
+    -- Spectator mode: game ends when only one team has buildings
+    if spectatorMode then
+        local team1Buildings = countBuildingsForTeam(1)
+        local team2Buildings = countBuildingsForTeam(2)
+
+        if team1Buildings == 0 and team2Buildings > 0 then
+            -- Team 2 wins
+            victory = true
+            Game.spectatorWinner = 2
+            if Game.Replay then Game.Replay.log("GAME", "Team 2 wins!") Game.Replay.finish() end
+            return
+        elseif team2Buildings == 0 and team1Buildings > 0 then
+            -- Team 1 wins
+            victory = true
+            Game.spectatorWinner = 1
+            if Game.Replay then Game.Replay.log("GAME", "Team 1 wins!") Game.Replay.finish() end
+            return
         end
+        return
     end
-    for _, b in ipairs(barracks) do
-        if b.team == enemyTeam and (not b.isDead or not b:isDead()) then
-            enemyBuildingsLeft = enemyBuildingsLeft + 1
-        end
-    end
-    for _, b in ipairs(farms) do
-        if b.team == enemyTeam and (not b.isDead or not b:isDead()) then
-            enemyBuildingsLeft = enemyBuildingsLeft + 1
-        end
-    end
-    -- Add other building types as needed
+
+    -- Normal mode: check human player vs enemies
+    local playerTeam = humanTeam or 1
+    local enemyTeam = M.Teams and M.Teams.ENEMY or 2
+
+    local enemyBuildingsLeft = countBuildingsForTeam(enemyTeam)
+    local playerBuildingsLeft = countBuildingsForTeam(playerTeam)
 
     if enemyBuildingsLeft == 0 then
         victory = true
@@ -2166,8 +2209,8 @@ local function checkVictoryConditions()
         return
     end
 
-    -- Check if player's main townhall is destroyed
-    if townHall and townHall.isDead and townHall:isDead() then
+    -- Check if player's main townhall is destroyed (or all buildings)
+    if playerBuildingsLeft == 0 then
         defeat = true
         if Game.Replay then Game.Replay.log("GAME", "Defeat") Game.Replay.finish() end
         return
@@ -2323,9 +2366,43 @@ function Gameplay.load(options)
     siegeWorkshops = {}
     townHalls = {}
 
-    -- Reset AI
+    -- Reset AI (legacy single AI and multi-player AI controllers)
     enemyAI = nil
     enemyTownHall = nil
+    aiControllers = {}
+
+    -- Initialize player configuration from options
+    -- Supports both new format (options.players) and legacy format (options.enemies)
+    spectatorMode = options.spectatorMode or false
+    humanTeam = nil  -- Will be set below if there's a human player
+
+    -- Build player list from config
+    local playerConfigs = {}
+    if options.players and #options.players > 0 then
+        -- New multi-player format
+        for _, player in ipairs(options.players) do
+            table.insert(playerConfigs, player)
+            if player.type == "human" then
+                humanTeam = player.team
+                spectatorMode = false
+            end
+        end
+    else
+        -- Legacy format: human on team 1, AI enemies on team 2+
+        humanTeam = 1
+        spectatorMode = false
+        table.insert(playerConfigs, { team = 1, type = "human" })
+        if options.enemies and #options.enemies > 0 then
+            table.insert(playerConfigs, {
+                team = 2,
+                type = "ai",
+                personality = options.enemies[1].personality or "blinky"
+            })
+        else
+            -- Default: one AI opponent
+            table.insert(playerConfigs, { team = 2, type = "ai", personality = "blinky" })
+        end
+    end
 
     -- Clear new unit tables
     archers = {}
@@ -2356,12 +2433,27 @@ function Gameplay.load(options)
         M.Pathfinding.markTile(gridX, gridY, true)  -- Mark depleted tree as walkable
     end
 
-    -- Human player team
-    local playerTeam = M.Teams and M.Teams.PLAYER or 1
-    local enemyTeam = M.Teams and M.Teams.ENEMY or 2
+    -- Use humanTeam (set above from playerConfigs) for player-owned entities
+    -- For backwards compatibility, local playerTeam variable still used in base creation
+    local playerTeam = humanTeam or 1
+    local enemyTeam = 2  -- Will be overridden per AI in multi-player
 
     local buildingSize = 3
     local mapSize = options.mapSize or 64
+
+    -- Start positions for 2-8 players (as fractions of map size)
+    -- Position 1: bottom-left, Position 2: top-right
+    -- Additional positions spread around the map edges
+    local startPositions = {
+        { x = 0.15, y = 0.70 },  -- Position 1: bottom-left
+        { x = 0.80, y = 0.20 },  -- Position 2: top-right
+        { x = 0.15, y = 0.20 },  -- Position 3: top-left
+        { x = 0.80, y = 0.70 },  -- Position 4: bottom-right
+        { x = 0.50, y = 0.10 },  -- Position 5: top-center
+        { x = 0.50, y = 0.85 },  -- Position 6: bottom-center
+        { x = 0.10, y = 0.45 },  -- Position 7: left-center
+        { x = 0.85, y = 0.45 },  -- Position 8: right-center
+    }
     
     -- Minimum distance from map edge (10% of map size, at least 5 tiles)
     local edgeBuffer = math.max(5, math.floor(mapSize * 0.10))
@@ -2603,13 +2695,23 @@ function Gameplay.load(options)
         table.insert(farms, enemyFarm)
     end
 
-    -- Initialize AI controller
+    -- Initialize AI controller(s)
     if AI then
-        -- Get AI personality from options (game config or tutorial)
+        -- Get AI personality from playerConfigs or legacy options
         local aiPersonality = tutorialOptions.aiPersonality or "blinky"
 
-        -- Check if we have enemies defined in game config
-        if options.enemies and #options.enemies > 0 then
+        -- Check for AI players in new config format
+        local foundAI = false
+        for _, cfg in ipairs(playerConfigs) do
+            if cfg.type == "ai" and cfg.team == 2 then
+                aiPersonality = cfg.personality or "blinky"
+                foundAI = true
+                break
+            end
+        end
+
+        -- Fall back to legacy format if no new config
+        if not foundAI and options.enemies and #options.enemies > 0 then
             aiPersonality = options.enemies[1].personality or "blinky"
         end
 
@@ -2622,10 +2724,36 @@ function Gameplay.load(options)
             startingPeons = 7,
             personality = aiPersonality
         })
+
+        -- Store in aiControllers table for multi-player support
+        aiControllers[enemyTeam] = enemyAI
+
+        -- In spectator mode, team 1 is also AI-controlled
+        if spectatorMode then
+            -- Find team 1's AI personality
+            local team1Personality = "blinky"
+            for _, cfg in ipairs(playerConfigs) do
+                if cfg.type == "ai" and cfg.team == 1 then
+                    team1Personality = cfg.personality or "blinky"
+                    break
+                end
+            end
+
+            local team1AI = M.AI.new({
+                team = 1,
+                townHall = townHall,  -- The "player" town hall
+                map = map,
+                startGold = 1000,
+                startLumber = 400,
+                startingPeons = 7,
+                personality = team1Personality
+            })
+            aiControllers[1] = team1AI
+        end
     end
 
-    -- Disable fog in tutorial mode
-    if tutorialOptions.disableFog then
+    -- Disable fog in tutorial mode or spectator mode (for MVP)
+    if tutorialOptions.disableFog or spectatorMode then
         map.fogEnabled = false
     end
 
@@ -3040,9 +3168,12 @@ function Gameplay.update(dt)
         end
     end
 
-    -- Update AI
-    if enemyAI then
-        enemyAI:update(gameDt, goldMines, townHall, aiCreateBuilding, peons, footmen, farms, barracks)
+    -- Update AI(s)
+    -- Update all AI controllers (for multi-player/spectator mode support)
+    for team, ai in pairs(aiControllers) do
+        -- Each AI gets the appropriate opposing townhall (or nil for team 1 in 2-player)
+        local targetTownHall = (team == 1) and enemyTownHall or townHall
+        ai:update(gameDt, goldMines, targetTownHall, aiCreateBuilding, peons, footmen, farms, barracks)
     end
 
     -- Refresh requirements state after all building updates
@@ -3505,6 +3636,22 @@ function Gameplay.mousepressed(x, y, button)
     if M.Surrender.mousepressed(x, y, button) then return end
 
     if victory or defeat then return end
+
+    -- Spectator mode: only allow camera movement (handled in mousereleased/mousemoved)
+    -- Block unit selection and commands
+    if spectatorMode then
+        -- Allow minimap clicks for camera movement
+        local minimapX = love.graphics.getWidth() - UI.minimapSize - 10
+        local minimapY = 10
+        if x >= minimapX and x <= minimapX + UI.minimapSize and
+           y >= minimapY and y <= minimapY + UI.minimapSize then
+            -- Allow minimap clicks in spectator mode
+            local mapPx = (x - minimapX) / UI.minimapSize * (map.width * 32)
+            local mapPy = (y - minimapY) / UI.minimapSize * (map.height * 32)
+            map:centerOn(mapPx, mapPy)
+        end
+        return
+    end
 
     -- Debug checkbox click
     if button == 1 then
