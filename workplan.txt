@@ -11,9 +11,9 @@ Performance Optimization Work Plan
 2. ✅ DONE (6b905d0) Unit separation - O(n²) distance calculations
    - Implemented quadtree spatial partitioning for neighbor lookup
 
-3. Peon collision - checks ALL buildings per move attempt (peon.lua:245-283)
-   - canMoveTo() loops all buildings, called up to 8x per peon per frame
-   - Fix: Spatial partitioning or cache nearby buildings
+3. ✅ DONE (089cbc6) Peon collision - was checking ALL buildings per move attempt
+   - canMoveTo() now uses buildingQuadtreeRef for O(log n) lookup
+   - Part of building quadtree PR #46
 
 ### Medium-High Impact
 
@@ -21,9 +21,9 @@ Performance Optimization Work Plan
    - 8 neighbor checks per visible fog cell (~475 cells x 8 = 3,800 lookups/frame)
    - Fix: Cache fog edge states, only recalculate when fog changes
 
-5. Peon outline rendering - draws body 5x per peon (peon.lua:993-1004)
-   - 4 offset draws for outline + 1 actual = 5 complete body draws
-   - Fix: Render peon to canvas once, draw canvas 5x (much cheaper)
+5. ✅ DONE (0c6810b) Peon outline rendering - was drawing body 5x per peon
+   - Now prerenders 44 sprite canvases at load time (0.69 MB VRAM)
+   - 6.1x faster rendering - PR #48
 
 6. Depth sorting every frame (gameplay.lua:3150-3247)
    - Full O(n log n) sort of all units/buildings every draw
@@ -61,5 +61,8 @@ Performance Optimization Work Plan
 
 1. ✅ DONE - Cache getAllUnits/getAllBuildings per frame
 2. ✅ DONE - Quadtree for unit separation (replaced spatial hash approach)
-3. Canvas cache for peon outlines - moderate effort, 5x fewer draw calls per peon
-4. Peon collision spatial partitioning - can reuse quadtree
+3. ✅ DONE - Canvas cache for peon outlines (PR #48 - 6.1x faster)
+4. ✅ DONE - Peon collision spatial partitioning (part of PR #46)
+5. Fog of war edge caching - cache edge states, recalc only when fog changes
+6. Depth sorting optimization - insertion sort or dirty flag
+7. Tree edge detection caching - render to canvas since trees rarely change
